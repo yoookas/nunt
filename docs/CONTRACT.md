@@ -5,10 +5,11 @@
 
 ## 1. 环境与构建
 
-Go 1.25（本机 go1.25.5）。模块缓存必须放在工作区内，**每条 pwsh 命令都要带这个前缀**：
+Go 1.26（`go.mod` 声明 `go 1.26.0`，工具链由 `toolchain go1.26.9` 固定；
+`GOTOOLCHAIN=auto` 会从 GOPROXY 自动拉取 go1.26.9）。模块缓存必须放在工作区内，**每条 pwsh 命令都要带这个前缀**：
 
 ```powershell
-$env:GOMODCACHE='D:\Desktop\nunt\.gocache\mod';$env:GOCACHE='D:\Desktop\nunt\.gocache\build';$env:GOPATH='D:\Desktop\nunt\.gocache\gopath';$env:GOFLAGS='-mod=mod';$env:GOTOOLCHAIN='local';
+$env:GOMODCACHE='D:\Desktop\nunt\.gocache\mod';$env:GOCACHE='D:\Desktop\nunt\.gocache\build';$env:GOPATH='D:\Desktop\nunt\.gocache\gopath';$env:GOFLAGS='-mod=mod';$env:GOTOOLCHAIN='auto';
 Set-Location D:\Desktop\nunt; go build ./...
 ```
 

@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 # build stage
 # ---------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
@@ -19,7 +19,7 @@ ENV CGO_ENABLED=0 \
     GOOS=$TARGETOS \
     GOARCH=$TARGETARCH \
     GOPROXY=$GOPROXY \
-    GOTOOLCHAIN=local
+    GOTOOLCHAIN=auto
 
 WORKDIR /src
 COPY go.mod go.sum ./

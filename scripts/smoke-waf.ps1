@@ -4,7 +4,7 @@ Set-Location (Split-Path -Parent $PSScriptRoot)
 if (-not $env:GOMODCACHE) { $env:GOMODCACHE = Join-Path (Get-Location) '.gocache\mod' }
 if (-not $env:GOCACHE) { $env:GOCACHE = Join-Path (Get-Location) '.gocache\build' }
 if (-not $env:GOPATH) { $env:GOPATH = Join-Path (Get-Location) '.gocache\gopath' }
-$env:GOFLAGS = '-mod=mod'; $env:GOTOOLCHAIN = 'local'
+$env:GOFLAGS = '-mod=mod'; $env:GOTOOLCHAIN = 'auto'
 
 $dataDir = Join-Path $env:TEMP ('nunt-waf-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Force -Path $dataDir | Out-Null

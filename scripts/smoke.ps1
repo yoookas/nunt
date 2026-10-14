@@ -10,7 +10,7 @@ if (-not $env:GOMODCACHE) { $env:GOMODCACHE = Join-Path $root '.gocache\mod' }
 if (-not $env:GOCACHE) { $env:GOCACHE = Join-Path $root '.gocache\build' }
 if (-not $env:GOPATH) { $env:GOPATH = Join-Path $root '.gocache\gopath' }
 $env:GOFLAGS = '-mod=mod'
-$env:GOTOOLCHAIN = 'local'
+$env:GOTOOLCHAIN = 'auto'
 
 $port = 16601
 $dataDir = Join-Path $env:TEMP ('nunt-smoke-' + [guid]::NewGuid().ToString('N').Substring(0, 8))

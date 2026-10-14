@@ -17,7 +17,7 @@ if (-not $env:GOMODCACHE) { $env:GOMODCACHE = Join-Path $root '.gocache\mod' }
 if (-not $env:GOCACHE) { $env:GOCACHE = Join-Path $root '.gocache\build' }
 if (-not $env:GOPATH) { $env:GOPATH = Join-Path $root '.gocache\gopath' }
 $env:GOFLAGS = '-mod=mod'
-$env:GOTOOLCHAIN = 'local'
+$env:GOTOOLCHAIN = 'auto'
 
 function Step($name, [scriptblock]$body) {
   Write-Host ""

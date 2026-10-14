@@ -18,7 +18,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.x"
           cache: true
 
       - name: Format check
@@ -78,8 +78,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.x"
           cache: true
 
       - name: Scan for reachable vulnerabilities
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        # Pinned instead of @latest: the scan is blocking, so its result has to
+        # be reproducible. Bump the version deliberately, in its own change.
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
