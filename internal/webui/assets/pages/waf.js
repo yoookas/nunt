@@ -755,17 +755,20 @@ function ruleIdsOf(l) {
 //   defaultBodyPolicy full | peek | skip | grpc（默认 full）
 //   peekBytes         默认 65536
 //   peekTimeoutMs     默认 250
+//   notifyBodyRatio   非 full 占比告警阈值，0–1（默认 0 = 关闭）
 //
 // 后端接口尚未落地这些字段时，本页面读取会退回到「未设置」并在页面上给出
 // 明确提示，不会白屏；保存时也不会把后端不认识的值写回去（见 savePolicy）。
 // ---------------------------------------------------------------------------
 
-const POLICY_DEFAULTS = { enforcementMode: 'observe', defaultBodyPolicy: 'full', peekBytes: 65536, peekTimeoutMs: 250 };
+const POLICY_DEFAULTS = { enforcementMode: 'observe', defaultBodyPolicy: 'full', peekBytes: 65536, peekTimeoutMs: 250, notifyBodyRatio: 0 };
 // 与 internal/config/validate.go 的边界一致：超出范围保存会被后端拒绝，
-// 前端先拦一次并给出中文提示（defaultWAFPeekBytes / maxWAFPeekBytes 等）。
+// 前端先拦一次并给出中文提示（defaultWAFPeekBytes / maxWAFPeekBytes、
+// notifyBodyRatio 的 [0,1] 等）。
 const POLICY_LIMITS = {
   peekBytes: { min: 0, max: 4 * 1024 * 1024, low: 1024 },
   peekTimeoutMs: { min: 0, max: 10000, low: 50 },
+  notifyBodyRatio: { min: 0, max: 1 },
 };
 
 // 执行模式：observe 只记录「本应拒绝」，不真的拒绝。
@@ -813,6 +816,7 @@ const FIELD_ALIASES = {
   defaultBodyPolicy: ['defaultBodyPolicy', 'DefaultBodyPolicy', 'bodyPolicy'],
   peekBytes: ['peekBytes', 'PeekBytes', 'peekSize', 'peekLimit'],
   peekTimeoutMs: ['peekTimeoutMs', 'PeekTimeoutMS', 'PeekTimeoutMs', 'peekTimeout'],
+  notifyBodyRatio: ['notifyBodyRatio', 'NotifyBodyRatio'],
   bodyState: ['bodyState', 'bodyStates', 'bodyStateCounts', 'bodyStateDist', 'bodyStateDistribution'],
   wouldReject: ['wouldReject', 'wouldRejects', 'wouldRejectSamples', 'wouldRejectList', 'wouldRejectItems', 'wouldRejectRecent', 'wouldRejectLog', 'wouldRejectCount'],
   undeclared: ['undeclaredRoutes', 'undeclaredBodyPolicyRoutes', 'undeclaredBodyPolicy', 'undeclared', 'missingBodyPolicy', 'routesWithoutBodyPolicy', 'unclaimedRoutes', 'inheritedRoutes'],
@@ -922,6 +926,14 @@ function parseAliasedInt(root, key) {
   if (hit.value === undefined) return { value: null, field: '' };
   const n = Number(hit.value);
   return { value: isFinite(n) && n >= 0 ? Math.trunc(n) : null, field: hit.field };
+}
+
+// parseAliasedFloat 读浮点策略字段（notifyBodyRatio 是 0–1 的比例，不能截断成整数）。
+function parseAliasedFloat(root, key) {
+  const hit = pickAlias(root, key);
+  if (hit.value === undefined) return { value: null, field: '' };
+  const n = Number(hit.value);
+  return { value: isFinite(n) ? n : null, field: hit.field };
 }
 
 function parseAliasedEnum(root, key, allowed) {
@@ -1311,26 +1323,33 @@ export default {
 
     // readPolicy 从 GET /waf/config 的返回里解析策略字段，命中未知命名时记录提示。
     function readPolicy(root, fallback) {
-      const f = { mode: false, policy: false, peekBytes: false, peekTimeoutMs: false };
+      const f = { mode: false, policy: false, peekBytes: false, peekTimeoutMs: false, notifyBodyRatio: false };
       const enforce = parseAliasedEnum(root, 'enforcementMode', ['observe', 'enforce']);
       const dflt = parseAliasedEnum(root, 'defaultBodyPolicy', ['full', 'peek', 'skip', 'grpc']);
       const bytes = parseAliasedInt(root, 'peekBytes');
       const timeout = parseAliasedInt(root, 'peekTimeoutMs');
+      const ratio = parseAliasedFloat(root, 'notifyBodyRatio');
       f.mode = enforce.value === null;
       f.policy = dflt.value === null;
       f.peekBytes = bytes.value === null;
       f.peekTimeoutMs = timeout.value === null;
+      // notifyBodyRatio 的零值带 omitempty：后端在 0（关闭）时不会回传该字段，
+      // 因此这里的「缺失」同时覆盖「后端确实没有该字段」与「当前就是 0」，界面上
+      // 按 0 显示并注明后端未返回；保存时始终提交输入值（见 savePolicy）。
+      f.notifyBodyRatio = ratio.value === null;
       const notes = [];
       if (enforce.field && enforce.field !== 'enforcementMode') notes.push('enforcementMode ← ' + enforce.field);
       if (dflt.field && dflt.field !== 'defaultBodyPolicy') notes.push('defaultBodyPolicy ← ' + dflt.field);
       if (bytes.field && bytes.field !== 'peekBytes') notes.push('peekBytes ← ' + bytes.field);
       if (timeout.field && timeout.field !== 'peekTimeoutMs') notes.push('peekTimeoutMs ← ' + timeout.field);
+      if (ratio.field && ratio.field !== 'notifyBodyRatio') notes.push('notifyBodyRatio ← ' + ratio.field);
       return {
         values: {
           enforcementMode: enforce.value === null ? fallback.enforcementMode : enforce.value,
           defaultBodyPolicy: dflt.value === null ? fallback.defaultBodyPolicy : dflt.value,
           peekBytes: bytes.value === null ? fallback.peekBytes : bytes.value,
           peekTimeoutMs: timeout.value === null ? fallback.peekTimeoutMs : timeout.value,
+          notifyBodyRatio: ratio.value === null ? fallback.notifyBodyRatio : ratio.value,
         },
         fallback: f,
         notes: notes,
