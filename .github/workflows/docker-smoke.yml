@@ -1,0 +1,111 @@
+name: Docker smoke
+
+# Runs the published container contract on a real docker daemon. This is the
+# automated substitute for "start it on my machine": it builds the image,
+# starts it with host networking, and checks the things that only break inside
+# a container (unprivileged user, low port capability, volume layout, health
+# check, admin API round trip).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - "Dockerfile"
+      - "docker/**"
+      - "docker-compose*.yml"
+      - "cmd/**"
+      - "internal/**"
+      - ".github/workflows/docker-smoke.yml"
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - "docker/**"
+      - "docker-compose*.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  container:
+    name: build and verify the image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build --build-arg VERSION=ci --build-arg COMMIT=${GITHUB_SHA::12} -t nunt:ci .
+
+      - name: Validate the compose files
+        run: |
+          docker compose -f docker-compose.yml config > /dev/null
+          docker compose -f docker-compose.bridge.yml config > /dev/null
+
+      - name: Start the container with host networking
+        run: |
+          mkdir -p "$PWD/ci-data"
+          docker run -d --name nunt --network host \
+            -v "$PWD/ci-data:/data" \
+            -e TZ=UTC \
+            nunt:ci
+
+      - name: Dump the log when anything fails
+        if: failure()
+        run: docker logs nunt || true
+
+      - name: Wait for the health endpoint
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:16601/healthz > /dev/null; then
+              echo "healthy after $attempt attempts"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::the service did not become healthy"
+          docker logs nunt || true
+          exit 1
+
+      - name: Verify the container contract
+        run: |
+          set -euo pipefail
+
+          # the health check declared in the Dockerfile reports healthy
+          for attempt in $(seq 1 30); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' nunt)
+            [ "$status" = "healthy" ] && break
+            sleep 3
+          done
+          test "$status" = "healthy"
+
+          # the service itself runs as the unprivileged user that wrote the config
+          test "$(docker exec nunt stat -c %u /data/config.json)" = "1000"
+
+          # low ports are reachable through the file capability baked into the image
+          docker exec nunt getcap /usr/local/bin/nunt | grep -q cap_net_bind_service
+
+          # the admin interface and its assets are served
+          curl -fsS http://127.0.0.1:16601/ | grep -qi nunt
+          curl -fsS http://127.0.0.1:16601/app.js > /dev/null
+          curl -fsS http://127.0.0.1:16601/style.css > /dev/null
+
+          # secrets are stored with restrictive permissions inside the volume
+          docker exec nunt stat -c %a /data/secret.key | grep -qx 600
+          docker exec nunt stat -c %a /data/config.json | grep -qx 600
+
+          # the generated administrator password is announced once, and it works
+          password=$(docker logs nunt 2>&1 | sed -n 's/.*Administrator pass : \([^ ]*\).*/\1/p' | head -n1)
+          test -n "$password"
+          jq -n --arg u admin --arg p "$password" '{username:$u,password:$p}' > /tmp/login.json
+          curl -fsS -c /tmp/cookies -H 'Content-Type: application/json' \
+            --data @/tmp/login.json http://127.0.0.1:16601/api/v1/auth/login > /tmp/session.json
+          jq -e '.csrf' /tmp/session.json > /dev/null
+
+          # every module is registered and the registry is reachable with the session
+          curl -fsS -b /tmp/cookies http://127.0.0.1:16601/api/v1/modules \
+            | jq -e 'length >= 6' > /dev/null
+
+      - name: Stop the container
+        if: always()
+        run: docker rm -f nunt || true
