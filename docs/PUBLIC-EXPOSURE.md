@@ -211,15 +211,15 @@ or set the access control to allow + IP list
 
 > 上面打勾的条目同样只代表「已实现 + 有测试」，不代表已在真实环境跑过。
 
-### P2 第一条「A+C+E 实施并切 enforce」的验收判据
+### P2「A+C+E 已实现并通过测试」与「切 enforce」的验收判据
 
 这一条**不是一件事，而是 6 件事**，逐条判定（判据全部取自 [PLAN-waf-body-policy.md](PLAN-waf-body-policy.md) §7 的 T1–T10，
 字段名与中止语义见 [CONTRACT.md](CONTRACT.md) 第 8 节）。**在真实公网环境逐条跑过之前不要勾。**
 
 **前置检查（配置面）**
 
-- [ ] `GET /api/v1/waf/config` 返回 `config.enforcementMode` / `defaultBodyPolicy` / `peekBytes` / `peekTimeoutMs` 四项；
-      默认值分别是 `observe` / `full` / `65536` / `250`；
+- [ ] `GET /api/v1/waf/config` 返回 `config.enforcementMode` / `defaultBodyPolicy` / `peekBytes` / `peekTimeoutMs` 四项策略
+      （默认值分别是 `observe` / `full` / `65536` / `250`）以及告警阈值 `config.notifyBodyRatio`（默认 `0` = 关闭）；
 - [ ] `GET /api/v1/web/rules` 的每条规则都带 `bodyPolicy`（空串 = 继承），PUT/POST 能保存它；
 - [ ] 配置校验对未知枚举**报错**（把 `enforcementMode` 写成 `banana` 保存应当失败，而不是被静默改成默认值）；
 
@@ -241,7 +241,7 @@ or set the access control to allow + IP list
 - [ ] 「未声明 `bodyPolicy` 的路由」列表**为空**（WAF 页可一键跳转到 Web 规则页逐条声明）；
 - [ ] wouldReject 样例**逐条看过**，每条都能解释「为什么它本来会被拒」，并且不是正常业务流量；
 - [ ] 非 full 占比已知：哪些路由是 `peek` / `skip` / `grpc-stream`，为什么可以接受；
-- [ ] 已打开 notify 告警（非 full 占比 / wouldReject 计数超阈值时发通知）；
+- [ ] 已打开 notify 告警：把 `config.notifyBodyRatio` 设成一个业务能接受的值（非 full 占比**超过**它、且样本 ≥ 50 时发一条，同一进程每小时最多一次；`0` = 永不发）；
 - [ ] 记住这条：**enforce 之前不要开 body 策略**——否则 chunked / 流式请求会直接被 411 或拒绝。
 
 > 能力边界（不要在这一步才发现）：**gRPC 流式路由只做首消息检查 + 帧校验**，
@@ -264,7 +264,10 @@ or set the access control to allow + IP list
 | 告警打通 | 主动制造事件（证书剩余天数告急、模块异常退出、WAF 拦截突增）→ 通知渠道收到；且不会重复轰炸 |
 | soak + 压测 | 24h 连续运行无内存/goroutine/连接泄漏（对比前后 RSS 与统计）；压测达到预期 QPS 且 P99 达标；gRPC 流式与 WebSocket 长连接各跑一轮 |
 | 备份/恢复与回滚 | 从备份恢复到一个干净主机能起来（含证书与凭据可用）；把版本回滚到上一版并确认配置可读（`version` 字段向后兼容） |
-| A+C+E 切 enforce | `GET /api/v1/waf/config` 返回 `enforcementMode=observe` + `defaultBodyPolicy=full`（默认值）；用 chunked 请求打一条 full 策略的路由：observe 下放行且 WAF 页多一条 wouldReject（计数 +1），切 enforce 后同一请求返回 411；WAF 页的未声明路由列表逐条声明后清空；T1–T10（PLAN §7）在 h2c 与 TLS-h2 各跑一遍 |
+| 非 full 占比告警（代码） | 把 `notifyBodyRatio` 设成一个会被触发的值，让一条 `skip` 或 `peek` 路由跑够 50 个请求 → 通知渠道收到一条 `system.alert`，字段含 `bodyNonFullRatio` / `notifyBodyRatio` / `bodyRequests`；再打一批请求，一小时内不再收到第二条；把 `notifyBodyRatio` 改回 `0` 后永不再发 |
+| A+C+E 已实现并通过测试 | `go test ./internal/modules/waf/... ./internal/modules/web/... -count=1` 全绿（含 T1–T10 与 bodyState 计数）；`GET /api/v1/waf/config` 返回四项策略 + `notifyBodyRatio`，`GET /api/v1/web/rules` 每条带 `bodyPolicy`；把 `enforcementMode` 写成 `banana`、把 `notifyBodyRatio` 写成 `1.5` 保存都失败 |
+| A+C+E 切 enforce | `GET /api/v1/waf/config` 返回 `enforcementMode=observe` + `defaultBodyPolicy=full`（默认值）；用 chunked 请求打一条 full 策略的路由：observe 下放行且 WAF 页多一条 wouldReject（计数 +1），切 enforce 后同一请求返回 411；WAF 页的未声明路由列表逐条声明后清空；T1–T10（PLAN §7）在 h2c 与 TLS-h2 各跑一遍 | —— **`enforcementMode` 那一半（代码路径）已在仓库内验证；「切 enforce」需要在真实流量上观察一个完整业务周期**
+| 真实 CA / 真实 DNS 联调 | 见「ACME 真实 CA」一行；DNS 侧另需：用真实账号跑一次 DDNS 更新（记录出现在服务商控制台）与一次 ACME dns-01 签发，失败路径（错凭据、错域名）也各跑一次并确认有通知 |
 
 ---
 
@@ -279,6 +282,7 @@ or set the access control to allow + IP list
 5. **前端未真机浏览器验证**：管理界面只做过静态资源可访问性检查（HTTP 200），没有在真实浏览器里逐页点过（尤其是文件管理上传/分享、WAF 规则编辑、SSE 日志这几处）。
 6. **管理面白名单未在真实公网验证**：`adminAllowIps` 的强制逻辑有单测覆盖，但没有在真实公网环境（含 CDN/第三方反代 + `trustProxy`）验证过取到的客户端 IP 是否就是期望值。
 7. **WAF 误报率未知**：CRS 在真实业务流量下的误报率没有数据；`paranoiaLevel`、`inboundThreshold` 等参数目前是按经验值设的。
+   **非 full 占比告警也还没在真实流量下发过**：阈值门限、每小时一次的去重、样本下限都有单测覆盖，但「真实业务下占比多少算异常」需要你自己定（先设一个值跑一周，再按收到的告警调）。
 8. **TLS 配置未经第三方扫描**：TLS 1.2+ / ECDHE 套件是代码里的约束，但没有用 SSL Labs 之类工具实测过评级，也没有验证 OCSP/证书链在移动端与老设备上的兼容性。
 
 ---
