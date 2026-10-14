@@ -26,11 +26,14 @@ import (
 	"github.com/nunt/nunt/internal/config"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
+	"github.com/nunt/nunt/internal/modules/waf"
 	"github.com/nunt/nunt/internal/mounts"
 	"github.com/nunt/nunt/internal/secret"
 )
 
-// testDeps wires the minimum a web module needs.
+// testDeps wires the minimum a web module needs. The firewall is registered
+// exactly like the application does it, and before the web module is built: the
+// web module shares the instance of the registry instead of building its own.
 func testDeps(t *testing.T, store *config.Store) *module.Deps {
 	t.Helper()
 	box, err := secret.Open(filepath.Join(filepath.Dir(store.Path()), "secret.key"))
@@ -41,13 +44,17 @@ func testDeps(t *testing.T, store *config.Store) *module.Deps {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &module.Deps{
+	deps := &module.Deps{
 		Cfg:      store,
 		Certs:    certStore,
 		Mounts:   mounts.New(store, box, nil),
 		DataDir:  filepath.Dir(store.Path()),
 		Registry: module.NewRegistry(),
 	}
+	if err := deps.Registry.Register(waf.New(deps)); err != nil {
+		t.Fatalf("register the firewall: %v", err)
+	}
+	return deps
 }
 
 // TestH2CClientIsAccepted proves that a cleartext HTTP/2 client (the transport

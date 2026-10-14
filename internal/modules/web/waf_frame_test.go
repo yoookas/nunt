@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -20,6 +22,7 @@ import (
 	"github.com/nunt/nunt/internal/config"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
+	"github.com/nunt/nunt/internal/modules/waf"
 )
 
 // These tests run the gRPC request body policy of the WAF module through the
@@ -139,10 +142,9 @@ func postGRPC(t *testing.T, client *http.Client, addr string, body []byte) *http
 
 // startWAFModule brings the web module up with the given configuration.
 //
-// The firewall instance the module owns is started by hand: the module builds
-// it in New but never starts it, so nothing else in this test would. The
-// registry of the application starts the instance it registered itself, which
-// is a different object than the one the proxy chain calls.
+// The web module does not own the firewall: it shares the instance registered in
+// module.Deps.Registry, exactly like the application does. The registry owns the
+// lifecycle, so the firewall is started from there, before the web module.
 func startWAFModule(t *testing.T, store *config.Store) *Web {
 	t.Helper()
 	return startWAFModuleWith(t, testDeps(t, store))
@@ -152,8 +154,12 @@ func startWAFModule(t *testing.T, store *config.Store) *Web {
 // dependencies itself (a custom certificate, for instance).
 func startWAFModuleWith(t *testing.T, deps *module.Deps) *Web {
 	t.Helper()
+	firewall := registryWAF(t, deps)
 	w := New(deps)
-	if err := w.waf.Start(context.Background()); err != nil {
+	if w.waf != firewall {
+		t.Fatal("the web module must share the firewall registered in the registry")
+	}
+	if err := firewall.Start(context.Background()); err != nil {
 		t.Fatalf("start the firewall: %v", err)
 	}
 	if err := w.Start(context.Background()); err != nil {
@@ -161,9 +167,27 @@ func startWAFModuleWith(t *testing.T, deps *module.Deps) *Web {
 	}
 	t.Cleanup(func() {
 		_ = w.Stop(context.Background())
-		_ = w.waf.Stop(context.Background())
+		_ = firewall.Stop(context.Background())
 	})
 	return w
+}
+
+// registryWAF returns the firewall the registry holds. It fails the test when
+// the module is missing, so a wiring mistake cannot silently disable the tests.
+func registryWAF(t *testing.T, deps *module.Deps) *waf.WAF {
+	t.Helper()
+	if deps == nil || deps.Registry == nil {
+		t.Fatal("the test dependencies carry no registry")
+	}
+	mod, ok := deps.Registry.Get("waf")
+	if !ok {
+		t.Fatal("the registry holds no waf module")
+	}
+	firewall, ok := mod.(*waf.WAF)
+	if !ok {
+		t.Fatalf("the registry holds %T, want *waf.WAF", mod)
+	}
+	return firewall
 }
 
 // TestWAFGRPCAttackIsRefusedOverH2C is T1 over cleartext HTTP/2: the upstream
@@ -385,5 +409,68 @@ func TestWAFChunkedUploadUnderTheFullPolicy(t *testing.T) {
 	}
 	if n := calls.Load(); n != 0 {
 		t.Fatalf("the upstream served %d calls, want 0", n)
+	}
+}
+
+// bodyStateCount reads one body policy counter out of the module statistics.
+func bodyStateCount(t *testing.T, stats map[string]any, state string) int64 {
+	t.Helper()
+	states, ok := stats["bodyStates"].(map[string]int64)
+	if !ok {
+		t.Fatalf("bodyStates is missing from the statistics: %v", stats)
+	}
+	return states[state]
+}
+
+// TestWAFBodyPolicyCountersReachTheRegistry is the regression test for the two
+// firewall instances: the rule level accounting used to land on an instance the
+// admin API never reads, so the WAF page always showed zero. The request goes
+// through a static rule whose WAF flag is set and the counters must show up on
+// the instance held by the registry.
+func TestWAFBodyPolicyCountersReachTheRegistry(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("ok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	addr := freeAddr(t)
+	rule := mkRule(t, "waf-static", "app.example.com", "/", 0, model.WebTypeStatic)
+	rule.Listen = []string{addr}
+	rule.WAF = true
+	rule.BodyPolicy = model.WAFBodyFull
+	rule.Static = &model.StaticTgt{Root: root, Listing: true}
+
+	deps := testDeps(t, wafConfigStore(t, model.WAFEnforceObserve, rule))
+	firewall := registryWAF(t, deps)
+	w := startWAFModuleWith(t, deps)
+	if w.waf != firewall {
+		t.Fatal("the web module shares no firewall with the registry")
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1"+addr+"/upload", io.NopCloser(strings.NewReader(cleanPayload)))
+	if err != nil {
+		t.Fatalf("build the request: %v", err)
+	}
+	req.Host = "app.example.com"
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// A declared length of -1 is what a chunked request carries: the policy
+	// cannot size it, so observe mode records the refusal instead of enforcing it.
+	req.ContentLength = -1
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusLengthRequired {
+		t.Fatal("observe mode must not refuse the request with 411")
+	}
+
+	// The counters of the registry instance must describe the rule traffic.
+	stats := firewall.Stats()
+	if n := bodyStateCount(t, stats, "peeked"); n < 1 {
+		t.Fatalf("bodyStates[peeked] = %d on the registry instance, want at least 1", n)
+	}
+	if n, _ := stats["wouldReject"].(int64); n < 1 {
+		t.Fatalf("wouldReject = %v on the registry instance, want at least 1", stats["wouldReject"])
 	}
 }

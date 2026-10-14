@@ -37,6 +37,9 @@ type Web struct {
 
 	fb  *filebrowser.Service
 	dav *webdav.Service
+	// waf is the firewall instance registered in the module registry; the web
+	// module shares it instead of building a second engine, so the rule level
+	// counters land on the instance the admin API and the WAF page report.
 	waf *waf.WAF
 
 	mu        sync.Mutex
@@ -66,6 +69,23 @@ type Web struct {
 	logs *logBuffer
 }
 
+// sharedWAF returns the firewall of the module registry. The registry owns the
+// instance: it starts, stops and reloads it, and the admin API plus the WAF page
+// read its statistics. Sharing it is what makes the rule level counters visible
+// in the API; a missing or foreign module leaves the module without a firewall,
+// which the middleware treats as "no protection configured".
+func sharedWAF(deps *module.Deps) *waf.WAF {
+	if deps == nil || deps.Registry == nil {
+		return nil
+	}
+	mod, ok := deps.Registry.Get("waf")
+	if !ok {
+		return nil
+	}
+	engine, _ := mod.(*waf.WAF)
+	return engine
+}
+
 // New creates the module.
 func New(deps *module.Deps) *Web {
 	cfg := deps.Cfg.Snapshot()
@@ -74,7 +94,7 @@ func New(deps *module.Deps) *Web {
 		log:       deps.Logger("web"),
 		fb:        filebrowser.New(deps),
 		dav:       webdav.New(deps),
-		waf:       waf.New(deps),
+		waf:       sharedWAF(deps),
 		bindings:  map[string]*listener{},
 		tlsAddrs:  map[string]bool{},
 		siteCache: map[string]cachedSite{},
@@ -103,16 +123,6 @@ func (w *Web) Start(ctx context.Context) error {
 	w.mu.Unlock()
 	w.rebuildMu.Unlock()
 
-	// The web module owns its own WAF instance (the module registered in the
-	// registry is a second one, used for the admin API). Nothing else starts
-	// this instance, so rule level protection must be brought up here or
-	// rule.WAF would silently never inspect anything in production.
-	if w.waf != nil {
-		if err := w.waf.Start(ctx); err != nil {
-			w.SetError(err)
-		}
-	}
-
 	if err := w.apply(base, w.snapshot()); err != nil {
 		w.SetRunning(true)
 		return err
@@ -128,10 +138,6 @@ func (w *Web) Stop(ctx context.Context) error {
 	w.cancelAll = nil
 	w.started = false
 	w.mu.Unlock()
-
-	if w.waf != nil {
-		_ = w.waf.Stop(ctx)
-	}
 
 	w.rebuildMu.Lock()
 	w.mu.Lock()
@@ -185,13 +191,6 @@ func (w *Web) Reload(cfg *model.Config) {
 	w.cfg = cfg
 	w.cfgMu.Unlock()
 	w.logs.resize(cfg.Web.LogKeep)
-
-	// The rule level WAF is a private instance of this module, so configuration
-	// changes (engine switch, body policy, thresholds) must be pushed to it
-	// explicitly: the module in the registry is a different instance.
-	if w.waf != nil {
-		w.waf.Reload(cfg)
-	}
 
 	w.mu.Lock()
 	started := w.started
