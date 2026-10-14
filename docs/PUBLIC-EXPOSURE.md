@@ -200,6 +200,42 @@ or set the access control to allow + IP list
 
 > 以上勾选框按原始清单逐字保留，尚未在任何真实环境跑过，**一律保持未勾**。
 
+### P2 第一条「A+C+E 实施并切 enforce」的验收判据
+
+这一条**不是一件事，而是 6 件事**，逐条判定（判据全部取自 [PLAN-waf-body-policy.md](PLAN-waf-body-policy.md) §7 的 T1–T10，
+字段名与中止语义见 [CONTRACT.md](CONTRACT.md) 第 8 节）。**在真实公网环境逐条跑过之前不要勾。**
+
+**前置检查（配置面）**
+
+- [ ] `GET /api/v1/waf/config` 返回 `config.enforcementMode` / `defaultBodyPolicy` / `peekBytes` / `peekTimeoutMs` 四项；
+      默认值分别是 `observe` / `full` / `65536` / `250`；
+- [ ] `GET /api/v1/web/rules` 的每条规则都带 `bodyPolicy`（空串 = 继承），PUT/POST 能保存它；
+- [ ] 配置校验对未知枚举**报错**（把 `enforcementMode` 写成 `banana` 保存应当失败，而不是被静默改成默认值）；
+
+**逐条验收（enforce 与 observe 各跑一遍需要对照的项）**
+
+- [ ] T1 unary gRPC 消息内含攻击：被拦、**上游零请求**、返回 `grpc-status`（HTTP 200 + 非 2xx 的 `grpc-status`）；
+- [ ] T2 声明 `grpc-unary` 却发两帧：enforce 下拒绝；observe 下放行且落入 wouldReject；
+- [ ] T3 bidi 首消息干净、第二帧含攻击：首消息放行、bodyState=`grpc-stream` 且被计数（**明确不做二级检查**）；
+- [ ] T4 bidi 首消息即攻击：上游零请求即被拦；
+- [ ] T5 服务端先说话的流：在 `peekTimeoutMs` 量级内返回，bodyState=`grpc-server-first`；
+- [ ] T6 chunked 普通请求 + full 策略：enforce 下 **411 + 可操作文案**；observe 下放行并记录；
+- [ ] T7 声明 peek 的路由：前 `peekBytes` 被检查、其余流式透传、bodyState=`peeked`；
+- [ ] T8 畸形帧 / 超长消息 / 截断流：被拒、**不 panic**、返回 `grpc-status 8`（RESOURCE_EXHAUSTED）；
+- [ ] T9 回归：现有 web 27 例 + waf 27 例全绿（含 WebSocket 隧道、h2c、gRPC over TLS）；
+- [ ] T10 h2c 与 TLS-h2 各跑 T1 / T3，行为一致；
+
+**切换 enforce 之前必须满足**
+
+- [ ] 「未声明 `bodyPolicy` 的路由」列表**为空**（WAF 页可一键跳转到 Web 规则页逐条声明）；
+- [ ] wouldReject 样例**逐条看过**，每条都能解释「为什么它本来会被拒」，并且不是正常业务流量；
+- [ ] 非 full 占比已知：哪些路由是 `peek` / `skip` / `grpc-stream`，为什么可以接受；
+- [ ] 已打开 notify 告警（非 full 占比 / wouldReject 计数超阈值时发通知）；
+- [ ] 记住这条：**enforce 之前不要开 body 策略**——否则 chunked / 流式请求会直接被 411 或拒绝。
+
+> 能力边界（不要在这一步才发现）：**gRPC 流式路由只做首消息检查 + 帧校验**，
+> 后续消息不会被逐条检查、也没有跨消息累计评分。T3 就是这个边界的正面确认，不是缺陷。
+
 ---
 
 ## 6. 每条怎么算「通过」（验收判据）
@@ -217,6 +253,7 @@ or set the access control to allow + IP list
 | 告警打通 | 主动制造事件（证书剩余天数告急、模块异常退出、WAF 拦截突增）→ 通知渠道收到；且不会重复轰炸 |
 | soak + 压测 | 24h 连续运行无内存/goroutine/连接泄漏（对比前后 RSS 与统计）；压测达到预期 QPS 且 P99 达标；gRPC 流式与 WebSocket 长连接各跑一轮 |
 | 备份/恢复与回滚 | 从备份恢复到一个干净主机能起来（含证书与凭据可用）；把版本回滚到上一版并确认配置可读（`version` 字段向后兼容） |
+| A+C+E 切 enforce | `GET /api/v1/waf/config` 返回 `enforcementMode=observe` + `defaultBodyPolicy=full`（默认值）；用 chunked 请求打一条 full 策略的路由：observe 下放行且 WAF 页多一条 wouldReject（计数 +1），切 enforce 后同一请求返回 411；WAF 页的未声明路由列表逐条声明后清空；T1–T10（PLAN §7）在 h2c 与 TLS-h2 各跑一遍 |
 
 ---
 

@@ -689,6 +689,19 @@ const PAGE_CSS = [
   '.pwaf-test{display:grid;grid-template-columns:110px 1fr;gap:8px;align-items:start}',
   '@media (max-width:760px){.pwaf-test{grid-template-columns:1fr}}',
   '.pwaf-result{margin-top:10px}',
+  '.pwaf-states{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:8px}',
+  '.pwaf-state{border:1px solid var(--border,#2a2f3a);border-radius:6px;padding:7px 9px;display:flex;flex-direction:column;gap:3px;background:var(--bg-soft,rgba(127,127,127,.06))}',
+  '.pwaf-state .k{font-size:12px;color:var(--muted,#98a2b3)}',
+  '.pwaf-state .v{font-size:17px;font-weight:600;line-height:1.1}',
+  '.pwaf-state .s{font-size:11px;color:var(--muted,#98a2b3)}',
+  '.pwaf-state.zero{opacity:.55}',
+  '.pwaf-coverage{font-size:12px;margin-left:6px}',
+  '.pwaf-warn{border-left:3px solid var(--warn,#d98b00)}',
+  '.pwaf-err{border-left:3px solid var(--err,#e5484d)}',
+  '.pwaf-sub{margin-top:12px}',
+  '.pwaf-sub-title{font-size:13px;font-weight:600;margin:0 0 6px}',
+  '.pwaf-hit-tag{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--muted,#98a2b3)}',
+  '.pwaf-compat{font-size:12px;color:var(--muted,#98a2b3);margin-top:10px;line-height:1.6}',
 ].join(String.fromCharCode(10));
 
 function levelOptions(value, dflt) {
@@ -727,6 +740,227 @@ function ruleIdsOf(l) {
   return [v];
 }
 
+// ---------------------------------------------------------------------------
+// 请求体检查策略（PLAN-waf-body-policy.md §2 / §3 / §5）
+//
+// 字段名与后端 model.WAFConfig 冻结的 JSON tag 一致：
+//   enforcementMode   observe | enforce（默认 observe）
+//   defaultBodyPolicy full | peek | skip | grpc（默认 full）
+//   peekBytes         默认 65536
+//   peekTimeoutMs     默认 250
+//
+// 后端接口尚未落地这些字段时，本页面读取会退回到「未设置」并在页面上给出
+// 明确提示，不会白屏；保存时也不会把后端不认识的值写回去（见 savePolicy）。
+// ---------------------------------------------------------------------------
+
+const POLICY_DEFAULTS = { enforcementMode: 'observe', defaultBodyPolicy: 'full', peekBytes: 65536, peekTimeoutMs: 250 };
+// 与 internal/config/validate.go 的边界一致：超出范围保存会被后端拒绝，
+// 前端先拦一次并给出中文提示（defaultWAFPeekBytes / maxWAFPeekBytes 等）。
+const POLICY_LIMITS = {
+  peekBytes: { min: 0, max: 4 * 1024 * 1024, low: 1024 },
+  peekTimeoutMs: { min: 0, max: 10000, low: 50 },
+};
+
+// 执行模式：observe 只记录「本应拒绝」，不真的拒绝。
+const ENFORCEMENT_OPTIONS = [
+  { value: 'observe', label: '观察模式（observe）：只记录，不拒绝' },
+  { value: 'enforce', label: '强制模式（enforce）：真的拒绝' },
+];
+const ENFORCEMENT_LABEL = { observe: '观察', enforce: '强制' };
+
+// 全局默认策略只允许 full | peek | skip | grpc（grpc 会按 gRPC 首消息路径处理）。
+const DEFAULT_POLICY_OPTIONS = [
+  { value: 'full', label: '全量（full，fail-closed：形态上无法完整检查就拒绝）' },
+  { value: 'peek', label: '偷看（peek，只检查前 PeekBytes 字节）' },
+  { value: 'skip', label: '跳过（skip，只查 URI / 请求头）' },
+  { value: 'grpc', label: 'gRPC（grpc，Content-Type 为 application/grpc* 时走首消息路径）' },
+];
+const DEFAULT_POLICY_SHORT = { full: '全量 full', peek: '偷看 peek', skip: '跳过 skip', grpc: 'gRPC grpc' };
+
+// bodyState 的完整取值集合（缺项的按 0 展示，便于确认后端是否在计数）。
+const BODY_STATE_KEYS = [
+  { key: 'full', label: '全量检查', desc: '完整检查后转发' },
+  { key: 'peeked', label: '部分检查', desc: '读满 PeekBytes / 超时' },
+  { key: 'skipped', label: '声明跳过', desc: '只查 URI / 请求头' },
+  { key: 'grpc-unary', label: 'gRPC 单消息', desc: '首消息 + EOF 完成判定' },
+  { key: 'grpc-stream', label: 'gRPC 流式', desc: '只查首消息 + 帧校验' },
+  { key: 'grpc-server-first', label: '服务端先说话', desc: '首消息等待超时后放行' },
+  { key: 'frame-error', label: '帧错误', desc: '畸形 / 超长 / 截断帧' },
+];
+const BODY_STATE_ALIASES = {
+  full: ['full', 'fullBody'],
+  peeked: ['peeked', 'peek'],
+  skipped: ['skipped', 'skip'],
+  'grpc-unary': ['grpc-unary', 'grpcUnary', 'grpc_unary'],
+  'grpc-stream': ['grpc-stream', 'grpcStream', 'grpc_stream'],
+  'grpc-server-first': ['grpc-server-first', 'grpcServerFirst', 'grpc_server_first', 'serverFirst'],
+  'frame-error': ['frame-error', 'frameError', 'frame_error', 'frameErrors'],
+};
+const NON_FULL_STATES = ['peeked', 'skipped', 'grpc-stream', 'grpc-server-first', 'frame-error'];
+
+// FIELD_ALIASES 是「同一个语义字段的多种后端命名」兜底表：后端把字段放在
+// config / stats / policy 任意一层、或换个写法时都能读到（命中未知命名会在
+// 页面上注明，避免误以为数据缺失）。
+const FIELD_ALIASES = {
+  enforcementMode: ['enforcementMode', 'EnforcementMode', 'mode'],
+  defaultBodyPolicy: ['defaultBodyPolicy', 'DefaultBodyPolicy', 'bodyPolicy'],
+  peekBytes: ['peekBytes', 'PeekBytes', 'peekSize', 'peekLimit'],
+  peekTimeoutMs: ['peekTimeoutMs', 'PeekTimeoutMS', 'PeekTimeoutMs', 'peekTimeout'],
+  bodyState: ['bodyState', 'bodyStates', 'bodyStateCounts', 'bodyStateDist', 'bodyStateDistribution'],
+  wouldReject: ['wouldReject', 'wouldRejects', 'wouldRejectSamples', 'wouldRejectList', 'wouldRejectItems', 'wouldRejectRecent', 'wouldRejectLog', 'wouldRejectCount'],
+  undeclared: ['undeclaredBodyPolicyRoutes', 'undeclaredBodyPolicy', 'undeclaredRoutes', 'undeclared', 'missingBodyPolicy', 'routesWithoutBodyPolicy', 'unclaimedRoutes', 'inheritedRoutes'],
+};
+
+// BODY_STATE_LABEL 把 bodyState / policy 的取值翻成中文短标签。
+const BODY_STATE_LABEL = {
+  full: '全量',
+  peeked: '部分',
+  skipped: '跳过',
+  'grpc-unary': 'gRPC 单消息',
+  'grpc-stream': 'gRPC 流式',
+  'grpc-server-first': '服务端先说话',
+  'frame-error': '帧错误',
+};
+
+function bodyStateChip(value) {
+  const key = String(value || '').trim();
+  if (!key) return el('span', { class: 'muted', text: '-' });
+  const kind = (key === 'full' || key === 'grpc-unary') ? 'ok' : ((key === 'skipped' || key === 'frame-error') ? 'err' : 'warn');
+  return badge(BODY_STATE_LABEL[key] || key, kind);
+}
+
+// routeOf 拼出「域名 + 路径」，后端 Violation 里这两项是分开的。
+function routeOf(s) {
+  const host = s.host || '';
+  const uri = s.path || s.uri || s.url || '';
+  if (!host) return uri;
+  return host + uri;
+}
+
+function isPlainObject(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
+
+function pickAlias(root, key) {
+  const names = FIELD_ALIASES[key] || [key];
+  const hosts = [root, root && root.policy, root && root.stats, root && root.status, root && root.extra];
+  for (const host of hosts) {
+    for (const name of names) {
+      if (isPlainObject(host) && host[name] !== undefined && host[name] !== null) return { value: host[name], field: name };
+    }
+  }
+  return { value: undefined, field: '' };
+}
+
+// pickAliasWhere 与 pickAlias 相同，但只接受满足 accept 的值。用于同一字段名
+// 在不同层承载不同类型的情况（例如 wouldReject 既是计数也是样例数组）。
+function pickAliasWhere(root, key, accept) {
+  const names = FIELD_ALIASES[key] || [key];
+  const hosts = [root, root && root.policy, root && root.stats, root && root.status, root && root.extra];
+  for (const host of hosts) {
+    for (const name of names) {
+      if (isPlainObject(host) && host[name] !== undefined && host[name] !== null && accept(host[name])) {
+        return { value: host[name], field: name };
+      }
+    }
+  }
+  return { value: undefined, field: '' };
+}
+
+function parseAliasedInt(root, key) {
+  const hit = pickAlias(root, key);
+  if (hit.value === undefined) return { value: null, field: '' };
+  const n = Number(hit.value);
+  return { value: isFinite(n) && n >= 0 ? Math.trunc(n) : null, field: hit.field };
+}
+
+function parseAliasedEnum(root, key, allowed) {
+  const hit = pickAlias(root, key);
+  if (hit.value === undefined) return { value: null, field: '' };
+  const text = String(hit.value).trim();
+  return { value: allowed.indexOf(text) >= 0 ? text : null, field: hit.field };
+}
+
+// normalizeBodyState 兼容三种形状：{full: 12} / [{state,count}] / {full:{count}}。
+function normalizeBodyState(raw) {
+  const out = {};
+  if (raw === undefined || raw === null) return out;
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (!isPlainObject(item)) continue;
+      const name = item.state || item.name || item.key || item.bodyState || item.type;
+      const value = numLike(item.count !== undefined ? item.count : (item.value !== undefined ? item.value : (item.total !== undefined ? item.total : item.n)));
+      if (name !== undefined && name !== null && name !== '') out[String(name)] = value;
+    }
+    return out;
+  }
+  if (typeof raw === 'object') {
+    for (const key of Object.keys(raw)) {
+      const value = raw[key];
+      if (isPlainObject(value)) {
+        const inner = numLike(value.count !== undefined ? value.count : (value.value !== undefined ? value.value : value.total));
+        if (inner !== null) out[key] = inner;
+        continue;
+      }
+      const n = numLike(value);
+      if (n !== null) out[key] = n;
+    }
+  }
+  return out;
+}
+
+function numLike(v) {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return isFinite(n) ? n : null;
+}
+
+// bodyStateValue 按别名表取某个状态的计数。
+function bodyStateValue(map, key) {
+  for (const name of (BODY_STATE_ALIASES[key] || [key])) {
+    if (map[name] !== undefined) return map[name];
+    const lower = name.toLowerCase();
+    for (const k of Object.keys(map)) {
+      if (k.toLowerCase() === lower) return map[k];
+    }
+  }
+  return null;
+}
+
+// normalizeSamples 兼容三种形状：数组 / {items|samples|list} / 单条对象。
+function normalizeSamples(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.filter((x) => x && typeof x === 'object');
+  if (isPlainObject(raw)) {
+    for (const key of ['items', 'samples', 'list', 'entries', 'recent', 'records']) {
+      if (Array.isArray(raw[key])) return raw[key].filter((x) => x && typeof x === 'object');
+    }
+    if (raw.rule || raw.path || raw.uri || raw.reason) return [raw];
+  }
+  return [];
+}
+
+function sampleReason(s) {
+  const value = s.reason || s.msg || s.message || s.detail || s.why || s.policy || '';
+  if (Array.isArray(value)) return value.map((x) => String(x)).join(' / ');
+  return String(value || '');
+}
+
+// wouldRejectStatus 取「本应返回的状态码」。
+// 后端的 Violation.status 是「本应返回的状态码」：gRPC 场景按 PLAN §4 是
+// HTTP 200 + grpc-status，因此 policy 为 grpc* 时在界面上写成 grpc-status。
+function wouldRejectStatus(s) {
+  const grpc = s.grpcStatus !== undefined ? s.grpcStatus : s.grpcCode;
+  if (grpc !== undefined && grpc !== null && grpc !== '') return 'grpc-status ' + grpc;
+  const direct = (s.status !== undefined && s.status !== null && s.status !== '') ? s.status
+    : ((s.statusCode !== undefined && s.statusCode !== null && s.statusCode !== '') ? s.statusCode : undefined);
+  if (direct === undefined) return '-';
+  const policy = String(s.policy || '');
+  if (policy.indexOf('grpc') === 0) {
+    // 首消息违规 / 第二帧：HTTP 200 + grpc-status 7（或 13）
+    return 'HTTP ' + direct + ' + grpc-status ' + (s.secondMessage ? '13' : '7');
+  }
+  return String(direct);
+}
+
 export default {
   id: 'waf',
   title: 'WAF 防护',
@@ -738,8 +972,20 @@ export default {
     const rulesBox = el('div', {});
     const logsBox = el('div', {});
     const testResult = el('div', { class: 'pwaf-result' });
+    const policyBox = el('div', {}, spinner('正在加载请求体检查策略…'));
     let stopLogs = null;
-    const state = { config: null, rules: [], logs: [], ruleQuery: '' };
+    const state = {
+      config: null,
+      rules: [],
+      logs: [],
+      ruleQuery: '',
+      policy: null,
+      fallback: {},
+      compatNotes: [],
+      webRules: null,
+      webRulesError: null,
+    };
+    const policyF = {};
 
     // 配置表单控件
     const f = {};
@@ -901,6 +1147,443 @@ export default {
       }
     }
 
+    /* ---------------------------------------------------------------- 策略面板 */
+
+    // refreshWebRules 取一次 Web 规则，用于「未声明 bodyPolicy 的路由」列表。
+    async function refreshWebRules() {
+      try {
+        const data = await api.get('/web/rules');
+        state.webRules = unwrap(data, ['rules', 'items']);
+        state.webRulesError = null;
+      } catch (e) {
+        state.webRules = null;
+        state.webRulesError = e;
+      }
+    }
+
+    // readPolicy 从 GET /waf/config 的返回里解析策略字段，命中未知命名时记录提示。
+    function readPolicy(root, fallback) {
+      const f = { mode: false, policy: false, peekBytes: false, peekTimeoutMs: false };
+      const enforce = parseAliasedEnum(root, 'enforcementMode', ['observe', 'enforce']);
+      const dflt = parseAliasedEnum(root, 'defaultBodyPolicy', ['full', 'peek', 'skip', 'grpc']);
+      const bytes = parseAliasedInt(root, 'peekBytes');
+      const timeout = parseAliasedInt(root, 'peekTimeoutMs');
+      f.mode = enforce.value === null;
+      f.policy = dflt.value === null;
+      f.peekBytes = bytes.value === null;
+      f.peekTimeoutMs = timeout.value === null;
+      const notes = [];
+      if (enforce.field && enforce.field !== 'enforcementMode') notes.push('enforcementMode ← ' + enforce.field);
+      if (dflt.field && dflt.field !== 'defaultBodyPolicy') notes.push('defaultBodyPolicy ← ' + dflt.field);
+      if (bytes.field && bytes.field !== 'peekBytes') notes.push('peekBytes ← ' + bytes.field);
+      if (timeout.field && timeout.field !== 'peekTimeoutMs') notes.push('peekTimeoutMs ← ' + timeout.field);
+      return {
+        values: {
+          enforcementMode: enforce.value === null ? fallback.enforcementMode : enforce.value,
+          defaultBodyPolicy: dflt.value === null ? fallback.defaultBodyPolicy : dflt.value,
+          peekBytes: bytes.value === null ? fallback.peekBytes : bytes.value,
+          peekTimeoutMs: timeout.value === null ? fallback.peekTimeoutMs : timeout.value,
+        },
+        fallback: f,
+        notes: notes,
+      };
+    }
+
+    // readPolicyStats 解析 bodyState 分布、wouldReject 与未声明路由列表。
+    //
+    // wouldReject 的情况特殊：后端把「计数」放在 stats.wouldReject（数字），
+    // 把「样例数组」放在响应根 wouldReject（[]Violation，最新在前）。
+    // countHit 只找数字，sampleHit 只找数组/对象，两者不会互相遮蔽。
+    function readPolicyStats(root) {
+      const bodyHit = pickAlias(root, 'bodyState');
+      const countHit = pickAliasWhere(root, 'wouldReject', (v) => typeof v === 'number');
+      const sampleHit = pickAliasWhere(root, 'wouldReject', (v) => Array.isArray(v) || isPlainObject(v));
+      const undeclaredHit = pickAlias(root, 'undeclared');
+      const states = normalizeBodyState(bodyHit.value);
+      let samples = normalizeSamples(sampleHit.value);
+      let rejectCount = numLike(countHit.value);
+      if (rejectCount === null) {
+        // 没有独立计数时：对象样例用它的 count/total，否则退回样例条数。
+        const inner = isPlainObject(sampleHit.value)
+          ? numLike(sampleHit.value.count !== undefined ? sampleHit.value.count : sampleHit.value.total) : null;
+        rejectCount = inner === null ? samples.length : Math.max(inner, samples.length);
+      }
+      return {
+        states,
+        samples,
+        rejectCount: rejectCount,
+        undeclaredFromConfig: Array.isArray(undeclaredHit.value) ? undeclaredHit.value.filter(Boolean) : [],
+        fields: {
+          bodyState: bodyHit.field,
+          wouldReject: countHit.field || sampleHit.field,
+          wouldRejectSamples: sampleHit.field,
+          undeclared: undeclaredHit.field,
+        },
+      };
+    }
+
+    function sumStates(states) {
+      let total = 0;
+      for (const name of Object.keys(states)) {
+        const v = numLike(states[name]);
+        if (v !== null) total += v;
+      }
+      return total;
+    }
+
+    function nonFullCount(states) {
+      let n = 0;
+      for (const key of NON_FULL_STATES) {
+        const v = bodyStateValue(states, key);
+        if (v !== null) n += v;
+      }
+      return n;
+    }
+
+    // undeclaredRoutes 优先用后端给的列表，缺失时从 Web 规则里推导。
+    function undeclaredRoutes(stats) {
+      if (stats.undeclaredFromConfig.length) {
+        return { list: stats.undeclaredFromConfig.map((item, i) => {
+          if (isPlainObject(item)) {
+            return {
+              id: String(item.id || item.ruleId || item.name || ('#' + (i + 1))),
+              name: String(item.name || item.rule || item.path || ''),
+              path: String(item.path || item.uri || ''),
+            };
+          }
+          return { id: String(item), name: '', path: '' };
+        }), source: 'config' };
+      }
+      if (state.webRules) {
+        return {
+          list: state.webRules.filter((r) => !String(r.bodyPolicy || '').trim()).map((r) => ({
+            id: String(r.id || ''),
+            name: String(r.name || ''),
+            path: String(r.path || '/'),
+            type: r.type || '',
+          })),
+          source: 'webRules',
+        };
+      }
+      return { list: [], source: state.webRulesError ? 'error' : 'none' };
+    }
+
+    function policyEmptyCard(title, detail) {
+      return el('div', { class: 'notice' },
+        el('div', { style: { fontWeight: '600' }, text: title }),
+        el('div', { text: detail }),
+      );
+    }
+
+    function infoCard(title, lines) {
+      const box = el('div', { class: 'notice' });
+      box.appendChild(el('div', { style: { fontWeight: '600' }, text: title }));
+      for (const line of lines) box.appendChild(el('div', { text: line }));
+      return box;
+    }
+
+    function paintPolicy() {
+      clear(policyBox);
+      const cfg = state.policy;
+      if (!cfg) {
+        policyBox.appendChild(spinner('正在加载请求体检查策略…'));
+        return;
+      }
+      const controlGrid = el('div', { class: 'grid' });
+      const modeSel = selectEl(ENFORCEMENT_OPTIONS, cfg.enforcementMode);
+      const defaultSel = selectEl(DEFAULT_POLICY_OPTIONS, cfg.defaultBodyPolicy);
+      const peekBytes = input({ type: 'number', min: '0', max: String(POLICY_LIMITS.peekBytes.max), step: '1024', value: String(cfg.peekBytes), placeholder: '65536' });
+      const peekTimeout = input({ type: 'number', min: '0', max: String(POLICY_LIMITS.peekTimeoutMs.max), step: '50', value: String(cfg.peekTimeoutMs), placeholder: '250' });
+      const warnBox = el('div', { class: 'pwaf-sub' });
+      policyF.mode = modeSel;
+      policyF.defaultPolicy = defaultSel;
+      policyF.peekBytes = peekBytes;
+      policyF.peekTimeoutMs = peekTimeout;
+
+      function markMissing(node, missing, fallbackValue) {
+        if (!missing) return;
+        node.style.borderColor = 'var(--warn,#d98b00)';
+        node.title = '后端返回里没有这个字段，界面显示的是默认值 ' + fallbackValue + '；保存前请确认后端已实现';
+      }
+      // modeHint / peekHintField 必须在 sync* 之前建好（它们会被同步函数写入）。
+      const modeHint = el('div', { class: 'hint' });
+      const peekHintField = el('div', { class: 'hint' });
+      markMissing(modeSel, cfg.__fallback.mode, POLICY_DEFAULTS.enforcementMode);
+      markMissing(defaultSel, cfg.__fallback.policy, POLICY_DEFAULTS.defaultBodyPolicy);
+      markMissing(peekBytes, cfg.__fallback.peekBytes, POLICY_DEFAULTS.peekBytes);
+      markMissing(peekTimeout, cfg.__fallback.peekTimeoutMs, POLICY_DEFAULTS.peekTimeoutMs);
+
+      function syncModeHint() {
+        const mode = val(modeSel) || 'observe';
+        clear(modeHint);
+        modeHint.appendChild(el('span', mode === 'observe'
+          ? '观察模式（observe）：只记录「本应拒绝」，请求照常放行——用于上线前扫出漏声明的路由。'
+          : '强制模式（enforce）：形态上无法完整检查的请求会被真的拒绝（例如 Content-Length 未知的请求返回 411）。'));
+      }
+      function syncPeekHint() {
+        const bytes = numOf(peekBytes, POLICY_DEFAULTS.peekBytes);
+        const ms = numOf(peekTimeout, POLICY_DEFAULTS.peekTimeoutMs);
+        peekHintField.textContent = 'peek 策略读满 ' + fmtBytes(bytes) + ' 或空闲 ' + ms +
+          'ms 就先检查已到达的部分，其余字节流式透传（bodyState=peeked）；只有声明了 peek 的路由会用到这两个参数。';
+      }
+      modeSel.addEventListener('change', () => { syncModeHint(); paintPolicyWarnings(warnBox, modeSel, defaultSel); });
+      defaultSel.addEventListener('change', () => paintPolicyWarnings(warnBox, modeSel, defaultSel));
+      peekBytes.addEventListener('input', syncPeekHint);
+      peekTimeout.addEventListener('input', syncPeekHint);
+      syncModeHint();
+      syncPeekHint();
+
+      controlGrid.appendChild(el('div', { class: 'field' }, el('label', { text: '执行模式' }), modeSel, modeHint));
+      const defField = el('div', { class: 'field' }, el('label', { text: '默认请求体策略（未声明 bodyPolicy 的路由使用）' }), defaultSel,
+        el('div', { class: 'hint', text: '默认 full 是 fail-closed：攻击者只能通过改变请求形态落到「拒绝」，不存在自动降级为部分检查的路径。' }));
+      controlGrid.appendChild(defField);
+      controlGrid.appendChild(el('div', { class: 'field' }, el('label', { text: 'PeekBytes（peek 检查的字节数）' }), peekBytes));
+      controlGrid.appendChild(el('div', { class: 'field' }, el('label', { text: 'PeekTimeoutMS（空闲超时，毫秒）' }), peekTimeout));
+      policyBox.appendChild(controlGrid);
+      policyBox.appendChild(peekHintField);
+      paintPolicyWarnings(warnBox, modeSel, defaultSel);
+      policyBox.appendChild(warnBox);
+      policyBox.appendChild(paintBodyStates());
+      paintRejects();
+      paintUndeclared();
+    }
+
+    function paintPolicyWarnings(host, modeSel, defaultSel) {
+      clear(host);
+      const missing = [];
+      if (state.fallback.mode) missing.push('enforcementMode');
+      if (state.fallback.policy) missing.push('defaultBodyPolicy');
+      if (state.fallback.peekBytes) missing.push('peekBytes');
+      if (state.fallback.peekTimeoutMs) missing.push('peekTimeoutMs');
+      if (missing.length) {
+        host.appendChild(policyEmptyCard('后端尚未返回这些字段：' + missing.join('、'),
+          '界面按 PLAN-waf-body-policy.md §2 的默认值显示（observe / full / 65536 / 250）。' +
+          '这种情况下「保存策略」不会把这些字段写回配置，避免把默认值当成你的选择落盘；' +
+          '等后端把字段加进 model.WAFConfig 后自动生效。'));
+        host.appendChild(el('div', { style: { height: '8px' } }));
+      }
+      if ((val(modeSel) || 'observe') === 'enforce') {
+        const n = state.rejectCount || 0;
+        host.appendChild(infoCard('当前是强制模式（enforce）：不符合策略的请求会被拒绝',
+          ['确认「未声明 bodyPolicy 的路由」已经补齐；下面列出它们，点「去 Web 规则页设置」可以逐个声明。',
+            'observe 期间累计的本应拒绝样本：' + n + ' 条（切换前请确认已看完）。']));
+        host.appendChild(el('div', { style: { height: '8px' } }));
+      }
+    }
+
+    function paintBodyStates() {
+      const stats = state.policyStats || { states: {} };
+      const states = stats.states || {};
+      const total = sumStates(states);
+      const nonFull = nonFullCount(states);
+      const pct = total ? Math.round((nonFull / total) * 1000) / 10 : 0;
+      const box = el('div', { class: 'pwaf-sub' });
+      const title = el('div', { class: 'row', style: { marginBottom: '6px' } },
+        el('span', { class: 'pwaf-sub-title', text: 'bodyState 分布' }),
+        el('span', { class: 'pwaf-coverage muted', text: total ? ('总样本 ' + total + '，非 full 占比 ' + pct + '%') : '暂无样本' }));
+      box.appendChild(title);
+      if (!total) {
+        box.appendChild(emptyBox('暂无 bodyState 计数（可能还没有流量，或后端尚未暴露该字段）'));
+      } else {
+        const grid = el('div', { class: 'pwaf-states' });
+        for (const item of BODY_STATE_KEYS) {
+          const value = bodyStateValue(states, item.key);
+          const count = value === null ? 0 : value;
+          const card = el('div', { class: 'pwaf-state' + (count ? '' : ' zero'), title: item.key + '：' + item.desc },
+            el('span', { class: 'k', text: item.label }),
+            el('span', { class: 'v', text: String(count) }),
+            el('span', { class: 's', text: item.key + (value === null ? '（后端未返回）' : '') }),
+          );
+          grid.appendChild(card);
+        }
+        box.appendChild(grid);
+        if (nonFull > 0) {
+          box.appendChild(el('div', { class: 'hint', style: { marginTop: '6px' }, text: '非 full 的请求表示检查存在缺口（peek 只覆盖前若干字节，skip / grpc-stream 只覆盖首消息或请求头）；这些请求仍然会被 WAF 的 URI / 请求头检查覆盖。' }));
+        }
+      }
+      return box;
+    }
+
+    function paintRejects() {
+      const stats = state.policyStats || { samples: [] };
+      const samples = stats.samples || [];
+      const box = el('div', { class: 'pwaf-sub' });
+      box.appendChild(el('div', { class: 'row', style: { marginBottom: '6px' } },
+        el('span', { class: 'pwaf-sub-title', text: 'wouldReject 样例（本应被拒绝的请求）' }),
+        el('span', { class: 'pwaf-coverage muted', text: '计数 ' + (state.rejectCount || 0) + '，样例 ' + samples.length + ' 条' })));
+      if (!samples.length) {
+        box.appendChild(emptyBox(state.rejectCount
+          ? '后端返回了计数 ' + state.rejectCount + '，但没有样例详情；请确认是否把样例数组（items/samples）一起返回'
+          : '暂无 wouldReject 记录（observe 模式下本应被拒绝的请求会记录在这里）'));
+      } else {
+        const cols = [
+          { title: '规则', render: (s) => el('div', {},
+            el('div', { text: s.rule || s.ruleName || s.ruleId || s.site || '-' }),
+            el('div', { class: 'pwaf-hit-tag', text: r.routeOf(s) })) },
+          { title: '路径', render: (s) => el('span', { class: 'mono pwaf-hit-tag', text: (s.method ? s.method + ' ' : '') + (s.path || s.uri || s.url || '-') }) },
+          { title: '原因', render: (s) => el('span', { class: 'muted', text: sampleReason(s) || '-' }) },
+          { title: '策略', render: (s) => (s.policy || s.bodyPolicy ? bodyStateChip(String(s.policy || s.bodyPolicy)) : el('span', { class: 'muted', text: '-' })) },
+          { title: '本应返回', render: (s) => badge(wouldRejectStatus(s), 'warn') },
+          { title: '客户端', render: (s) => el('span', { class: 'mono', text: s.clientIp || s.ip || s.remoteAddr || '-' }) },
+          { title: '时间', render: (s) => el('span', { text: fmtTime(s.time || s.ts || s.at || s.timestamp) }) },
+        ];
+        box.appendChild(dataTable(cols, samples.map((s, i) => ({ raw: s, tag: String(i) })), '暂无样例'));
+      }
+      policyBox.appendChild(box);
+    }
+
+    // rejectRuleIds 统计 wouldReject 样例里出现过的规则名（每个记条数），
+    // 用来标注「这条路由已经产生过本应拒绝的流量」。
+    function rejectRuleIds() {
+      const map = {};
+      for (const s of (state.policyStats && state.policyStats.samples) || []) {
+        const name = s.rule || s.ruleName || s.ruleId || s.site || '';
+        if (!name) continue;
+        map[name] = (map[name] || 0) + 1;
+      }
+      return map;
+    }
+
+    function paintUndeclared() {
+      const found = undeclaredRoutes(state.policyStats || { undeclaredFromConfig: [] });
+      const hits = rejectRuleIds();
+      const box = el('div', { class: 'pwaf-sub' });
+      const jump = el('button', {
+        class: 'btn btn-sm', type: 'button', text: '去 Web 规则页设置',
+        onclick: () => {
+          if (typeof ctx.navigate === 'function') ctx.navigate('web');
+          else { location.hash = '#/web'; }
+        },
+      });
+      box.appendChild(el('div', { class: 'row', style: { marginBottom: '6px' } },
+        el('span', { class: 'pwaf-sub-title', text: '未声明 bodyPolicy 的路由' }),
+        el('span', { class: 'pwaf-coverage muted', text: found.list.length + ' 条（继承全局默认策略）' }),
+        el('span', { class: 'spacer', style: { flex: '1 1 auto' } }),
+        found.list.length ? jump : null));
+      if (found.source === 'error') {
+        box.appendChild(errorCard(state.webRulesError, () => loadPolicy()));
+      } else if (!found.list.length) {
+        box.appendChild(emptyBox(found.source === 'none'
+          ? '无法读取 Web 规则与后端列表，暂时无法判断哪些路由未声明策略'
+          : '所有 Web 规则都已显式声明 bodyPolicy（或当前没有规则）'));
+      } else {
+        const cols = [
+          { title: '规则', render: (r) => el('div', {}, el('div', { text: r.name || r.id }), el('div', { class: 'muted mono', text: r.id })) },
+          { title: '路径', render: (r) => el('span', { class: 'mono', text: r.path || '/' }) },
+          { title: '当前继承', render: () => badge(DEFAULT_POLICY_SHORT[(state.policy && state.policy.defaultBodyPolicy) || 'full'] || 'full') },
+          { title: 'wouldReject', render: (r) => (hits[r.id] || hits[r.name]
+            ? badge(hits[r.id] || hits[r.name], 'warn')
+            : el('span', { class: 'muted', text: '—' })) },
+          { title: '', render: (r) => el('button', { class: 'btn btn-sm', type: 'button', text: '去设置', onclick: () => goToRule(r.id) }) },
+        ];
+        box.appendChild(dataTable(cols, found.list.map((r) => ({ raw: r, tag: r.id })), '暂无未声明的路由'));
+      }
+      if (found.source === 'webRules') {
+        box.appendChild(el('div', { class: 'pwaf-compat', text: '说明：后端 /waf/config 未返回未声明路由列表，这里由 GET /web/rules 的 bodyPolicy 字段推导（空值即未声明）。' }));
+      }
+      policyBox.appendChild(box);
+    }
+
+    // goToRule 跳转到 Web 规则页并聚焦该规则（#/web?rule=<id>）。
+    function goToRule(id) {
+      if (!id) return;
+      if (typeof ctx.navigate === 'function') ctx.navigate('web', { rule: id });
+      else { location.hash = '#/web?rule=' + encodeURIComponent(id); }
+    }
+
+    // loadPolicy 读取 GET /waf/config 并渲染策略面板。
+    async function loadPolicy() {
+      clear(policyBox);
+      policyBox.appendChild(spinner('正在加载请求体检查策略…'));
+      state.compatNotes = [];
+      let root = null;
+      let data = null;
+      try {
+        data = await api.get('/waf/config');
+        root = (data && data.config) ? data.config : (data || {});
+        const read = readPolicy(root, POLICY_DEFAULTS);
+        state.fallback = read.fallback;
+        state.compatNotes = read.notes;
+        state.policy = Object.assign({}, read.values, { __fallback: read.fallback });
+        state.policyStats = readPolicyStats(data);
+        state.rejectCount = state.policyStats.rejectCount;
+      } catch (e) {
+        state.policy = null;
+        clear(policyBox);
+        policyBox.appendChild(errorCard(e, () => loadPolicy()));
+        return;
+      }
+      // 光有 /waf/config 还不够：未声明路由列表可能需要 /web/rules 兜底。
+      if (!state.policyStats.undeclaredFromConfig.length && !state.webRules && !state.webRulesError) {
+        await refreshWebRules();
+        state.policyStats = readPolicyStats(data);
+      }
+      paintPolicy();
+      // 兼容读取的痕迹要留在页面上：命中非契约命名时明确写出来，避免误判成「后端没实现」。
+      const notes = [];
+      if (state.compatNotes.length) notes.push('字段兼容读取：' + state.compatNotes.join('，'));
+      const sf = state.policyStats.fields;
+      if (sf.bodyState && sf.bodyState !== 'bodyState' && sf.bodyState !== 'bodyStates') notes.push('bodyStates ← ' + sf.bodyState);
+      if (sf.wouldReject && sf.wouldReject !== 'wouldReject') notes.push('wouldReject 计数 ← ' + sf.wouldReject);
+      if (sf.wouldRejectSamples && sf.wouldRejectSamples !== 'wouldReject') notes.push('wouldReject 样例 ← ' + sf.wouldRejectSamples);
+      if (sf.undeclared && sf.undeclared !== 'undeclaredBodyPolicyRoutes') notes.push('未声明路由 ← ' + sf.undeclared);
+      const source = '数据来源：GET /api/v1/waf/config（config.enforcementMode / defaultBodyPolicy / peekBytes / peekTimeoutMs、' +
+        'stats.bodyStates、stats.wouldReject 计数、响应根 wouldReject 样例）。';
+      policyBox.appendChild(el('div', { class: 'pwaf-compat', text: notes.length ? source + notes.join('；') : source }));
+    }
+
+    // reloadPolicy 用于定时刷新：正在面板里编辑时跳过这一轮，避免把用户
+    // 输了一半的值刷掉（页面每 15 秒自动刷新一次数据）。
+    function reloadPolicy() {
+      const active = document.activeElement;
+      if (active && policyBox.contains(active)) return;
+      return loadPolicy();
+    }
+
+    // savePolicy 把四项策略写回 /waf/config；后端未返回的字段不写，避免覆盖。
+    async function savePolicy() {
+      if (!state.config) { toast('配置尚未加载完成', 'warn'); return; }
+      if (!state.policy) { toast('策略尚未加载完成', 'warn'); return; }
+      const nextMode = val(policyF.mode) || 'observe';
+      const prevMode = state.policy.enforcementMode || 'observe';
+      const nextDefault = val(policyF.defaultPolicy) || 'full';
+      const nextBytes = numOf(policyF.peekBytes, POLICY_DEFAULTS.peekBytes);
+      const nextTimeout = numOf(policyF.peekTimeoutMs, POLICY_DEFAULTS.peekTimeoutMs);
+      const byteLimit = POLICY_LIMITS.peekBytes;
+      const timeLimit = POLICY_LIMITS.peekTimeoutMs;
+      if (nextBytes < byteLimit.min || nextBytes > byteLimit.max) {
+        toast('PeekBytes 必须在 ' + byteLimit.min + ' – ' + fmtBytes(byteLimit.max) + ' 之间（后端校验会拒绝超范围的值）', 'warn');
+        return;
+      }
+      if (nextTimeout < timeLimit.min || nextTimeout > timeLimit.max) {
+        toast('PeekTimeoutMS 必须在 ' + timeLimit.min + ' – ' + timeLimit.max + ' 毫秒之间', 'warn');
+        return;
+      }
+      if (nextBytes > 0 && nextBytes < byteLimit.low) {
+        toast('PeekBytes 只有 ' + nextBytes + ' 字节，检查覆盖会很小；确认无误再保存', 'warn');
+      }
+      if (nextMode !== prevMode) {
+        const ok = await confirmDialog(nextMode === 'enforce'
+          ? '切换到强制模式（enforce）后，形态上无法完整检查的请求会被真的拒绝（例如 Content-Length 未知的请求返回 411）。确认已补齐所有路由的 bodyPolicy 声明？'
+          : '切回观察模式（observe）：只记录「本应拒绝」，不真的拒绝任何请求。');
+        if (!ok) { paintPolicy(); return; }
+      }
+      const payload = Object.assign({}, state.config);
+      const fallback = state.fallback || {};
+      if (!fallback.mode) payload.enforcementMode = nextMode;
+      if (!fallback.policy) payload.defaultBodyPolicy = nextDefault;
+      if (!fallback.peekBytes) payload.peekBytes = nextBytes;
+      if (!fallback.peekTimeoutMs) payload.peekTimeoutMs = nextTimeout;
+      try {
+        await api.put('/waf/config', payload);
+        toast('请求体检查策略已保存', 'ok');
+        loadConfig();
+        loadPolicy();
+      } catch (e) {
+        toast('保存失败：' + apiErr(e), 'error');
+      }
+    }
+
     const testMethod = selectEl(['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS'].map((m) => ({ value: m, label: m })), 'GET');
     const testURL = input({ placeholder: '/admin?id=1 union select 1 或完整 URL' });
     const testBody = textarea({ rows: '2', placeholder: '请求体（POST/PUT 时填写）' });
@@ -917,6 +1600,18 @@ export default {
         el('button', { class: 'btn btn-primary', type: 'button', text: '保存配置', onclick: () => saveConfig() }),
       ),
       el('div', { class: 'card-body pwaf-panel' }, formBox),
+    ));
+
+    root.appendChild(el('div', { class: 'card' },
+      el('div', { class: 'card-head' },
+        el('h3', { text: '请求体检查策略' }),
+        el('span', { class: 'grow' }),
+        el('span', { class: 'muted', style: { 'font-size': '12px' }, text: 'GET/PUT /api/v1/waf/config' }),
+        el('span', { class: 'muted', style: { 'font-size': '12px' }, text: '每 15 秒自动刷新' }),
+        el('button', { class: 'btn', type: 'button', text: '刷新数据', onclick: () => { refreshWebRules().then(() => loadPolicy()); } }),
+        el('button', { class: 'btn btn-primary', type: 'button', text: '保存策略', onclick: () => savePolicy() }),
+      ),
+      el('div', { class: 'card-body pwaf-panel' }, policyBox),
     ));
 
     root.appendChild(el('div', { class: 'card' },
@@ -957,7 +1652,9 @@ export default {
     loadConfig();
     loadRules();
     loadLogs();
+    loadPolicy();
     stopLogs = makePoller(() => loadLogs(), 10000);
-    return () => { if (stopLogs) stopLogs(); offStyle(); };
+    const stopPolicy = makePoller(() => reloadPolicy(), 15000);
+    return () => { if (stopLogs) stopLogs(); if (stopPolicy) stopPolicy(); offStyle(); };
   },
 };

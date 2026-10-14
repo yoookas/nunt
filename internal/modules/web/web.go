@@ -103,6 +103,16 @@ func (w *Web) Start(ctx context.Context) error {
 	w.mu.Unlock()
 	w.rebuildMu.Unlock()
 
+	// The web module owns its own WAF instance (the module registered in the
+	// registry is a second one, used for the admin API). Nothing else starts
+	// this instance, so rule level protection must be brought up here or
+	// rule.WAF would silently never inspect anything in production.
+	if w.waf != nil {
+		if err := w.waf.Start(ctx); err != nil {
+			w.SetError(err)
+		}
+	}
+
 	if err := w.apply(base, w.snapshot()); err != nil {
 		w.SetRunning(true)
 		return err
@@ -118,6 +128,10 @@ func (w *Web) Stop(ctx context.Context) error {
 	w.cancelAll = nil
 	w.started = false
 	w.mu.Unlock()
+
+	if w.waf != nil {
+		_ = w.waf.Stop(ctx)
+	}
 
 	w.rebuildMu.Lock()
 	w.mu.Lock()

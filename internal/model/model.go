@@ -102,25 +102,29 @@ type WebConfig struct {
 
 // WebRule routes one logical site/route.
 type WebRule struct {
-	ID        string       `json:"id"`
-	Name      string       `json:"name"`
-	Enable    bool         `json:"enable"`
-	Type      string       `json:"type"`
-	Listen    []string     `json:"listen"`
-	Domains   []string     `json:"domains,omitempty"`
-	Path      string       `json:"path"`
-	Priority  int          `json:"priority"`
-	TLS       WebTLS       `json:"tls"`
-	WAF       bool         `json:"waf"`
-	Access    Access       `json:"access"`
-	BasicAuth *BasicAuth   `json:"basicAuth,omitempty"`
-	Proxy     *ProxyTarget `json:"proxy,omitempty"`
-	Redirect  *RedirectTgt `json:"redirect,omitempty"`
-	Static    *StaticTgt   `json:"static,omitempty"`
-	Files     *FilesTgt    `json:"files,omitempty"`
-	Remark    string       `json:"remark,omitempty"`
-	CreatedAt time.Time    `json:"createdAt"`
-	UpdatedAt time.Time    `json:"updatedAt"`
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Enable   bool     `json:"enable"`
+	Type     string   `json:"type"`
+	Listen   []string `json:"listen"`
+	Domains  []string `json:"domains,omitempty"`
+	Path     string   `json:"path"`
+	Priority int      `json:"priority"`
+	TLS      WebTLS   `json:"tls"`
+	WAF      bool     `json:"waf"`
+	// BodyPolicy declares how the request body of this rule is inspected:
+	// "" inherits the global default, otherwise full, peek, skip, grpc-unary
+	// or grpc-stream (see WAFBody* constants).
+	BodyPolicy string       `json:"bodyPolicy,omitempty"`
+	Access     Access       `json:"access"`
+	BasicAuth  *BasicAuth   `json:"basicAuth,omitempty"`
+	Proxy      *ProxyTarget `json:"proxy,omitempty"`
+	Redirect   *RedirectTgt `json:"redirect,omitempty"`
+	Static     *StaticTgt   `json:"static,omitempty"`
+	Files      *FilesTgt    `json:"files,omitempty"`
+	Remark     string       `json:"remark,omitempty"`
+	CreatedAt  time.Time    `json:"createdAt"`
+	UpdatedAt  time.Time    `json:"updatedAt"`
 }
 
 // WebTLS describes how a rule terminates TLS.
@@ -360,6 +364,41 @@ const (
 	WAFModeBlock  = "block"
 )
 
+// WAF body enforcement modes. The mode only changes the answer to a request
+// body policy decision; the decision itself, and therefore the statistics, is
+// identical in both modes.
+const (
+	// WAFEnforceObserve lets a request the body policy would refuse pass and
+	// records it as a "would reject" event. It is the default so that a route
+	// with a missing body declaration cannot break traffic during a rollout.
+	WAFEnforceObserve = "observe"
+	// WAFEnforceEnforce answers such a request with the documented refusal.
+	WAFEnforceEnforce = "enforce"
+)
+
+// WAF request body policies. The global default accepts full, peek, skip and
+// grpc; a rule accepts the same values plus the two explicit gRPC shapes. An
+// empty rule value inherits the global default.
+const (
+	// WAFBodyFull inspects the whole body before the upstream is contacted. A
+	// request whose body carries no declared length is refused because it
+	// cannot be inspected completely.
+	WAFBodyFull = "full"
+	// WAFBodyPeek inspects the first PeekBytes bytes and streams the rest.
+	WAFBodyPeek = "peek"
+	// WAFBodySkip forwards the body without inspecting it.
+	WAFBodySkip = "skip"
+	// WAFBodyGRPC is the global default for gRPC traffic: a request is treated
+	// as unary unless the rule declares grpc-stream.
+	WAFBodyGRPC = "grpc"
+	// WAFBodyGRPCUnary inspects the first message of an application/grpc
+	// request and refuses a second one.
+	WAFBodyGRPCUnary = "grpc-unary"
+	// WAFBodyGRPCStream inspects the first message of a streaming gRPC request
+	// and validates the frames that follow.
+	WAFBodyGRPCStream = "grpc-stream"
+)
+
 // WAFConfig configures the embedded Coraza engine.
 type WAFConfig struct {
 	Enable            bool     `json:"enable"`
@@ -375,6 +414,16 @@ type WAFConfig struct {
 	AdminProtect      bool     `json:"adminProtect"`
 	BodyLimitKB       int      `json:"bodyLimitKb,omitempty"`
 	LogOnly           bool     `json:"logOnly,omitempty"`
+	// EnforcementMode is observe (default) or enforce, see the WAFEnforce constants.
+	EnforcementMode string `json:"enforcementMode,omitempty"`
+	// DefaultBodyPolicy is the body policy of a rule that declares none:
+	// full (default), peek, skip or grpc.
+	DefaultBodyPolicy string `json:"defaultBodyPolicy,omitempty"`
+	// PeekBytes bounds how much of a body the peek and gRPC policies read
+	// before the request is forwarded. Default 65536.
+	PeekBytes int `json:"peekBytes,omitempty"`
+	// PeekTimeoutMS bounds how long a peek waits for the client. Default 250.
+	PeekTimeoutMS int `json:"peekTimeoutMs,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

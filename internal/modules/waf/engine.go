@@ -82,6 +82,13 @@ func (b *directiveBuilder) String() string {
 // 1 GiB; buffering that much per request would be a memory hazard.
 const maxBodyLimitKB = 10 * 1024
 
+// allowedRequestContentTypes is the value tx.allowed_request_content_type
+// is set to unless an administrator overrides it. It is the default list of
+// the bundled rule set (OWASP CRS REQUEST-901-INITIALIZATION.conf) plus the
+// gRPC content types this service terminates itself.
+const allowedRequestContentTypes = "|application/x-www-form-urlencoded| |multipart/form-data| |text/xml| " +
+	"|application/xml| |application/soap+xml| |application/json| |application/grpc| |application/grpc-web|"
+
 // normalizeWAFConfig repairs the configuration values the engine relies on.
 func normalizeWAFConfig(cfg model.WAFConfig) model.WAFConfig {
 	if cfg.Mode != model.WAFModeDetect {
@@ -277,6 +284,12 @@ func renderDirectives(cfg model.WAFConfig, catalog []ruleFile) *directiveBuilder
 		fmt.Sprintf("SecAction \"id:1000004,phase:1,pass,nolog,t:none,setvar:'tx.executing_paranoia_level=%d'\"", cfg.ExecutingLevel),
 		fmt.Sprintf("SecAction \"id:1000005,phase:1,pass,nolog,t:none,setvar:'tx.inbound_anomaly_score_threshold=%d'\"", cfg.InboundThreshold),
 		fmt.Sprintf("SecAction \"id:1000006,phase:1,pass,nolog,t:none,setvar:'tx.outbound_anomaly_score_threshold=%d'\"", cfg.OutboundThreshold),
+		// The bundled rule set does not allow the gRPC content types, so every
+		// gRPC request would be reported as a protocol violation before its body
+		// is even looked at. They belong to the default list of this service,
+		// which terminates gRPC traffic itself. The rule set only fills the
+		// variable in when it is unset, so an override still wins.
+		fmt.Sprintf("SecAction \"id:1000007,phase:1,pass,nolog,t:none,setvar:'tx.allowed_request_content_type=%s'\"", allowedRequestContentTypes),
 	}
 
 	// Scalar settings are applied after the includes: coraza.conf-recommended

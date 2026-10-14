@@ -694,6 +694,7 @@ const PAGE_CSS = [
   '.pweb-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
   '.pweb-search{width:180px}',
   '.pweb-log{max-height:300px}',
+  '.pweb-hit>td{background:color-mix(in srgb,var(--brand) 10%,transparent)}',
 ].join(String.fromCharCode(10));
 const NEWLINE = String.fromCharCode(10);
 
@@ -965,10 +966,54 @@ function buildTarget(kind, base, mounts, host) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// 请求体检查策略（与后端 model.WebRule.bodyPolicy 一一对应）
+//
+// 空串 = 继承全局默认策略；其余取值由 PLAN-waf-body-policy.md §2 冻结。
+// 说明文案里必须保留「gRPC 流式只查首消息」这一能力边界，避免运维误以为
+// 流式路由的每一条消息都被检查过。
+// ---------------------------------------------------------------------------
+const BODY_POLICY_OPTIONS = [
+  { value: '', label: '继承全局默认' },
+  { value: 'full', label: '全量（full，fail-closed）' },
+  { value: 'peek', label: '偷看（peek，只检查前 N 字节）' },
+  { value: 'skip', label: '跳过（skip，只查 URI / 请求头）' },
+  { value: 'grpc-unary', label: 'gRPC 单消息（grpc-unary）' },
+  { value: 'grpc-stream', label: 'gRPC 流式（grpc-stream，只查首消息）' },
+];
+
+const BODY_POLICY_HINT = {
+  '': '跟随 WAF 页的「默认策略」；改全局默认会同时影响所有未声明的路由。',
+  full: '请求体必须先完整到达才转发；Content-Length 未知（chunked / 流式）时，enforce 模式下返回 411 并给出可操作文案。',
+  peek: '读满 peekBytes 或空闲 peekTimeoutMs 就先检查已到达的部分，其余字节流式透传；只对前若干字节负责。',
+  skip: '只检查 URI 与请求头，请求体原样透传；计为 skipped:declared，是显式声明的检查缺口。',
+  'grpc-unary': '先读第一条 gRPC 消息，读到 EOF 判定为 unary / 服务端流式并做请求级判定；若随后又出现第二帧，按执行模式拒绝或记录（防止把 unary 路由伪装成流式降级）。',
+  'grpc-stream': '首消息先判定一次，通过后连同 scanner 交给上游；后续帧只做帧校验（compressed flag、长度上限、截断）——不会逐消息做 CRS 检查。',
+};
+
+function bodyPolicyHintOf(value) {
+  const key = BODY_POLICY_OPTIONS.filter((o) => o.value === String(value || ''))[0];
+  return key ? BODY_POLICY_HINT[key.value] : BODY_POLICY_HINT[''];
+}
+
+function bodyPolicyBadge(value) {
+  const key = String(value || '');
+  if (key === 'full') return badge('全量', 'ok');
+  if (key === 'peek') return badge('偷看', 'warn');
+  if (key === 'skip') return badge('跳过', 'err');
+  if (key === 'grpc-unary') return badge('gRPC 单消息', 'ok');
+  if (key === 'grpc-stream') return badge('gRPC 流式', 'warn');
+  return el('span', { class: 'muted', text: '继承默认' });
+}
+
 function baseFields(base) {
   const b = base || {};
   const f = {};
   f.name = input({ value: b.name || '', placeholder: '例如 博客首页' });
+  // WAF 开关与请求体策略：两者都是可编辑的（旧版本把 WAF 当成只读回显，
+  // 导致编辑规则时无法调整防护开关）。
+  f.waf = checkEl('启用 WAF 检查', !!b.waf);
+  f.bodyPolicy = selectEl(BODY_POLICY_OPTIONS, String(b.bodyPolicy || ''));
   f.enable = checkEl('启用该规则', b.enable !== false);
   f.type = selectEl(TYPES.map((t) => ({ value: t.id, label: t.label })), b.type || 'proxy');
   f.listen = textarea({ rows: '3', placeholder: '每行一个监听地址，例如：' + NEWLINE + ':443' + NEWLINE + '0.0.0.0:8080', value: (b.listen || []).join(NEWLINE) });
@@ -976,6 +1021,13 @@ function baseFields(base) {
   f.path = input({ value: b.path || '/', placeholder: '/' });
   f.priority = input({ type: 'number', value: String(b.priority || 0) });
   return f;
+}
+
+// bodyPolicyHintNode 随下拉选择实时更新策略说明。
+function bodyPolicyHintNode(select) {
+  const node = el('div', { class: 'hint', text: bodyPolicyHintOf(val(select)) });
+  select.addEventListener('change', () => { node.textContent = bodyPolicyHintOf(val(select)); });
+  return node;
 }
 
 function tlsFields(base) {
@@ -1056,6 +1108,15 @@ async function openRuleForm(rule, ctx, reload) {
       field('密码', B.authPass, editing ? '留空表示不修改' : ''),
       field('其他账号', B.authExtra, '每行一个 user:password'),
     ]),
+    fieldSet('WAF 与请求体检查策略', [
+      field('WAF 开关', F.waf, '关闭后该路由完全不经过 WAF（含请求体检查）'),
+      field('请求体策略', F.bodyPolicy, ''),
+      el('div', { class: 'field', style: { gridColumn: '1 / -1' } },
+        bodyPolicyHintNode(F.bodyPolicy),
+        el('div', { class: 'hint', text: '能力边界：gRPC 流式路由只做首消息检查 + 帧校验，后续消息不会被逐条检查；' +
+          '声明 grpc-unary 的路由若出现第二帧，enforce 模式下拒绝、observe 模式下只记录。' }),
+      ),
+    ]),
   );
 
   F.type.addEventListener('change', () => { rebuildTarget(); });
@@ -1089,7 +1150,8 @@ async function openRuleForm(rule, ctx, reload) {
               certId: targetRef.cert ? val(targetRef.cert) : ((base.tls && base.tls.certId) || ''),
               hsts: checked(T.hsts),
             },
-            waf: !!(base.waf),
+            waf: checked(F.waf),
+            bodyPolicy: val(F.bodyPolicy),
             access: {
               mode: val(A.accessMode) || 'off',
               ips: lines(A.accessIPs),
@@ -1163,8 +1225,13 @@ export default {
   async mount(root, ctx) {
     const api = wrapAPI(ctx && ctx.api);
     const offStyle = pageStyle(root, PAGE_CSS);
-    const state = { type: 'all', q: '', rules: [] };
+    // WAF 页的「未声明 bodyPolicy 的路由」通过 #/web?rule=<id> 跳转到本页，
+    // 这里把该规则从列表里挑出来高亮，并提供「设置请求体策略」的一键入口。
+    const focusId = String((ctx && ctx.params && ctx.params.get('rule')) || '').trim();
+    const state = { type: 'all', q: focusId, rules: [] };
     const bodyBox = el('div', {});
+    const focusBox = el('div', {});
+    let focusWarned = false;
 
     async function getRule(id) {
       const data = await api.get('/web/rules');
@@ -1208,6 +1275,7 @@ export default {
       { title: '目标', render: (r) => el('span', { class: 'mono pweb-sum', text: targetText(r) }) },
       { title: 'TLS', render: (r) => badge(tlsLabel(r), r.tls && r.tls.mode === 'off' ? '' : 'ok') },
       { title: 'WAF', render: (r) => (r.waf ? badge('已开启', 'ok') : el('span', { class: 'muted', text: '关闭' })) },
+      { title: '请求体策略', render: (r) => (r.waf ? bodyPolicyBadge(r.bodyPolicy) : el('span', { class: 'muted', text: '不检查' })) },
       { title: '状态', render: (r) => switchEl(!!r.enable, (next) => toggle(r, next)) },
       { title: '', cls: 'acts', render: (r) => el('span', {},
         iconBtn(logIcon(), { title: '访问日志', tag: 'logs', onClick: () => openRuleLogs(r, ctx) }),
@@ -1239,7 +1307,33 @@ export default {
         bodyBox.appendChild(emptyBox(state.rules.length ? '没有符合条件的规则' : '还没有 Web 规则，点击右上角“新建规则”开始'));
         return;
       }
-      bodyBox.appendChild(dataTable(columns, rows, '暂无规则'));
+      const table = dataTable(columns, rows, '暂无规则');
+      bodyBox.appendChild(table);
+      if (focusId) {
+        // dataTable 的行标签就是规则 id，用它定位并高亮目标行。
+        const hit = table.querySelector('tr[data-row="' + focusId.replace(/"/g, '') + '"]');
+        if (hit) hit.classList.add('pweb-hit');
+        if (!hit && !focusWarned) {
+          focusWarned = true;
+          toast('未在当前规则列表里找到 ' + focusId + '，可能已被删除', 'warn');
+        }
+      }
+    }
+
+    // paintFocus 顶部提示条：说明本次是从 WAF 页跳过来的，并直接给出编辑入口。
+    function paintFocus() {
+      clear(focusBox);
+      if (!focusId) return;
+      const rule = state.rules.filter((r) => r.id === focusId)[0] || null;
+      const open = rule
+        ? el('button', { class: 'btn btn-sm btn-primary', type: 'button', text: '设置请求体策略', onclick: () => openRuleForm(rule, ctx, load) })
+        : null;
+      focusBox.appendChild(el('div', { class: 'notice' },
+        el('div', { style: { fontWeight: '600' }, text: rule ? '来自 WAF 页：为路由「' + (rule.name || rule.id) + '」声明请求体策略' : '来自 WAF 页：找不到规则 ' + focusId }),
+        el('div', { text: rule ? '该路由尚未声明 bodyPolicy，当前继承全局默认策略；保存后按该路由自己的策略执行。' : '该规则可能已被删除，请刷新列表。' }),
+        open ? el('div', { style: { marginTop: '8px' } }, open) : null,
+      ));
+      focusBox.appendChild(el('div', { style: { height: '10px' } }));
     }
 
     async function load() {
@@ -1253,10 +1347,11 @@ export default {
         bodyBox.appendChild(errorCard(e, () => load()));
         return;
       }
+      paintFocus();
       paint();
     }
 
-    const search = input({ class: 'input pweb-search', placeholder: '搜索名称/域名/路径' });
+    const search = input({ class: 'input pweb-search', placeholder: '搜索名称/域名/路径', value: focusId });
     search.addEventListener('input', debounce(() => { state.q = search.value; paint(); }, 200));
 
     function paintTabs(host) {
@@ -1280,7 +1375,7 @@ export default {
 
     root.appendChild(el('div', { class: 'card' },
       el('div', { class: 'card-head' }, el('h3', { text: 'Web 规则' }), el('span', { class: 'grow' }), el('span', { class: 'muted', style: 'font-size:12px', text: '点击规则行可查看最近访问日志' })),
-      el('div', { class: 'card-body' }, head, el('div', { style: 'height:10px' }), bodyBox),
+      el('div', { class: 'card-body' }, focusBox, head, el('div', { style: 'height:10px' }), bodyBox),
     ));
 
     load();

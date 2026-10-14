@@ -146,3 +146,125 @@ DELETE /api/v1/auth/users/{id}|tokens/{id}
 GET    /api/v1/modules                   POST /api/v1/modules/{name}/start|stop|restart
 GET    /api/v1/events                    (SSE，消息格式 {"type":"log|status|event","data":...})
 ```
+
+---
+
+## 8. 请求体检查策略（A + C + E）
+
+> 规格来源：[请求体检查策略实施清单](PLAN-waf-body-policy.md)。本节是**接口契约**：
+> 字段名、枚举值、中止语义、切换流程以本节为准，前端与后端都按这里的名字实现。
+
+> ### ⚠️ 能力边界（先读这一段）
+>
+> **gRPC 流式路由只做首消息检查 + 帧校验。** 声明 `grpc-stream`（或默认按流式判定的）路由，
+> 只会检查**第一条** gRPC 消息，之后的消息只做帧层校验（compressed flag、长度上限、截断），
+> **不做逐消息的 CRS 检查，也不做跨消息累计评分**。这是刻意收窄的范围（见 PLAN §1「不做」），
+> 接口已为将来的 per-message 检查（D）预留 `BodyInspector`。
+> 任何界面文案、文档、告警都不允许暗示「流式路由的每一条消息都被检查过」。
+
+### 8.1 配置面（只有 4 项 + 每规则 1 项）
+
+全局 `model.WAFConfig`（JSON tag 为 camelCase）：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `enforcementMode` | string | `observe` | `observe` \| `enforce`。**只改变响应，不改变判定逻辑** |
+| `defaultBodyPolicy` | string | `full` | `full` \| `peek` \| `skip` \| `grpc`。未声明 bodyPolicy 的路由用它 |
+| `peekBytes` | int | `65536` | peek 策略检查的字节数上限 |
+| `peekTimeoutMs` | int | `250` | peek 的空闲超时（毫秒）；超时后不再等待 |
+
+每规则 `model.WebRule`：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `bodyPolicy` | string | `""`（继承全局） | `""` \| `full` \| `peek` \| `skip` \| `grpc-unary` \| `grpc-stream` |
+
+约束：
+
+- 配置校验**拒绝未知枚举**（拼错就是保存失败，不是静默回退）；
+- `Normalize` 负责补齐默认值，**版本号不变**（靠 Normalize 回填，不需要迁移）；
+- 前端提交 `PUT /api/v1/waf/config` 时**必须回传原配置对象**再覆盖这几项，
+  否则会被 `rest.Decode` 重置成零值（现有前端已经是这个模式：
+  `Object.assign({}, state.config, {...})`）。
+
+### 8.2 策略矩阵（每次请求执行一次，按顺序判定）
+
+| 判定顺序 | 条件 | 策略 | 行为 | bodyState |
+| --- | --- | --- | --- | --- |
+| 1 | 规则/全局声明 `skip` | skip | 只查 URI / 请求头，请求体原样透传 | `skipped` |
+| 2 | 规则/全局声明 `peek` | peek | 读满 `peekBytes` 或空闲 `peekTimeoutMs`，检查已到达的部分，其余流式透传 | `peeked` |
+| 3 | Content-Type 为 `application/grpc*` | grpc-unary / grpc-stream | 见 8.3；默认按 grpc-unary 处理，检测到第二帧时按声明决定拒绝或降级 | `grpc-unary` / `grpc-stream` / `grpc-server-first` / `frame-error` |
+| 4 | Content-Length 已知且 ≤ `bodyLimitKb` | full | 全量检查后转发（今天的行为） | `full` |
+| 5 | Content-Length 未知且策略为 `full` | 拒绝 | enforce：拒绝；observe：放行 + 记 wouldReject | 记入 wouldReject |
+
+**这张表的安全含义**：攻击者只能通过「改变请求形态」落到第 5 行，而第 5 行在 enforce 下是拒绝，
+因此**不存在「用 chunked 自动降级为部分检查」的路径**。
+
+第 5 行的错误文案与状态码：
+
+| 场景 | enforce 下的响应 | observe 下的行为 |
+| --- | --- | --- |
+| 非 gRPC + full + Content-Length 未知 | **411 Length Required** + 可操作文案 | 放行，落一条 wouldReject |
+| gRPC + 首消息违规（未联系上游） | HTTP 200 + `grpc-status 7`（PERMISSION_DENIED）+ `grpc-message` | 放行，落一条 wouldReject |
+| 声明 grpc-unary 却出现第二帧 | `grpc-status 7` / `13`（+ 说明） | 放行，落一条 wouldReject |
+| 帧层违规（畸形 / 超长 / 截断） | `grpc-status 8`（RESOURCE_EXHAUSTED），经 proxy 的 `ErrorHandler` 写出 | 同上（帧错误始终拒绝，与模式无关） |
+
+### 8.3 gRPC 路径的三段中止语义
+
+组件 `grpcFrameScanner`（`io.ReadCloser` 包装，pull 驱动，只缓冲一条消息）：
+
+1. **首消息阶段**：在调用下游之前读第一条消息（5 字节头 + 声明长度），受 `peekTimeoutMs` 约束。
+   - 读到 **EOF** → 判定 unary / server-streaming，**整套请求体已完整**，做请求级判定；
+     违规则直接返回（上游**零请求**）。
+   - **未 EOF** → 判定为流式，首消息仍然先判定（挡掉绝大多数「第一发就是攻击」），
+     通过后把首消息与 scanner 一起交给下游，bodyState=`grpc-stream`。
+   - **超时**（服务端先说话的流）→ 立即放行，bodyState=`grpc-server-first`，计数并在指标里可见。
+2. **后续帧阶段**（仅流式）：只做帧校验，**不检查内容**。
+3. **帧校验（始终生效，独立于 CRS）**：compressed flag 只能是 0/1；
+   单条消息长度 ≤ `MaxMessageBytes`（默认 4MiB）；截断流报错；
+   声明 `grpc-unary` 的路由出现第二帧按模式拒绝 / 记录。
+
+中止语义分三条路径，客户端看到的东西不同：
+
+| 时机 | 中间件行为 | 客户端看到 |
+| --- | --- | --- |
+| 首消息违规、尚未联系上游 | 中间件直接写响应 | gRPC：HTTP 200 + `grpc-status 7` + `grpc-message`；非 gRPC：**403** |
+| 帧层违规（畸形 / 超长 / 截断） | 哨兵错误经 body reader 返回，proxy 的 `ErrorHandler` 识别后写响应 | `grpc-status 8` |
+| 声明 unary 却出现第二帧 | 同首消息路径 | `grpc-status 7` / `13` + 说明 |
+
+工程约束（评审时逐条核对）：**任何策略分支都不允许存在「等待客户端把 body 发完」的路径**
+（PLAN §8.2，T4 / T5 覆盖）。
+
+### 8.4 观察模式与 observe → enforce 切换流程
+
+1. 默认 `enforcementMode=observe`：所有「本应拒绝」的请求**照常放行**，但落一条 wouldReject
+   记录（规则、路径、原因、客户端、本应返回的状态码），环形缓冲 **500 条** + 计数。
+2. WAF 页「请求体检查策略」面板展示：未声明 bodyPolicy 的路由列表、wouldReject 样例表、
+   bodyState 分布与非 full 占比卡片。
+3. 运维补齐路由声明后，在 UI 上一键切到 `enforce`（前端会先弹确认框）；建议同时打开 notify 告警
+   （非 full 占比 / wouldReject 计数阈值）。
+4. **代码路径完全一致，enforce 只改变响应，不改变判定逻辑**——两者的差异必须有测试覆盖
+   （T2、T6 就是这对差异）。
+
+上线顺序：`observe` → 看 wouldReject 样例 → 补齐路由声明 → `enforce` → 观察 30–60 分钟。
+**在 enforce 之前不要开 body 策略**，否则 chunked / 流式请求会直接被 411 或拒绝。
+
+### 8.5 前端读接口的字段约定
+
+WAF 页读 `GET /api/v1/waf/config`（现有形状 `{"config":..., "engine":..., "stats":...}`）：
+
+| 数据 | 约定位置 | 兼容读取（前端会兜底，但后端应实现第一种） |
+| --- | --- | --- |
+| 四项策略 | `config.enforcementMode` / `defaultBodyPolicy` / `peekBytes` / `peekTimeoutMs` | `stats` / `policy` 层，或 `EnforcementMode` 等写法 |
+| bodyState 分布 | `stats.bodyStates` = `{"full":0,"peeked":0,"skipped":0,"grpc-unary":0,"grpc-stream":0,"grpc-server-first":0,"frame-error":0}` | 单数 `bodyState`、数组 `[{state,count}]` |
+| wouldReject 计数 | `stats.wouldReject`（数字） | 对象 `{count}`、或只有样例数组时用其长度 |
+| wouldReject 样例 | 响应根 `wouldReject` = `[]Violation`（最新在前） | `stats.wouldReject.items`、`wouldRejectSamples` 等 |
+| 未声明策略的路由 | 可选：`config.undeclaredBodyPolicyRoutes` | 前端会退回 `GET /api/v1/web/rules` + 空 `bodyPolicy` 推导 |
+
+wouldReject 每条样例前端按这些字段名显示（都做兜底）：规则 `rule|ruleName|ruleId|site`、
+域名 `host` + 路径 `uri|path|url` + `method`、原因 `reason|msg|message|detail`、
+策略 `policy|bodyPolicy`、本应返回 `status|statusCode`（gRPC 场景按 PLAN §4 显示成
+`HTTP 200 + grpc-status 7/13`）、客户端 `clientIp|ip|remoteAddr`、时间 `time|ts|at|timestamp`。
+
+Web 规则接口：`GET /api/v1/web/rules` 的每一项必须带 `bodyPolicy` 字段（空串表示继承），
+`PUT/POST /api/v1/web/rules[/{id}]` 必须接收并保存它（现有实现整体解码 `model.WebRule`，加字段即可）。
