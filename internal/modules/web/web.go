@@ -186,6 +186,13 @@ func (w *Web) Reload(cfg *model.Config) {
 	w.cfgMu.Unlock()
 	w.logs.resize(cfg.Web.LogKeep)
 
+	// The rule level WAF is a private instance of this module, so configuration
+	// changes (engine switch, body policy, thresholds) must be pushed to it
+	// explicitly: the module in the registry is a different instance.
+	if w.waf != nil {
+		w.waf.Reload(cfg)
+	}
+
 	w.mu.Lock()
 	started := w.started
 	base := w.stopCtx
