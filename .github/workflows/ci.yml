@@ -32,6 +32,11 @@ jobs:
       - name: Test
         run: go test ./... -count=1
 
+      - name: Race detector
+        # The proxy, forwarder and WAF all run concurrent goroutines; a data
+        # race here is a security bug, not just a flake.
+        run: go test -race ./... -count=1
+
       - name: Build
         run: go build -trimpath -o /tmp/nunt ./cmd/nunt
 
