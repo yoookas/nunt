@@ -45,6 +45,13 @@ const (
 	udpBufferSize     = 64 * 1024
 )
 
+// Reasons recorded when a connection is refused by a concurrency limit. The
+// same vocabulary is used by the access log and by the rule list API.
+const (
+	reasonRuleLimit = "rule-limit"
+	reasonIPLimit   = "ip-limit"
+)
+
 // Forward is the port forwarding module.
 type Forward struct {
 	module.Base
@@ -219,12 +226,15 @@ func (f *Forward) Stats() map[string]any {
 
 	active, accepted := 0, uint64(0)
 	up, down := uint64(0), uint64(0)
+	rejectedRule, rejectedIP := uint64(0), uint64(0)
 	listening := 0
 	for _, p := range proxies {
 		active += int(p.active.Load())
 		accepted += p.total.Load()
 		up += p.upBytes.Load()
 		down += p.downBytes.Load()
+		rejectedRule += p.rejectedRule.Load()
+		rejectedIP += p.rejectedIP.Load()
 		if p.isRunning() {
 			listening++
 		}
@@ -237,6 +247,8 @@ func (f *Forward) Stats() map[string]any {
 		"totalConnections":  accepted,
 		"upBytes":           up,
 		"downBytes":         down,
+		"rejectedRuleLimit": rejectedRule,
+		"rejectedIPLimit":   rejectedIP,
 		"accessLogEnabled":  f.access.enabledNow(),
 	}
 }
@@ -414,6 +426,7 @@ func fingerprint(r model.ForwardRule) string {
 		strings.TrimSpace(r.SrcAddr),
 		strings.TrimSpace(r.DstAddr),
 		fmt.Sprintf("timeout=%d", timeoutSeconds(r)),
+		fmt.Sprintf("limits=%d/%d", maxConns(r), maxConnsPerIP(r)),
 		accessFingerprint(r.Access),
 	}, "|")
 }
@@ -435,6 +448,43 @@ func timeoutSeconds(r model.ForwardRule) int {
 	default:
 		return r.TimeoutSec
 	}
+}
+
+// maxConns returns the concurrent connection cap of a rule. A rule without a
+// configured cap (zero) is never refused by the rule limit.
+func maxConns(r model.ForwardRule) int {
+	if r.MaxConns < 0 {
+		return 0
+	}
+	return r.MaxConns
+}
+
+// maxConnsPerIP returns the cap of concurrent connections a single client
+// address may open on the rule.
+func maxConnsPerIP(r model.ForwardRule) int {
+	if r.MaxConnsPerIP < 0 {
+		return 0
+	}
+	return r.MaxConnsPerIP
+}
+
+// sessionLimit returns how many concurrent UDP sessions a rule may keep: its
+// own connection cap when one is configured, the built-in guard otherwise so a
+// rule can never be abused as a reflection amplifier.
+func sessionLimit(r model.ForwardRule) int {
+	if n := maxConns(r); n > 0 {
+		return n
+	}
+	return udpMaxSessions
+}
+
+// clientIPKey renders a peer address without its port, which is what the per
+// address limits count on.
+func clientIPKey(addr net.Addr) string {
+	if ip := clientIP(addr); ip != nil {
+		return ip.String()
+	}
+	return addrString(addr)
 }
 
 func ruleLabel(r model.ForwardRule) string {

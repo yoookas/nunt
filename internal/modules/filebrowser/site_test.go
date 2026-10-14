@@ -75,7 +75,17 @@ func testRule(mountID string, mutate func(*model.FilesTgt)) *model.WebRule {
 	if mutate != nil {
 		mutate(files)
 	}
-	return &model.WebRule{ID: "rule-fb", Name: "文件", Type: model.WebTypeFiles, Path: "/files", Files: files}
+	// A file service must be protected before it can be stored in the
+	// configuration (see config.Validate); authentication is enforced by the
+	// web module, so this fixture only has to declare it.
+	return &model.WebRule{
+		ID:     "rule-fb",
+		Name:   "文件",
+		Type:   model.WebTypeFiles,
+		Path:   "/files",
+		Files:  files,
+		Access: model.Access{Mode: model.AccessAllow, IPs: []string{"127.0.0.1", "::1"}},
+	}
 }
 
 func seedFile(t *testing.T, dir, name, content string) {

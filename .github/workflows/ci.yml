@@ -52,3 +52,29 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Dependency vulnerability scanning.
+  #
+  # The scan is deliberately blocking (no continue-on-error): nunt terminates
+  # untrusted traffic from the public internet, so a dependency with a known
+  # exploitable vulnerability is a release blocker rather than a warning, and a
+  # non-blocking job would silently rot. Blocking is affordable here because the
+  # dependency set is small and pinned (x/crypto, x/net, coraza, cron) and
+  # govulncheck only reports vulnerabilities that are actually reachable from our
+  # code, which keeps the false positive rate low. If it ever becomes noisy, fix
+  # the finding or pin/exclude it explicitly in the scan invocation - do not make
+  # the job advisory.
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Scan for reachable vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...

@@ -58,6 +58,10 @@ type Web struct {
 	countersMu sync.Mutex
 	counters   map[string]int64
 	total      int64
+	// rateLimited and bodyRejected count the requests refused by the proxy
+	// limits; they are reported through Stats.
+	rateLimited  int64
+	bodyRejected int64
 
 	logs *logBuffer
 }
@@ -502,6 +506,8 @@ func (w *Web) Stats() map[string]any {
 
 	w.countersMu.Lock()
 	total := w.total
+	rateLimited := w.rateLimited
+	bodyRejected := w.bodyRejected
 	perRule := make(map[string]int64, len(w.counters))
 	for id, n := range w.counters {
 		perRule[id] = n
@@ -514,6 +520,8 @@ func (w *Web) Stats() map[string]any {
 		"rules":        rules,
 		"requests":     total,
 		"ruleRequests": perRule,
+		"rateLimited":  rateLimited,
+		"bodyRejected": bodyRejected,
 		"addresses":    w.Listeners(),
 		"lastError":    base.Error,
 		"upstreams":    w.upstreams(),
@@ -552,6 +560,9 @@ func (w *Web) countRequest(r *rule) {
 		return
 	}
 	w.countersMu.Lock()
+	if w.counters == nil {
+		w.counters = map[string]int64{}
+	}
 	w.counters[r.id]++
 	w.total++
 	w.countersMu.Unlock()

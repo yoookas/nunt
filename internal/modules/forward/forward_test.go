@@ -681,12 +681,13 @@ func TestForwardUDPSessionLimit(t *testing.T) {
 
 	found := false
 	for _, entry := range f.access.list("u2", 20) {
-		if strings.Contains(entry.Result, "too many sessions") {
+		// The refusal reason distinguishes the rule cap from the per address cap.
+		if strings.Contains(entry.Result, reasonRuleLimit) {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatal("the dropped session was not written to the access log")
+		t.Fatalf("the dropped session was not written to the access log: %v", accessResults(f, "u2"))
 	}
 }

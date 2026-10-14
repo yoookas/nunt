@@ -72,6 +72,9 @@ func newTestEnv(t *testing.T) *testEnv {
 		Sessions: sessions,
 		DataDir:  dir,
 	})
+	// Deferred writes (token usage) must not outlive the test: t.TempDir
+	// removal races with them on Windows ("the directory is not empty").
+	t.Cleanup(server.WaitBackground)
 	return &testEnv{server: server, store: store, sessions: sessions}
 }
 

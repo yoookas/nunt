@@ -40,6 +40,9 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 		"dataDir":   s.opts.DataDir,
 		"webRules":  len(cfg.Web.Rules),
 		"modules":   s.opts.Registry.Statuses(),
+		// Effective admin IP allow list (empty = unrestricted) and how many
+		// requests it rejected since start up.
+		"adminAllowList": s.adminAllowListInfo(),
 	})
 }
 

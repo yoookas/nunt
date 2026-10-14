@@ -185,12 +185,13 @@ func (w *Web) handleToggleRule(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 	id := strings.TrimSpace(req.PathValue("id"))
-	var enabled bool
+	var enabled, found bool
 	err := w.saveRule(func(c *model.Config) error {
 		for i := range c.Web.Rules {
 			if c.Web.Rules[i].ID != id {
 				continue
 			}
+			found = true
 			c.Web.Rules[i].Enable = !c.Web.Rules[i].Enable
 			c.Web.Rules[i].UpdatedAt = time.Now()
 			enabled = c.Web.Rules[i].Enable
@@ -199,6 +200,12 @@ func (w *Web) handleToggleRule(rw http.ResponseWriter, req *http.Request) {
 		return errNotFound
 	})
 	if err != nil {
+		// A rule that exists but fails validation (an unguarded file service
+		// being enabled, for example) is a refused change, not a missing rule.
+		if found {
+			rest.Fail(rw, http.StatusBadRequest, "无法应用该规则：%s", err)
+			return
+		}
 		rest.Fail(rw, http.StatusNotFound, "rule not found")
 		return
 	}

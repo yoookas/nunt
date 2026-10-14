@@ -177,6 +177,11 @@ func (w *Web) proxySite(r *rule, cfg *model.Config) (*webSite, error) {
 	}
 
 	var handler http.Handler = http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		// The body limit is applied here, right in front of the upstream, so a
+		// request that the WAF already inspected is not read twice.
+		if !w.capRequestBody(rw, r, req) {
+			return
+		}
 		up := bal.pick(clientIPString(req, w.trustProxy(cfg)))
 		req = req.WithContext(withUpstream(req.Context(), up.target))
 		proxyFor(w, r, up, target).ServeHTTP(rw, req)
@@ -291,6 +296,12 @@ func buildProxy(w *Web, r *rule, up upstream, target *model.ProxyTarget) *httput
 			return nil
 		},
 		ErrorHandler: func(rw http.ResponseWriter, req *http.Request, err error) {
+			if bodyLimitHit(req, err) {
+				// The configured cap stopped the upload: the upstream never saw
+				// the request and the refusal is already counted.
+				http.Error(rw, bodyLimitMessage, http.StatusRequestEntityTooLarge)
+				return
+			}
 			status := http.StatusBadGateway
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout

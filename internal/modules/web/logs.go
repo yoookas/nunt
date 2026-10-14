@@ -176,6 +176,15 @@ func (a *accessRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 // Unwrap lets http.ResponseController reach the underlying writer.
 func (a *accessRecorder) Unwrap() http.ResponseWriter { return a.ResponseWriter }
 
+// requestTooLarge forwards the signal of http.MaxBytesReader to the underlying
+// writer so the server closes the connection instead of draining the rest of an
+// oversized upload.
+func (a *accessRecorder) requestTooLarge() {
+	if r, ok := a.ResponseWriter.(interface{ requestTooLarge() }); ok {
+		r.requestTooLarge()
+	}
+}
+
 // maxLogLimit bounds the number of entries a single API call may return.
 const maxLogLimit = 1000
 

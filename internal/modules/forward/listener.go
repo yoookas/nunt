@@ -39,10 +39,21 @@ type proxy struct {
 	pending sync.WaitGroup
 	wg      sync.WaitGroup
 
+	// limitMu guards connPerIP, the per client address counter of the admitted
+	// TCP connections; sessPerIP is the same counter for the UDP sessions and is
+	// guarded by mu, which already owns the session table.
+	limitMu   sync.Mutex
+	connPerIP map[string]int
+	sessPerIP map[string]int
+
 	active    atomic.Int64
 	total     atomic.Uint64
 	upBytes   atomic.Uint64
 	downBytes atomic.Uint64
+	// rejectedRule and rejectedIP count the connections refused by the
+	// concurrency limits of the rule.
+	rejectedRule atomic.Uint64
+	rejectedIP   atomic.Uint64
 }
 
 func newProxy(f *Forward, r model.ForwardRule) *proxy {
@@ -53,6 +64,8 @@ func newProxy(f *Forward, r model.ForwardRule) *proxy {
 		fingerprint: fingerprint(r),
 		sessions:    map[string]*udpSession{},
 		conns:       map[net.Conn]struct{}{},
+		connPerIP:   map[string]int{},
+		sessPerIP:   map[string]int{},
 	}
 }
 
@@ -138,6 +151,8 @@ func (p *proxy) close() {
 		delete(p.sessions, key)
 		sessions = append(sessions, s)
 	}
+	p.sessions = map[string]*udpSession{}
+	p.sessPerIP = map[string]int{}
 	p.mu.Unlock()
 
 	if ln != nil {
@@ -257,15 +272,95 @@ func (p *proxy) acceptLoop(ln net.Listener) {
 			_ = conn.Close()
 			return
 		}
+		// The concurrency limits are applied before a relay goroutine is
+		// spawned: an abusive client must not be able to allocate one.
+		ip := clientIPKey(conn.RemoteAddr())
+		if reason, admitted := p.admit(ip); !admitted {
+			_ = conn.Close()
+			p.dropConn(conn)
+			p.reject(reason, conn.RemoteAddr())
+			continue
+		}
 		p.pending.Add(1)
-		go p.handleTCP(conn)
+		go p.handleTCP(conn, ip)
 	}
 }
 
-func (p *proxy) handleTCP(src net.Conn) {
+// admit reserves a connection slot of the rule for a client address. It returns
+// the refusal reason, which is empty when the connection is accepted; release
+// must be called exactly once for every accepted connection.
+func (p *proxy) admit(ip string) (string, bool) {
+	limit, perIP := maxConns(p.rule), maxConnsPerIP(p.rule)
+	p.limitMu.Lock()
+	defer p.limitMu.Unlock()
+	if limit > 0 && int(p.active.Load()) >= limit {
+		return reasonRuleLimit, false
+	}
+	if perIP > 0 && ip != "" && p.connPerIP[ip] >= perIP {
+		return reasonIPLimit, false
+	}
+	if ip != "" {
+		p.connPerIP[ip]++
+	}
+	p.active.Add(1)
+	return "", true
+}
+
+// release gives back the slot of an admitted connection.
+func (p *proxy) release(ip string) {
+	p.limitMu.Lock()
+	if ip != "" {
+		switch n := p.connPerIP[ip]; {
+		case n <= 1:
+			delete(p.connPerIP, ip)
+		default:
+			p.connPerIP[ip] = n - 1
+		}
+	}
+	p.limitMu.Unlock()
+	p.active.Add(-1)
+}
+
+// reject records and counts a TCP connection refused by a concurrency limit.
+func (p *proxy) reject(reason string, remote net.Addr) {
+	p.countRejection(reason)
+	p.record(accessEntry{
+		Time:     time.Now(),
+		RuleID:   p.rule.ID,
+		Rule:     ruleLabel(p.rule),
+		Protocol: protoTCP,
+		Client:   addrString(remote),
+		Target:   p.rule.DstAddr,
+		Result:   "rejected: " + reason,
+	})
+	p.f.log.Warn("forward: connection rejected by a concurrency limit",
+		"rule", ruleLabel(p.rule), "protocol", p.proto, "client", addrString(remote),
+		"reason", reason, "limit", p.limitValue(reason))
+}
+
+// countRejection bumps the counter of one limit.
+func (p *proxy) countRejection(reason string) {
+	if reason == reasonIPLimit {
+		p.rejectedIP.Add(1)
+		return
+	}
+	p.rejectedRule.Add(1)
+}
+
+// limitValue returns the cap that caused a refusal, for logging.
+func (p *proxy) limitValue(reason string) int {
+	if reason == reasonIPLimit {
+		return maxConnsPerIP(p.rule)
+	}
+	return maxConns(p.rule)
+}
+
+func (p *proxy) handleTCP(src net.Conn, ip string) {
 	defer p.pending.Done()
 	defer p.dropConn(src)
 	defer func() { _ = src.Close() }()
+	// The slot was reserved by the accept loop before this goroutine existed.
+	defer p.release(ip)
 
 	start := time.Now()
 	client := addrString(src.RemoteAddr())
@@ -286,9 +381,7 @@ func (p *proxy) handleTCP(src net.Conn) {
 		return
 	}
 
-	p.active.Add(1)
 	p.total.Add(1)
-	defer p.active.Add(-1)
 
 	dialer := net.Dialer{Timeout: dialTimeout}
 	dst, err := dialer.Dial(protoTCP, p.rule.DstAddr)
@@ -450,8 +543,9 @@ func (p *proxy) udpReadLoop(pc net.PacketConn) {
 
 // handleUDP forwards one datagram. A session (map entry plus a connected
 // target socket) is created on the first packet of a client address and reused
-// until it goes idle; the number of concurrent sessions is capped so the rule
-// cannot be abused as a reflection amplifier.
+// until it goes idle; the number of concurrent sessions is capped by the
+// connection limits of the rule so it cannot be abused as a reflection
+// amplifier.
 func (p *proxy) handleUDP(pc net.PacketConn, client net.Addr, data []byte) {
 	defer p.wg.Done()
 	if !p.isRunning() {
@@ -459,26 +553,26 @@ func (p *proxy) handleUDP(pc net.PacketConn, client net.Addr, data []byte) {
 	}
 	key := client.String()
 
+	ip := clientIPKey(client)
 	p.mu.Lock()
 	sess := p.sessions[key]
 	if sess == nil {
-		if len(p.sessions) >= udpMaxSessions {
+		limit := sessionLimit(p.rule)
+		if limit > 0 && len(p.sessions) >= limit {
 			p.mu.Unlock()
-			p.record(accessEntry{
-				Time:     time.Now(),
-				RuleID:   p.rule.ID,
-				Rule:     ruleLabel(p.rule),
-				Protocol: protoUDP,
-				Client:   key,
-				Target:   p.rule.DstAddr,
-				Result:   "dropped: too many sessions",
-			})
-			p.f.log.Warn("forward: udp session limit reached",
-				"rule", ruleLabel(p.rule), "limit", udpMaxSessions, "client", key)
+			p.rejectDatagram(key, reasonRuleLimit, limit)
+			return
+		}
+		if perIP := maxConnsPerIP(p.rule); perIP > 0 && ip != "" && p.sessPerIP[ip] >= perIP {
+			p.mu.Unlock()
+			p.rejectDatagram(key, reasonIPLimit, perIP)
 			return
 		}
 		sess = &udpSession{created: time.Now(), lastSeen: time.Now(), client: client}
 		p.sessions[key] = sess
+		if ip != "" {
+			p.sessPerIP[ip]++
+		}
 		p.mu.Unlock()
 
 		if !p.allow(client) {
@@ -557,6 +651,14 @@ func (p *proxy) removeSession(key string, sess *udpSession, result string) {
 	current, ok := p.sessions[key]
 	if ok && current == sess {
 		delete(p.sessions, key)
+		if ip := clientIPKey(sess.client); ip != "" {
+			switch n := p.sessPerIP[ip]; {
+			case n <= 1:
+				delete(p.sessPerIP, ip)
+			default:
+				p.sessPerIP[ip] = n - 1
+			}
+		}
 	}
 	p.mu.Unlock()
 	if !ok || current != sess {
@@ -579,6 +681,23 @@ func (p *proxy) removeSession(key string, sess *udpSession, result string) {
 		BytesOut: int64(down),
 		Packets:  packets,
 	})
+}
+
+// rejectDatagram records and counts a datagram dropped by a concurrency
+// limit.
+func (p *proxy) rejectDatagram(client string, reason string, limit int) {
+	p.countRejection(reason)
+	p.record(accessEntry{
+		Time:     time.Now(),
+		RuleID:   p.rule.ID,
+		Rule:     ruleLabel(p.rule),
+		Protocol: protoUDP,
+		Client:   client,
+		Target:   p.rule.DstAddr,
+		Result:   "dropped: " + reason,
+	})
+	p.f.log.Warn("forward: udp datagram dropped by a concurrency limit",
+		"rule", ruleLabel(p.rule), "client", client, "reason", reason, "limit", limit)
 }
 
 // udpSweepLoop reclaims the sessions that have been idle for too long. The

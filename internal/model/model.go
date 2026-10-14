@@ -165,6 +165,13 @@ type ProxyTarget struct {
 	// H2C talks cleartext HTTP/2 to a plain http:// upstream, which is what
 	// native gRPC servers expect.
 	H2C bool `json:"h2c,omitempty"`
+	// RateLimitPerSec caps the requests per second of one client address on
+	// this rule. Zero (the default) means the rule is not throttled, so an
+	// existing configuration keeps its behaviour.
+	RateLimitPerSec int `json:"rateLimitPerSec,omitempty"`
+	// MaxBodyBytes caps the size of a request body the rule forwards. Zero (the
+	// default) means the body size is not limited.
+	MaxBodyBytes int64 `json:"maxBodyBytes,omitempty"`
 }
 
 // RedirectTgt is a redirect / URL rewrite definition.
@@ -211,17 +218,24 @@ type ForwardConfig struct {
 
 // ForwardRule forwards TCP/UDP traffic from SrcAddr to DstAddr.
 type ForwardRule struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	Enable     bool      `json:"enable"`
-	Protocol   string    `json:"protocol"`
-	SrcAddr    string    `json:"srcAddr"`
-	DstAddr    string    `json:"dstAddr"`
-	Access     Access    `json:"access"`
-	TimeoutSec int       `json:"timeoutSec,omitempty"`
-	Remark     string    `json:"remark,omitempty"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Enable     bool   `json:"enable"`
+	Protocol   string `json:"protocol"`
+	SrcAddr    string `json:"srcAddr"`
+	DstAddr    string `json:"dstAddr"`
+	Access     Access `json:"access"`
+	TimeoutSec int    `json:"timeoutSec,omitempty"`
+	// MaxConns caps the concurrent connections the rule relays. Zero means the
+	// rule does not cap its connections; a stored configuration is normalised
+	// to a sane default.
+	MaxConns int `json:"maxConns,omitempty"`
+	// MaxConnsPerIP caps the concurrent connections a single client address may
+	// open on the rule. Zero means the rule does not cap them per address.
+	MaxConnsPerIP int       `json:"maxConnsPerIP,omitempty"`
+	Remark        string    `json:"remark,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,45 @@
+# Dependency update automation.
+#
+# The pull request limits are deliberately low. A dependency update here costs a
+# review plus a full CI run (gofmt / vet / test / image build, and the image
+# smoke test), and the dependency set is small and pinned, so a couple of open
+# PRs per week is enough to keep it current. A higher limit mostly produces
+# noise, stale branches and rebase churn - while the security relevant updates
+# (Dependabot security advisories) are opened regardless of this limit.
+version: 2
+updates:
+  # Go modules: weekly. Newer revisions of golang.org/x/* are the most common
+  # change; grouping minor and patch bumps keeps the review queue short.
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: "Asia/Shanghai"
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - go
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      go-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions: monthly. The workflow files pin actions to major tags, so
+  # this only has to pick up new major versions - monthly is frequent enough and
+  # avoids competing with the Go update stream.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: "chore(ci)"

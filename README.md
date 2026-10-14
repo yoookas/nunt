@@ -72,6 +72,12 @@ go build -o nunt ./cmd/nunt
 
 容器内运行时会自动使用 `/data`，并以非 root 用户（uid 1000）运行，镜像里已用 `setcap` 允许绑定 80/443。
 
+### 4. 上公网之前
+
+要把服务**直接暴露到公网**，先读 **[docs/PUBLIC-EXPOSURE.md](docs/PUBLIC-EXPOSURE.md)**：公网与内网的威胁模型差异、管理面隔离（`adminListen` 只监听回环 + WireGuard/SSH 隧道，或反代 + TLS + BasicAuth + IP 白名单 + WAF `adminProtect`）、最小暴露面清单、先观察后强制的上线顺序，以及 P0/P1/P2 勾选清单与「当前尚未验证」清单。
+
+其中一条已经写进配置校验：**FileBrowser / WebDAV 规则必须启用 BasicAuth，或把访问控制设为 `allow` + IP 列表**，否则保存配置会被直接拒绝（fail-closed）。现存匿名文件服务的迁移步骤见该文档第 8 节。
+
 ---
 
 ## 目录与配置
@@ -139,7 +145,8 @@ internal/webui      前端静态资源（embed，无构建步骤）
 web 前端            internal/webui/assets/{index.html,style.css,app.js,lib,pages}
 ```
 
-模块开发约定见 [docs/CONTRACT.md](docs/CONTRACT.md)（模块接口、REST 约定、前端页面契约）。
+模块开发约定见 [docs/CONTRACT.md](docs/CONTRACT.md)（模块接口、REST 约定、前端页面契约）；
+公网部署前的检查清单见 [docs/PUBLIC-EXPOSURE.md](docs/PUBLIC-EXPOSURE.md)。
 
 ### 前端
 
@@ -167,7 +174,9 @@ pwsh -File scripts/smoke.ps1
 3. 压缩为 `.tar.gz`、生成 `SHA256SUMS`；
 4. 创建/更新 Release 并上传全部附件。**不登录、不推送任何镜像仓库。**
 
-`.github/workflows/ci.yml`：push / PR 时执行 `gofmt` 检查、`go vet`、`go test`、构建二进制与镜像（不推送）。
+`.github/workflows/ci.yml`：push / PR 时执行 `gofmt` 检查、`go vet`、`go test`、构建二进制与镜像（不推送），并跑**阻塞式**的 `govulncheck` 依赖漏洞扫描（依赖中存在可达的已知漏洞时 CI 直接失败）。
+`.github/workflows/docker-smoke.yml`：在真实 docker daemon 上构建镜像并校验容器契约（非 root 用户、低端口 capability、配置与密钥权限、管理 UI 可访问、用日志里的随机密码登录）。
+`.github/dependabot.yml`：gomod 每周、GitHub Actions 每月检查依赖更新（限制同时开启的 PR 数，minor/patch 自动分组）。
 
 ---
 

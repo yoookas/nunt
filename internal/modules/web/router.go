@@ -41,6 +41,12 @@ type rule struct {
 	// handler (and the storage that handler may have opened) across reloads.
 	siteKey string
 	site    *webSite
+	// limiter throttles the requests of one client address on this rule; nil
+	// when the rule does not configure a rate limit.
+	limiter *rateLimiter
+	// maxBody caps the request body of the rule; zero means the body size is
+	// not limited.
+	maxBody int64
 }
 
 // compileRule validates a rule and turns it into its runtime form. The site
@@ -99,6 +105,18 @@ func compileRule(r model.WebRule, index int) (*rule, error) {
 		}
 		if len(out.tls.certDomains) == 0 {
 			return nil, errors.New("automatic certificates need at least one concrete domain")
+		}
+	}
+	if p := out.spec.Proxy; p != nil {
+		if p.RateLimitPerSec < 0 {
+			return nil, errors.New("rateLimitPerSec must not be negative")
+		}
+		if p.MaxBodyBytes < 0 {
+			return nil, errors.New("maxBodyBytes must not be negative")
+		}
+		out.maxBody = p.MaxBodyBytes
+		if p.RateLimitPerSec > 0 {
+			out.limiter = newRateLimiter(p.RateLimitPerSec)
 		}
 	}
 	nets, err := netutil.ParseIPList(r.Access.IPs)
@@ -238,13 +256,24 @@ func (rt *router) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		http.Error(rec, "route is not available", http.StatusServiceUnavailable)
 		return
 	}
+	// A file service that nobody guards must not be served at all. This is the
+	// runtime half of the configuration check; both refuse the same rules.
+	if r.fileServiceUnprotected() {
+		rt.web.warnUnprotectedFileService(r, req)
+		http.Error(rec, fileGuardMessage, http.StatusForbidden)
+		return
+	}
 
 	ctx := withRule(req.Context(), r)
 	req = req.WithContext(ctx)
 
-	// The chain is built outer to inner: access control, basic auth, WAF and
-	// finally the business handler.
+	// The chain is built outer to inner: access control, rate limit, basic
+	// auth, WAF and finally the business handler. The rate limit sits in front
+	// of the password check so a flood cannot burn the hashing budget.
 	handler := rt.web.accessHandler(r, r.site.handler)
+	if r.limiter != nil {
+		handler = rt.web.rateLimitHandler(r, handler)
+	}
 	if r.spec.BasicAuth != nil && r.spec.BasicAuth.Enable {
 		handler = rt.web.basicAuthHandler(r, handler)
 	}

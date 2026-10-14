@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nunt/nunt/internal/certs"
@@ -56,6 +57,28 @@ type Server struct {
 	apiLimiter   *security.RateLimiter
 	events       *eventHub
 	logOnce      sync.Once
+	// allowList caches the parsed admin IP allow list and allowDenied counts
+	// the requests that the allow list guard rejected.
+	allowList   atomic.Pointer[ipAllowList]
+	allowDenied atomic.Int64
+	// bg tracks best effort background work (for example persisting the last
+	// use of an API token) so it can be joined before the data directory goes
+	// away.
+	bg sync.WaitGroup
+}
+
+// WaitBackground blocks until every background task started by the server has
+// finished. Call it on shutdown so that no deferred write lands after the
+// configuration directory is gone.
+func (s *Server) WaitBackground() { s.bg.Wait() }
+
+// goBackground runs fn in a goroutine that WaitBackground joins.
+func (s *Server) goBackground(fn func()) {
+	s.bg.Add(1)
+	go func() {
+		defer s.bg.Done()
+		fn()
+	}()
 }
 
 // New creates the API server and registers every route.
@@ -68,6 +91,12 @@ func New(opts Options) *Server {
 		apiLimiter:   security.NewRateLimiter(50, 100),
 		events:       newEventHub(),
 	}
+	// The admin IP allow list is parsed once here and refreshed by the
+	// configuration subscriber, never on the request path.
+	s.allowList.Store(newIPAllowList(log, opts.Cfg.Snapshot().System))
+	opts.Cfg.Subscribe(func(cfg *model.Config) {
+		s.allowList.Store(newIPAllowList(log, cfg.System))
+	})
 	s.mux = rest.NewMux(log, rest.Recover(log), rest.AccessLog(log))
 	s.mux = s.mux.With(s.apiLimit)
 	s.mux = s.mux.WithAuth(s.authenticate)
@@ -86,7 +115,9 @@ func (s *Server) Handler() http.Handler {
 	root.Handle("/api/", apiHandler)
 	root.Handle("/healthz", http.HandlerFunc(s.health))
 	root.Handle("/", rest.Chain(webui.Handler(), rest.SecurityHeaders()))
-	return rest.Chain(root, rest.SecurityHeaders())
+	// The IP allow list guards the complete admin surface, including the sign
+	// in route and the static assets; only /healthz stays exempt.
+	return rest.Chain(root, rest.SecurityHeaders(), s.adminGuard)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
@@ -222,9 +253,10 @@ func (s *Server) matchToken(token string) *Identity {
 		return nil
 	}
 	// Persisting every request would rewrite the configuration file far too
-	// often, so the usage timestamp is only refreshed every few minutes.
+	// often, so the usage timestamp is only refreshed every few minutes. The
+	// write is tracked so shutdown (and tests) can wait for it.
 	if matched.LastUsed == nil || time.Since(*matched.LastUsed) > 5*time.Minute {
-		go s.touchToken(matched.ID)
+		s.goBackground(func() { s.touchToken(matched.ID) })
 	}
 	return &Identity{Kind: IdentityToken, Username: matched.Name, TokenID: matched.ID, Scopes: matched.Scopes}
 }

@@ -34,6 +34,15 @@ type ruleView struct {
 	UpBytes     uint64 `json:"upBytes"`
 	DownBytes   uint64 `json:"downBytes"`
 	Listening   bool   `json:"listening"`
+	// ConnLimit and ConnLimitPerIP repeat the configured caps with the value
+	// actually enforced, so the user interface never has to know the fallback
+	// rules. Zero means the rule is not capped.
+	ConnLimit      int `json:"connLimit"`
+	ConnLimitPerIP int `json:"connLimitPerIp"`
+	// RejectedRuleLimit and RejectedIPLimit count the connections refused by
+	// those caps.
+	RejectedRuleLimit uint64 `json:"rejectedRuleLimit"`
+	RejectedIPLimit   uint64 `json:"rejectedIpLimit"`
 }
 
 func (f *Forward) handleListRules(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +65,11 @@ func (f *Forward) ruleViews() []ruleView {
 
 	out := make([]ruleView, 0, len(rules))
 	for _, rule := range rules {
-		view := ruleView{ForwardRule: rule}
+		view := ruleView{
+			ForwardRule:    rule,
+			ConnLimit:      maxConns(rule),
+			ConnLimitPerIP: maxConnsPerIP(rule),
+		}
 		for _, p := range proxies {
 			if p.rule.ID != rule.ID {
 				continue
@@ -65,6 +78,8 @@ func (f *Forward) ruleViews() []ruleView {
 			view.TotalConns += p.total.Load()
 			view.UpBytes += p.upBytes.Load()
 			view.DownBytes += p.downBytes.Load()
+			view.RejectedRuleLimit += p.rejectedRule.Load()
+			view.RejectedIPLimit += p.rejectedIP.Load()
 			if p.isRunning() {
 				view.Listening = true
 			}
@@ -276,6 +291,12 @@ func validateRule(rule model.ForwardRule) error {
 	}
 	if _, err := netutil.NormalizeListen(rule.DstAddr); err != nil {
 		return err
+	}
+	if rule.MaxConns < 0 {
+		return errors.New("maxConns must not be negative")
+	}
+	if rule.MaxConnsPerIP < 0 {
+		return errors.New("maxConnsPerIP must not be negative")
 	}
 	if rule.Access.Mode != "" && rule.Access.Mode != model.AccessOff {
 		if rule.Access.Mode != model.AccessAllow && rule.Access.Mode != model.AccessDeny {

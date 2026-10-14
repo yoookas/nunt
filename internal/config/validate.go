@@ -9,6 +9,14 @@ import (
 	"github.com/nunt/nunt/internal/model"
 )
 
+// Default concurrency caps of a stored port forward rule. Zero disables a cap,
+// so a rule that never passed through the normaliser keeps relaying without a
+// limit; a persisted rule always carries an explicit, visible value.
+const (
+	defaultForwardMaxConns      = 1024
+	defaultForwardMaxConnsPerIP = 64
+)
+
 func deepCopy(in, out any) error {
 	data, err := json.Marshal(in)
 	if err != nil {
@@ -99,6 +107,12 @@ func Normalize(c *model.Config) {
 		if r.Access.Mode == "" {
 			r.Access.Mode = model.AccessOff
 		}
+		if r.MaxConns == 0 {
+			r.MaxConns = defaultForwardMaxConns
+		}
+		if r.MaxConnsPerIP == 0 {
+			r.MaxConnsPerIP = defaultForwardMaxConnsPerIP
+		}
 	}
 	for i := range c.DDNS.Rules {
 		r := &c.DDNS.Rules[i]
@@ -162,6 +176,17 @@ func Validate(c *model.Config) error {
 		if len(r.Listen) == 0 {
 			return fmt.Errorf("web rule %q: at least one listen address is required", displayName(r.Name, r.ID))
 		}
+		if err := requireFileServiceAuth(&r); err != nil {
+			return err
+		}
+		if r.Proxy != nil {
+			if r.Proxy.RateLimitPerSec < 0 {
+				return fmt.Errorf("web rule %q: rateLimitPerSec must not be negative", displayName(r.Name, r.ID))
+			}
+			if r.Proxy.MaxBodyBytes < 0 {
+				return fmt.Errorf("web rule %q: maxBodyBytes must not be negative", displayName(r.Name, r.ID))
+			}
+		}
 		for _, l := range r.Listen {
 			if _, _, err := net.SplitHostPort(l); err != nil {
 				return fmt.Errorf("web rule %q: invalid listen address %q", displayName(r.Name, r.ID), l)
@@ -191,6 +216,12 @@ func Validate(c *model.Config) error {
 		if _, _, err := net.SplitHostPort(r.DstAddr); err != nil {
 			return fmt.Errorf("forward rule %q: invalid destination address %q", displayName(r.Name, r.ID), r.DstAddr)
 		}
+		if r.MaxConns < 0 {
+			return fmt.Errorf("forward rule %q: maxConns must not be negative", displayName(r.Name, r.ID))
+		}
+		if r.MaxConnsPerIP < 0 {
+			return fmt.Errorf("forward rule %q: maxConnsPerIP must not be negative", displayName(r.Name, r.ID))
+		}
 	}
 	for _, r := range c.DDNS.Rules {
 		if strings.TrimSpace(r.Domain) == "" {
@@ -214,6 +245,36 @@ func Validate(c *model.Config) error {
 		}
 	}
 	return nil
+}
+
+// requireFileServiceAuth rejects filebrowser and webdav rules that would be
+// reachable by anybody: these rule types read and write the mounted storage, so
+// every anonymous visitor they accept is an anonymous storage account. Such a
+// rule must be gated by basic authentication or by an allow list of client
+// addresses. Both checks are deliberately made on the stored configuration, not
+// on the runtime state, so a rule cannot be activated later through a toggle
+// that skips validation.
+func requireFileServiceAuth(r *model.WebRule) error {
+	switch r.Type {
+	case model.WebTypeFiles, model.WebTypeWebDAV:
+	default:
+		return nil
+	}
+	if basicAuthHasUsers(r.BasicAuth) {
+		return nil
+	}
+	if r.Access.Mode == model.AccessAllow && len(r.Access.IPs) > 0 {
+		return nil
+	}
+	return fmt.Errorf("web rule %q: type %s exposes the file storage without authentication, "+
+		"enable BasicAuth for this rule (basicAuth.enable with at least one user) "+
+		"or set the access control to allow + IP list",
+		displayName(r.Name, r.ID), r.Type)
+}
+
+// basicAuthHasUsers reports whether the rule carries a usable basic auth list.
+func basicAuthHasUsers(auth *model.BasicAuth) bool {
+	return auth != nil && auth.Enable && len(auth.Users) > 0
 }
 
 func displayName(name, id string) string {
