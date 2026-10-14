@@ -157,12 +157,20 @@ GET    /api/v1/events                    (SSE，消息格式 {"type":"log|status
 > ### ⚠️ 能力边界（先读这一段）
 >
 > **gRPC 流式路由只做首消息检查 + 帧校验。** 声明 `grpc-stream`（或默认按流式判定的）路由，
-> 只会检查**第一条** gRPC 消息，之后的消息只做帧层校验（compressed flag、长度上限、截断），
+> 只会检查**第一条** gRPC 消息，之后的消息只做帧层校验（compressed flag、长度上限 4MiB、截断），
 > **不做逐消息的 CRS 检查，也不做跨消息累计评分**。这是刻意收窄的范围（见 PLAN §1「不做」），
 > 接口已为将来的 per-message 检查（D）预留 `BodyInspector`。
-> 任何界面文案、文档、告警都不允许暗示「流式路由的每一条消息都被检查过」。
+> 任何界面文案、文档、告警都不允许暗示「流式路由的每一条消息都被检查过」；
+> 这同一句话必须出现在 [README](../README.md)「WAF 与请求体检查策略 → 能力边界」与 [DEPLOY](DEPLOY.md) 的 WAF 部署说明里，措辞保持一致。
 
-### 8.1 配置面（只有 4 项 + 每规则 1 项）
+> **本次顺带修复的生产缺陷（实现事实，不是待办）**：
+>
+> 1. **规则级 WAF 之前从未启动**：web 模块自己持有的那个 WAF 实例（注册表里的实例只服务管理 API）此前没有任何地方调用 `Start`，
+>    因此生产环境里规则级 WAF 静默失效。现在由 `internal/modules/web/web.go` 的 `Start` / `Stop` 负责它的生命周期。
+> 2. **CRS 对 `application/grpc` 与缺失 Content-Length 的误判**：`tx.allowed_request_content_type` 已加入
+>    `application/grpc` / `application/grpc-web`，并且交给引擎的 body 按实际读到的消息长度设置 `Content-Length`。
+
+### 8.1 配置面（4 项策略 + 1 项告警 + 每规则 1 项）
 
 全局 `model.WAFConfig`（JSON tag 为 camelCase）：
 
@@ -172,6 +180,10 @@ GET    /api/v1/events                    (SSE，消息格式 {"type":"log|status
 | `defaultBodyPolicy` | string | `full` | `full` \| `peek` \| `skip` \| `grpc`。未声明 bodyPolicy 的路由用它 |
 | `peekBytes` | int | `65536` | peek 策略检查的字节数上限 |
 | `peekTimeoutMs` | int | `250` | peek 的空闲超时（毫秒）；超时后不再等待 |
+| `notifyBodyRatio` | float64 | `0`（关闭） | 非 full 占比**超过**该值时经 notify 发一条告警；`0` = 永不发，合法区间 `[0,1]`，同一进程每小时最多一次，样本少于 50 条不发 |
+
+`MaxMessageBytes`（单条 gRPC 消息上限，默认 **4MiB**）是代码里的常量（`grpc.go` 的 `maxGRPCMessageBytes`），不是配置项；
+超过它的帧按帧层违规处理（`grpc-status 8`）。
 
 每规则 `model.WebRule`：
 
@@ -181,8 +193,9 @@ GET    /api/v1/events                    (SSE，消息格式 {"type":"log|status
 
 约束：
 
-- 配置校验**拒绝未知枚举**（拼错就是保存失败，不是静默回退）；
+- 配置校验**拒绝未知枚举**（拼错就是保存失败，不是静默回退），也**拒绝越界的 `notifyBodyRatio`**（<0 或 >1 保存失败）；
 - `Normalize` 负责补齐默认值，**版本号不变**（靠 Normalize 回填，不需要迁移）；
+- `notifyBodyRatio` 是**唯一一项 Normalize 不填默认值的策略配置**：默认 `0` = 关闭告警（见 8.6）；
 - 前端提交 `PUT /api/v1/waf/config` 时**必须回传原配置对象**再覆盖这几项，
   否则会被 `rest.Decode` 重置成零值（现有前端已经是这个模式：
   `Object.assign({}, state.config, {...})`）。
@@ -256,6 +269,7 @@ WAF 页读 `GET /api/v1/waf/config`（现有形状 `{"config":..., "engine":...,
 | 数据 | 约定位置 | 兼容读取（前端会兜底，但后端应实现第一种） |
 | --- | --- | --- |
 | 四项策略 | `config.enforcementMode` / `defaultBodyPolicy` / `peekBytes` / `peekTimeoutMs` | `stats` / `policy` 层，或 `EnforcementMode` 等写法 |
+| 告警阈值 | `config.notifyBodyRatio`（数字，`0` = 关闭） | 缺失时按 0 处理（不告警） |
 | bodyState 分布 | `stats.bodyStates` = `{"full":0,"peeked":0,"skipped":0,"grpc-unary":0,"grpc-stream":0,"grpc-server-first":0,"frame-error":0}` | 单数 `bodyState`、数组 `[{state,count}]` |
 | wouldReject 计数 | `stats.wouldReject`（数字） | 对象 `{count}`、或只有样例数组时用其长度 |
 | wouldReject 样例 | 响应根 `wouldReject` = `[]Violation`（最新在前） | `stats.wouldReject.items`、`wouldRejectSamples` 等 |
@@ -268,3 +282,20 @@ wouldReject 每条样例前端按这些字段名显示（都做兜底）：规�
 
 Web 规则接口：`GET /api/v1/web/rules` 的每一项必须带 `bodyPolicy` 字段（空串表示继承），
 `PUT/POST /api/v1/web/rules[/{id}]` 必须接收并保存它（现有实现整体解码 `model.WebRule`，加字段即可）。
+
+### 8.6 非 full 占比告警（notify）
+
+`config.notifyBodyRatio` 是**策略缺口告警**的阈值，默认 `0`（关闭），合法区间 `[0,1]`，越界由配置校验拒绝。
+触发条件（两个都要满足，判定在每次请求结束时做一次）：
+
+| 条件 | 值 |
+| --- | --- |
+| 非 full 占比 `bodyNonFullRatio` | **严格大于** `notifyBodyRatio`（等于不发） |
+| 样本数 `bodyRequests` | ≥ **50**（低于它是噪声，不是上线信号） |
+| 发送频率 | **同一进程每小时最多一次**（带上一次发送时间，抑制不滑动窗口） |
+
+告警经 `notify.Service.Emit(notify.EventAlert, ...)` 下发，字段固定为 `bodyRequests` / `bodyNonFull` /
+`bodyNonFullRatio` / `notifyBodyRatio` / `minSamples` / `alertIntervalSecs`；正文含当前占比、阈值、样本数，
+并明确提示「去 WAF 页查看未声明策略的路由」。`notifyBodyRatio=0` 时**永不发送**。
+
+实现位置：`internal/modules/waf/alert.go`（阈值与样本门限、发送节流），时钟与投递函数可注入，因此单测不需要 sleep。

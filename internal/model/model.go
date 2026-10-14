@@ -424,6 +424,11 @@ type WAFConfig struct {
 	PeekBytes int `json:"peekBytes,omitempty"`
 	// PeekTimeoutMS bounds how long a peek waits for the client. Default 250.
 	PeekTimeoutMS int `json:"peekTimeoutMs,omitempty"`
+	// NotifyBodyRatio is the share of non full body checks above which the
+	// module raises a notification once per hour. Zero disables the alert; a
+	// value between 0 and 1 is the threshold, so 0.2 alerts once more than 20%
+	// of the sampled requests were inspected partially. Default 0 (off).
+	NotifyBodyRatio float64 `json:"notifyBodyRatio,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

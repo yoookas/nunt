@@ -297,6 +297,11 @@ func validateWAFBody(c *model.Config) error {
 	if c.WAF.PeekTimeoutMS < 0 || c.WAF.PeekTimeoutMS > maxWAFPeekTimeoutMS {
 		return fmt.Errorf("waf peekTimeoutMs must be between 0 and %d", maxWAFPeekTimeoutMS)
 	}
+	// notifyBodyRatio is a share, so 0 (off, the default) and 1 are both valid
+	// while anything outside the range would make the comparison meaningless.
+	if c.WAF.NotifyBodyRatio < 0 || c.WAF.NotifyBodyRatio > 1 {
+		return fmt.Errorf("waf notifyBodyRatio must be between 0 and 1")
+	}
 	return nil
 }
 

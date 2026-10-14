@@ -117,7 +117,7 @@ data/
 WAF 的请求体检查**由部署声明，不由攻击者决定**：每条 Web 规则都可以声明自己的请求体策略，没声明的继承全局默认值。
 这解决的是「攻击者用 chunked / 流式请求让 WAF 读不到 body，从而把全量检查悄悄降级成不检查」的问题。
 
-### 全局四项配置（`model.WAFConfig`）
+### 全局配置（`model.WAFConfig`）：4 项策略 + 1 项告警
 
 | 字段 | 默认值 | 含义 |
 | --- | --- | --- |
@@ -125,6 +125,7 @@ WAF 的请求体检查**由部署声明，不由攻击者决定**：每条 Web �
 | `defaultBodyPolicy` | `full` | 未声明策略的路由用它：`full` / `peek` / `skip` / `grpc` |
 | `peekBytes` | `65536` | `peek` 策略检查的字节数上限 |
 | `peekTimeoutMs` | `250` | `peek` 的空闲超时，超时后不再等待客户端 |
+| `notifyBodyRatio` | `0`（关闭） | 非 full 请求体检查占比**超过**该比例时发一条告警（0–1，`0` 表示不告警）；同一进程每小时最多一次，样本少于 50 条时不发 |
 
 ### 每条 Web 规则的 `bodyPolicy`（空 = 继承全局）
 
@@ -135,6 +136,10 @@ WAF 的请求体检查**由部署声明，不由攻击者决定**：每条 Web �
 | `skip` | 只查 URI / 请求头，请求体原样透传 | 请求体完全不查（显式声明） |
 | `grpc-unary` | 首消息 + 立即 EOF 即完成请求级判定；出现第二帧则拒绝/记录 | 无（针对 unary / 服务端流式） |
 | `grpc-stream` | 首消息先判定一次，后续帧只做帧校验 | **只查首消息** |
+
+固定上限（不是配置项，写在代码里）：单条 gRPC 消息 **4MiB**（`maxGRPCMessageBytes`），超过按帧层违规处理。
+CRS 侧另外把 `application/grpc` / `application/grpc-web` 加进了 `tx.allowed_request_content_type`，并按实际读到的消息长度设置 `Content-Length`，
+因此「gRPC 被 CRS 当成未知 Content-Type」「缺 Content-Length 被 CRS 误判」这两类误报不会发生——它只是不检查后续消息。
 
 ### 「部分检查」是什么意思
 
@@ -154,6 +159,15 @@ WAF 的请求体检查**由部署声明，不由攻击者决定**：每条 Web �
 5. 建议同时打开通知告警（非 full 占比 / wouldReject 计数超阈值）。
 
 > **在 enforce 之前不要开 body 策略**：否则 chunked / 流式请求会直接被 411 或拒绝。
+
+### 本次顺带修复的生产缺陷
+
+- **web 模块自建的 WAF 实例此前从未 `Start`**：web 模块自己 `waf.New()` 了一个实例给规则级 WAF 用（注册表里那个是给管理 API 用的），
+  此前没有任何地方启动它，于是「规则级 WAF」在生产里静默不生效（管理面 `adminProtect` 看起来正常，规则却完全不检查）。
+  现在 web 模块在 `Start` 里启动、在 `Stop` 里停止这个实例（`internal/modules/web/web.go`），并有测试覆盖。
+- **CRS 对 gRPC 与缺失 Content-Length 的误判**：把 `application/grpc` / `application/grpc-web` 加入 `tx.allowed_request_content_type`，
+  并在把首消息交给引擎时按实际读到的消息长度设置 `Content-Length`。否则 gRPC 请求会被 CRS 当成未知 Content-Type、
+  缺 `Content-Length` 的请求会被当成畸形体误报。
 
 ### 能力边界（必须知道）
 

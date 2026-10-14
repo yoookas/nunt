@@ -4,6 +4,8 @@
 > 纯内网 / 自用场景（只在局域网或 VPN 内使用）**不要求**满足清单里的全部条目：威胁模型不同，按需裁剪。
 >
 > 本文里的「已验证 / 未验证」是**验证状态**，不是「代码写没写」。代码合并、单测通过都不等于验证通过。
+> **勾选代表已验证，不代表已部署**：某一条被勾上，只说明它在当前仓库里已经实现并被测试覆盖过；
+> 是否已经在你的公网实例上生效，仍然要按第 6 节的判据自己跑一遍。
 
 相关文档：[部署与运维](DEPLOY.md) · [请求体检查策略实施清单](PLAN-waf-body-policy.md) · [开发契约](CONTRACT.md)
 
@@ -177,13 +179,19 @@ or set the access control to allow + IP list
 
 ### P0（不满足就别上公网）
 
-- [ ] AdminAllowIPs 真正强制执行 + 管理面只监听回环/内网
-- [ ] 端口转发加每规则最大连接数 + 每 IP 连接上限
-- [ ] 反向代理加每规则速率限制 + 请求体上限
-- [ ] FileBrowser/WebDAV 默认要求认证（未配认证时给出显式警告或拒绝）
-- [ ] ACME 对真实 CA（先 staging 再正式）实测签发 + 续期 + 热加载
-- [ ] CI 加 govulncheck + Dependabot
-- [ ] 真实 Docker 环境跑通 compose up（host + bridge）（CI: docker-smoke.yml，push/PR 触发）
+- [x] AdminAllowIPs 真正强制执行 + 管理面只监听回环/内网 —— **代码已实现并有测试**：白名单在请求路径上包住整个管理面
+      （`internal/api/allowlist.go`，行为见第 2 节）；「只监听回环」是部署动作，勾选后仍须自己把 `adminListen` 改掉并从外网确认端口不可达（判据见第 6 节）
+- [x] 端口转发加每规则最大连接数 + 每 IP 连接上限 —— **代码已实现并有测试**（`maxConns` 默认 1024、`maxConnsPerIP` 默认 64、UDP 会话上限 1024）
+- [x] 反向代理加每规则速率限制 + 请求体上限 —— **代码已实现并有测试**（`proxy.rateLimitPerSec` / `proxy.maxBodyBytes`）
+- [x] FileBrowser/WebDAV 默认要求认证（未配认证时显式拒绝）—— **代码已实现并有测试**：保存配置即被拒绝（fail-closed），见第 3.2 节
+- [ ] ACME 对真实 CA（先 staging 再正式）实测签发 + 续期 + 热加载 —— **保持未勾**：代码在，真实 CA 没跑过（见第 7 节第 2 条）
+- [x] CI 加 govulncheck + Dependabot —— **已实现**：阻塞式 `govulncheck` job + `.github/dependabot.yml`（见第 3.6 节）
+- [ ] 真实 Docker 环境跑通 compose up（host + bridge）—— **保持未勾**：本仓库仍未在真实 docker 上跑过 `docker compose up`，
+      只在 CI 里用 `docker compose config` 解析过两个 compose 文件。该场景由 **CI: docker-smoke.yml**（push / PR 触发）负责，
+      在它真实执行过一次并绿之前不要勾（见第 7 节第 1 条）
+
+> 勾选说明：打勾代表**已验证**（在当前仓库里已实现并被测试覆盖），**不代表已部署**——是否已经在你的实例上生效，
+> 仍要按第 6 节的判据自己跑一遍（与开头的说明一致）。
 
 ### P1（上线前应有）
 
@@ -194,11 +202,14 @@ or set the access control to allow + IP list
 
 ### P2（上线后按需）
 
-- [ ] A+C+E 实施并切 enforce
+- [x] A+C+E 已实现并通过测试 —— **代码已实现并有测试**：策略解析、observe/enforce 双路径、gRPC 首消息检查 + 帧校验、
+      wouldReject 环形缓冲、非 full 占比指标与非 full 占比告警都在仓库里，并由单测覆盖（判据见下一节）
+- [ ] A+C+E 切 enforce —— **保持未勾**：需要真实流量观察（先跑 observe 期：未声明策略的路由清空、wouldReject 逐条确认、非 full 占比已知），再一键切换
 - [ ] WAF 误报排除工作流（按规则 ID 禁用 + 文档）
 - [ ] D 逐消息检查（仅在确有公网 gRPC 业务时）
+- [ ] 真实 CA / 真实 DNS 联调 —— **保持未勾**：ACME 未对真实 CA 完成过签发；`internal/dnsprov` 的 13 家提供商只有接口形状与单测（见第 7 节第 2、3 条）
 
-> 以上勾选框按原始清单逐字保留，尚未在任何真实环境跑过，**一律保持未勾**。
+> 上面打勾的条目同样只代表「已实现 + 有测试」，不代表已在真实环境跑过。
 
 ### P2 第一条「A+C+E 实施并切 enforce」的验收判据
 

@@ -36,6 +36,9 @@ type WAF struct {
 	// body keeps the request body policy counters and the "would reject"
 	// ring buffer.
 	body *bodyRecorder
+	// alert raises the "non full share above the threshold" notification, at
+	// most once per bodyAlertInterval.
+	alert *bodyAlert
 
 	mu     sync.RWMutex
 	cfg    model.WAFConfig
@@ -62,10 +65,11 @@ type WAF struct {
 // New creates the module.
 func New(deps *module.Deps) *WAF {
 	w := &WAF{
-		deps: deps,
-		log:  deps.Logger("waf"),
-		rec:  newRecorder(defaultEventKeep),
-		body: newBodyRecorder(),
+		deps:  deps,
+		log:   deps.Logger("waf"),
+		rec:   newRecorder(defaultEventKeep),
+		body:  newBodyRecorder(),
+		alert: newBodyAlert(),
 	}
 	w.Init(deps, "waf", "Web 应用防火墙")
 	if deps != nil && deps.Cfg != nil {
@@ -362,6 +366,10 @@ func (w *WAF) inspect(st requestState, ruleName string, rw http.ResponseWriter, 
 			err = fmt.Errorf("panic while inspecting the request: %v", rec)
 		}
 	}()
+	// Every branch below records its bodyState before it returns, so the share
+	// of partial checks is evaluated once per request, on the way out. The call
+	// is throttled by the alert itself, so this stays cheap per request.
+	defer w.bodyAlertCheck()
 
 	clientIP := netutil.ClientIP(r, st.trustProxy)
 	remoteHost, port := splitHostPort(r.RemoteAddr)

@@ -90,7 +90,40 @@ NUNT_IMAGE=nunt:v1.0.0 docker compose up -d
 - 需要访问内网服务：规则类型选「反向代理」，上游填 `http://192.168.1.10:5000`；同一条规则可以有多个上游做轮询。
 - 需要暴露无认证的内网服务：开启 BasicAuth 或设置 IP 白名单（白名单模式更安全）。
 
-## 7. 常见问题
+## 7. WAF 与请求体检查策略（上线必读）
+
+WAF 的请求体检查是**按路由声明**的：每条 Web 规则声明自己的 `bodyPolicy`，没声明的继承全局默认值。
+全局 5 个字段的最终默认值（改配置页之外也可以直接改 `config.json`，保存时同样会被校验）：
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `enforcementMode` | `observe` | `observe` 只记录「本应拒绝」，`enforce` 真的拒绝；**只改变响应，不改变判定逻辑** |
+| `defaultBodyPolicy` | `full` | 未声明策略的路由用它：`full` / `peek` / `skip` / `grpc` |
+| `peekBytes` | `65536` | `peek` 策略检查的字节数上限 |
+| `peekTimeoutMs` | `250` | `peek` 的空闲超时（毫秒），超时后不再等待客户端 |
+| `notifyBodyRatio` | `0`（关闭） | 非 full 请求体检查占比**超过**该值时发一条告警（0–1）；同一进程每小时最多一次，样本少于 50 条不发 |
+
+上线顺序固定为「先观察、后强制」，细节见 [公网部署检查清单](PUBLIC-EXPOSURE.md) 第 4 节与
+[请求体检查策略实施清单](PLAN-waf-body-policy.md)：
+
+1. 保持 `enforcementMode=observe` 跑一段完整业务周期；
+2. 在 WAF 页看**未声明 bodyPolicy 的路由**列表、**wouldReject 样例**、**bodyState 分布与非 full 占比**；
+3. 逐条补齐路由声明；打开 `notifyBodyRatio`（例如 `0.2`）让占比超标时主动告警；
+4. 列表清空后再一键切 `enforce`。**在 enforce 之前不要开 body 策略**，否则 chunked / 流式请求会直接被 411 或拒绝。
+
+> ### ⚠️ 能力边界（部署前必须知道）
+> **gRPC 流式路由只做首消息检查 + 帧校验。** 声明 `grpc-stream`（含 bidi、客户端流式）的路由只会检查**第一条**消息，
+> 之后的消息只做帧层校验（compressed flag、单条消息长度上限 **4MiB**、截断检测），**不做逐消息的 CRS 检查，
+> 也不做跨消息累计评分**。这是刻意收窄的范围，不是缺陷：把它当成「首发放攻击能被挡住」，而不是「整个流都被检查过」。
+> 同一句话也写在 [README](../README.md)「WAF 与请求体检查策略 → 能力边界」与 [开发契约](CONTRACT.md) 第 8 节。
+
+> **已修复的两个生产问题**（如果你跑的是更早的版本，升级后再核对一遍）：
+> 1. **规则级 WAF 之前从未启动**：web 模块自建的 WAF 实例没有任何地方调用 `Start`，导致规则级 WAF 在生产里静默不生效
+>    （管理面保护看起来正常，规则却完全不检查）；现在由 web 模块的 `Start` / `Stop` 管理它的生命周期。
+> 2. **CRS 对 `application/grpc` 与缺失 `Content-Length` 的误判**：`application/grpc` / `application/grpc-web` 已加入
+>    `tx.allowed_request_content_type`，交给引擎的 body 按实际读到的消息长度设置 `Content-Length`。
+
+## 8. 常见问题
 
 | 现象 | 原因与处理 |
 | --- | --- |
@@ -99,9 +132,11 @@ NUNT_IMAGE=nunt:v1.0.0 docker compose up -d
 | DDNS 一直失败 | 先用「测试」按钮验证凭据；注意部分服务商需要 token 具备 DNS 编辑权限 |
 | ACME http-01 失败 | 80 端口被占用或域名未解析到本机；改用 dns-01 |
 | WAF 误拦正常请求 | 切到「仅检测」模式定位命中规则，把对应规则 ID 加入禁用列表，或降低 PL 等级 |
+| WAF 完全没反应（规则级） | 先确认模块已启动、规则上勾了 WAF；旧版本存在「web 模块自建实例从未 Start」的缺陷，升级到含该修复的版本 |
+| 收到「非 full 占比超阈值」告警 | 说明有路由在做部分检查：打开 WAF 页看未声明策略的路由与 bodyState 分布，逐条声明 `bodyPolicy`；不需要时把 `notifyBodyRatio` 改回 `0` |
 | 容器里看不到真实客户端 IP | 使用 host 网络；若前面还有一层代理，打开「信任代理」 |
 
-## 8. 升级
+## 9. 升级
 
 ```bash
 # 源码方式
