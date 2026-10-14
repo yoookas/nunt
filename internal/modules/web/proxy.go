@@ -17,6 +17,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/net/http2"
+
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/netutil"
 )
@@ -246,8 +248,13 @@ func buildProxy(w *Web, r *rule, up upstream, target *model.ProxyTarget) *httput
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
 
+	var rt http.RoundTripper = transport
+	if target.H2C && up.url != nil && up.url.Scheme == "http" {
+		rt = newH2CTransport(timeout)
+	}
+
 	return &httputil.ReverseProxy{
-		Transport:     transport,
+		Transport:     rt,
 		FlushInterval: 100 * time.Millisecond,
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(up.url)
@@ -262,12 +269,20 @@ func buildProxy(w *Web, r *rule, up upstream, target *model.ProxyTarget) *httput
 			applyHeaders(pr.Out.Header, target.Headers)
 			removeHopHeaders(pr.Out.Header)
 			if isUpgrade(pr.In) {
+				// Forward the switch request verbatim: WebSocket is the common
+				// case but h2c and custom upgrade tokens must work as well.
 				pr.Out.Header.Set("Connection", "Upgrade")
-				pr.Out.Header.Set("Upgrade", "websocket")
+				pr.Out.Header.Set("Upgrade", pr.In.Header.Get("Upgrade"))
 			}
 		},
 		ModifyResponse: func(resp *http.Response) error {
-			removeHopHeaders(resp.Header)
+			// A 101 response is the protocol switch itself: stripping the
+			// hop-by-hop headers here would remove Upgrade/Connection and make
+			// the reverse proxy reject its own backend ("backend tried to
+			// switch protocol ... when ... was requested").
+			if resp.StatusCode != http.StatusSwitchingProtocols {
+				removeHopHeaders(resp.Header)
+			}
 			for k, v := range target.RespHeaders {
 				if k = strings.TrimSpace(k); k != "" {
 					resp.Header.Set(k, v)
@@ -347,6 +362,38 @@ func removeHopHeaders(h http.Header) {
 	}
 }
 
+// h2cServer serves cleartext HTTP/2 on the plain listeners.
+var h2cServer = &http2.Server{}
+
+// newH2CTransport builds a transport that speaks HTTP/2 over plain TCP to an
+// upstream, which is what native (non TLS) gRPC servers require.
+func newH2CTransport(timeout time.Duration) *http2.Transport {
+	return &http2.Transport{
+		AllowHTTP: true,
+		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+			return (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext(ctx, network, addr)
+		},
+		ReadIdleTimeout: 30 * time.Second,
+		PingTimeout:     15 * time.Second,
+	}
+}
+
+// isUpgrade reports whether the request asks for a protocol switch. Any
+// token is accepted (websocket, h2c, custom tunnels); the proxy forwards it
+// unchanged instead of hard coding WebSocket.
 func isUpgrade(r *http.Request) bool {
-	return r != nil && strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+	if r == nil {
+		return false
+	}
+	if r.Header.Get("Upgrade") == "" {
+		return false
+	}
+	for _, v := range r.Header.Values("Connection") {
+		for _, token := range strings.Split(v, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/net/http2/h2c"
+
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/netutil"
 )
@@ -71,7 +73,11 @@ func (w *Web) newListener(ctx context.Context, addr string) *listener {
 	mux := &siteMux{handler: router}
 	mux.Handle("/", router)
 	server := &http.Server{
-		Handler:           mux,
+		// h2c lets cleartext HTTP/2 clients (native gRPC without TLS) reach
+		// the virtual hosts. Plain HTTP/1.1 and WebSocket upgrades are left
+		// alone: the wrapper only reacts to the HTTP/2 preface and to
+		// "Upgrade: h2c".
+		Handler:           h2c.NewHandler(mux, h2cServer),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      0, // WebSocket and streaming responses
@@ -95,17 +101,28 @@ func (w *Web) newListener(ctx context.Context, addr string) *listener {
 func (l *listener) start(m *matcher, tlsRules bool) error {
 	l.router.setMatcher(m)
 
-	plain, err := listenWithRetry(l.addr)
-	if err != nil {
-		l.cancel()
-		return fmt.Errorf("listen on %s: %w", l.addr, err)
+	// A TCP address can only be bound once (Go does not set SO_REUSEPORT), so
+	// the plain socket is only opened when at least one rule on this address
+	// does not terminate TLS. Opening both would make the TLS bind fail and
+	// silently downgrade an HTTPS port to HTTP.
+	plainNeeded := len(m.tlsRules) < len(m.rules)
+	if plainNeeded {
+		plain, err := listenWithRetry(l.addr)
+		if err != nil {
+			l.cancel()
+			return fmt.Errorf("listen on %s: %w", l.addr, err)
+		}
+		l.mu.Lock()
+		l.plain = plain
+		l.mu.Unlock()
+		go l.serve(plain, "http")
 	}
-	l.mu.Lock()
-	l.plain = plain
-	l.mu.Unlock()
-	go l.serve(plain, "http")
 
 	if !tlsRules {
+		if !plainNeeded {
+			l.cancel()
+			return fmt.Errorf("listen on %s: no rule can be served", l.addr)
+		}
 		return nil
 	}
 	tlsCfg := l.web.tlsConfig(m)

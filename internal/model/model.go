@@ -162,6 +162,9 @@ type ProxyTarget struct {
 	TimeoutSec     int               `json:"timeoutSec,omitempty"`
 	InsecureTLS    bool              `json:"insecureTls,omitempty"`
 	DisableCompres bool              `json:"disableCompression,omitempty"`
+	// H2C talks cleartext HTTP/2 to a plain http:// upstream, which is what
+	// native gRPC servers expect.
+	H2C bool `json:"h2c,omitempty"`
 }
 
 // RedirectTgt is a redirect / URL rewrite definition.
