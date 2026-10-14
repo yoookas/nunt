@@ -1,0 +1,27 @@
+# docker compose for Docker Desktop (macOS / Windows) or when host
+# networking is unavailable. Only the published ports can be served; port
+# forwarding rules must use ports listed here.
+services:
+  nunt:
+    build:
+      context: .
+      args:
+        VERSION: ${NUNT_VERSION:-dev}
+    image: ${NUNT_IMAGE:-nunt:dev}
+    container_name: nunt
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      DATA_DIR: /data
+    ports:
+      - "16601:16601"   # admin interface
+      - "80:80"         # web service http
+      - "443:443"       # web service https
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:16601/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

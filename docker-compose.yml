@@ -1,0 +1,39 @@
+# docker compose for nunt (host networking).
+#
+# Host networking is recommended: the web service, HTTP/HTTPS and port
+# forwarding need direct access to the host interfaces and to IPv6. On Docker
+# Desktop (macOS / Windows) use docker-compose.bridge.yml instead.
+#
+#   docker compose up -d --build
+#
+# To run a released image instead of building from source:
+#   docker load < nunt-v1.0.0-amd64.tar.gz
+#   docker compose up -d      # after setting the image name below
+services:
+  nunt:
+    build:
+      context: .
+      args:
+        VERSION: ${NUNT_VERSION:-dev}
+    image: ${NUNT_IMAGE:-nunt:dev}
+    container_name: nunt
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      DATA_DIR: /data
+      # PUID/PGID must match the owner of ./data on the host
+      PUID: "${PUID:-1000}"
+      PGID: "${PGID:-1000}"
+    volumes:
+      - ./data:/data
+    # Privileged ports are allowed through the file capability baked into the
+    # image; NET_ADMIN is only needed when the service manages interfaces.
+    cap_add:
+      - NET_BIND_SERVICE
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:16601/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

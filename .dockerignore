@@ -1,0 +1,9 @@
+.git
+.github
+.gocache
+data
+dist
+bin
+*.log
+nunt
+nunt.exe

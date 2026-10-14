@@ -1,0 +1,190 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (for example v1.2.3)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Build one container image per architecture and export it as a loadable
+  # docker archive. Nothing is pushed to a registry: the archives are attached
+  # to the GitHub release instead.
+  # -------------------------------------------------------------------------
+  image:
+    name: image ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+          - platform: linux/arm64
+            arch: arm64
+          - platform: linux/arm/v7
+            arch: armv7
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve version
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "commit=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          echo "buildtime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Build image archive
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            VERSION=${{ steps.vars.outputs.version }}
+            COMMIT=${{ steps.vars.outputs.commit }}
+            BUILDTIME=${{ steps.vars.outputs.buildtime }}
+          outputs: type=docker,dest=/tmp/nunt-${{ steps.vars.outputs.version }}-${{ matrix.arch }}.tar
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+      - name: Compress archive
+        run: |
+          mkdir -p dist
+          gzip -9 -c /tmp/nunt-${{ steps.vars.outputs.version }}-${{ matrix.arch }}.tar \
+            > dist/nunt-${{ steps.vars.outputs.version }}-${{ matrix.arch }}.tar.gz
+          ls -lh dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  # -------------------------------------------------------------------------
+  # One multi architecture OCI archive for users who prefer a single file.
+  # -------------------------------------------------------------------------
+  oci:
+    name: multi-arch oci
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve version
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "commit=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          echo "buildtime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Build OCI archive
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          build-args: |
+            VERSION=${{ steps.vars.outputs.version }}
+            COMMIT=${{ steps.vars.outputs.commit }}
+            BUILDTIME=${{ steps.vars.outputs.buildtime }}
+          outputs: type=oci,dest=/tmp/nunt-${{ steps.vars.outputs.version }}-oci.tar
+
+      - name: Compress archive
+        run: |
+          mkdir -p dist
+          gzip -9 -c /tmp/nunt-${{ steps.vars.outputs.version }}-oci.tar \
+            > dist/nunt-${{ steps.vars.outputs.version }}-oci.tar.gz
+          ls -lh dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-oci
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  # -------------------------------------------------------------------------
+  # Attach every archive to the GitHub release. No registry is used.
+  # -------------------------------------------------------------------------
+  release:
+    name: publish release
+    runs-on: ubuntu-latest
+    needs: [image, oci]
+    steps:
+      - name: Download image artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Resolve version
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.vars.outputs.version }}"
+          cat > NOTES.md <<'NOTES'
+          Container images for nunt.
+
+          Load an image with:
+
+          ```sh
+          docker load < nunt-<version>-amd64.tar.gz
+          docker compose up -d
+          ```
+
+          The amd64, arm64 and armv7 files are single architecture docker
+          archives. The -oci archive contains all three platforms. Nothing is
+          published to Docker Hub or GHCR.
+          NOTES
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" dist/*.tar.gz dist/SHA256SUMS --clobber
+          else
+            gh release create "$VERSION" dist/*.tar.gz dist/SHA256SUMS \
+              --title "nunt $VERSION" --notes-file NOTES.md --verify-tag
+          fi

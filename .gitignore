@@ -1,0 +1,18 @@
+# build output
+/nunt
+/nunt.exe
+/dist/
+/bin/
+
+# local go caches (sandbox-local)
+/.gocache/
+
+# runtime data
+/data/
+*.log
+*.bak
+
+# editors
+.idea/
+.vscode/
+.DS_Store
