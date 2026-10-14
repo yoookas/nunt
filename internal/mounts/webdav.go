@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/nunt/nunt/internal/httpc"
@@ -498,7 +499,7 @@ func (d *davFS) put(ctx context.Context, u *url.URL, clean string, r io.Reader) 
 	}
 	resp, err := d.do(req)
 	if err != nil {
-		return counter.n, fmt.Errorf("put %s: %w", clean, err)
+		return counter.count(), fmt.Errorf("put %s: %w", clean, err)
 	}
 	defer func() {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
@@ -506,11 +507,11 @@ func (d *davFS) put(ctx context.Context, u *url.URL, clean string, r io.Reader) 
 	}()
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusCreated, http.StatusNoContent:
-		return counter.n, nil
+		return counter.count(), nil
 	case http.StatusConflict:
-		return counter.n, fmt.Errorf("put %s: %w", clean, errDavConflict)
+		return counter.count(), fmt.Errorf("put %s: %w", clean, errDavConflict)
 	default:
-		return counter.n, davStatusError("put", clean, resp)
+		return counter.count(), davStatusError("put", clean, resp)
 	}
 }
 
@@ -749,14 +750,21 @@ func contentRangeStart(header string) int64 {
 
 type countingReader struct {
 	r io.Reader
-	n int64
+
+	// n is written by the transport's writer goroutine while the request is in
+	// flight and read by the caller once it completes, so it must be accessed
+	// atomically.
+	n atomic.Int64
 }
 
 func (c *countingReader) Read(p []byte) (int, error) {
 	n, err := c.r.Read(p)
-	c.n += int64(n)
+	c.n.Add(int64(n))
 	return n, err
 }
+
+// count returns the number of bytes read from the underlying reader so far.
+func (c *countingReader) count() int64 { return c.n.Load() }
 
 // readerLength reports the size of a body when it can be determined without
 // consuming it; -1 means the request has to use chunked encoding.
