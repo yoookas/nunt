@@ -1147,6 +1147,35 @@ export default {
     };
     const policyF = {};
 
+    // notifyRatioFromInput 读「非 full 占比告警阈值」输入：空=0（关闭），其余必须是
+    // 0–1 的有限数字；非法值由调用方标红并拒绝提交（后端也会拒绝越界值）。
+    function notifyRatioFromInput(node) {
+      const lim = POLICY_LIMITS.notifyBodyRatio;
+      const raw = val(node);
+      if (raw === '') return { ok: true, value: POLICY_DEFAULTS.notifyBodyRatio };
+      const n = Number(raw);
+      if (!isFinite(n) || n < lim.min || n > lim.max) return { ok: false, value: POLICY_DEFAULTS.notifyBodyRatio };
+      return { ok: true, value: n };
+    }
+
+    // ratioFeedback 更新阈值输入框的边框颜色与动态提示。kind：'' 正常 / 'warn' 后端
+    // 未返回 / 'err' 输入非法。
+    function ratioFeedback(message, kind) {
+      const node = policyF.notifyBodyRatio;
+      if (node) {
+        node.style.borderColor = kind === 'err' ? 'var(--err,#e5484d)' : (kind === 'warn' ? 'var(--warn,#d98b00)' : '');
+        node.title = message || '';
+      }
+      const hint = policyF.notifyRatioHint;
+      if (!hint) return;
+      clear(hint);
+      if (!message) return;
+      hint.appendChild(el('span', {
+        style: kind === '' ? null : { color: kind === 'err' ? 'var(--err,#e5484d)' : 'var(--warn,#d98b00)' },
+        text: message,
+      }));
+    }
+
     // 配置表单控件
     const f = {};
     function buildForm(cfg) {
@@ -1499,11 +1528,16 @@ export default {
       const defaultSel = selectEl(DEFAULT_POLICY_OPTIONS, cfg.defaultBodyPolicy);
       const peekBytes = input({ type: 'number', min: '0', max: String(POLICY_LIMITS.peekBytes.max), step: '1024', value: String(cfg.peekBytes), placeholder: '65536' });
       const peekTimeout = input({ type: 'number', min: '0', max: String(POLICY_LIMITS.peekTimeoutMs.max), step: '50', value: String(cfg.peekTimeoutMs), placeholder: '250' });
+      const notifyRatio = input({
+        type: 'number', min: String(POLICY_LIMITS.notifyBodyRatio.min), max: String(POLICY_LIMITS.notifyBodyRatio.max),
+        step: '0.05', value: String(cfg.notifyBodyRatio), placeholder: '0',
+      });
       const warnBox = el('div', { class: 'pwaf-sub' });
       policyF.mode = modeSel;
       policyF.defaultPolicy = defaultSel;
       policyF.peekBytes = peekBytes;
       policyF.peekTimeoutMs = peekTimeout;
+      policyF.notifyBodyRatio = notifyRatio;
 
       function markMissing(node, missing, fallbackValue) {
         if (!missing) return;
@@ -1513,10 +1547,13 @@ export default {
       // modeHint / peekHintField 必须在 sync* 之前建好（它们会被同步函数写入）。
       const modeHint = el('div', { class: 'hint' });
       const peekHintField = el('div', { class: 'hint' });
+      const ratioHintField = el('div', { class: 'hint' });
+      policyF.notifyRatioHint = ratioHintField;
       markMissing(modeSel, cfg.__fallback.mode, POLICY_DEFAULTS.enforcementMode);
       markMissing(defaultSel, cfg.__fallback.policy, POLICY_DEFAULTS.defaultBodyPolicy);
       markMissing(peekBytes, cfg.__fallback.peekBytes, POLICY_DEFAULTS.peekBytes);
       markMissing(peekTimeout, cfg.__fallback.peekTimeoutMs, POLICY_DEFAULTS.peekTimeoutMs);
+      // notifyBodyRatio 的「未返回」提示由 syncRatioHint 统一负责（含边框颜色）。
 
       function syncModeHint() {
         const mode = val(modeSel) || 'observe';
@@ -1531,12 +1568,27 @@ export default {
         peekHintField.textContent = 'peek 策略读满 ' + fmtBytes(bytes) + ' 或空闲 ' + ms +
           'ms 就先检查已到达的部分，其余字节流式透传（bodyState=peeked）；只有声明了 peek 的路由会用到这两个参数。';
       }
+      // syncRatioHint：非法输入 → 红框 + 红字；后端未返回该字段 → 黄框 + 说明。
+      function syncRatioHint() {
+        const check = notifyRatioFromInput(notifyRatio);
+        if (!check.ok) {
+          ratioFeedback('取值必须是 0 – 1 之间的数字（0 表示关闭），当前输入非法，保存会被拦下。', 'err');
+          return;
+        }
+        if (cfg.__fallback.notifyBodyRatio) {
+          ratioFeedback('后端未返回 notifyBodyRatio（0 时后端按 omitempty 省略），这里按 0（关闭）显示；填入非 0 值保存后即写入配置。', 'warn');
+          return;
+        }
+        ratioFeedback('', '');
+      }
       modeSel.addEventListener('change', () => { syncModeHint(); paintPolicyWarnings(warnBox, modeSel, defaultSel); });
       defaultSel.addEventListener('change', () => paintPolicyWarnings(warnBox, modeSel, defaultSel));
       peekBytes.addEventListener('input', syncPeekHint);
       peekTimeout.addEventListener('input', syncPeekHint);
+      notifyRatio.addEventListener('input', syncRatioHint);
       syncModeHint();
       syncPeekHint();
+      syncRatioHint();
 
       controlGrid.appendChild(el('div', { class: 'field' }, el('label', { text: '执行模式' }), modeSel, modeHint));
       const defField = el('div', { class: 'field' }, el('label', { text: '默认请求体策略（未声明 bodyPolicy 的路由使用）' }), defaultSel,
@@ -1544,6 +1596,13 @@ export default {
       controlGrid.appendChild(defField);
       controlGrid.appendChild(el('div', { class: 'field' }, el('label', { text: 'PeekBytes（peek 检查的字节数）' }), peekBytes));
       controlGrid.appendChild(el('div', { class: 'field' }, el('label', { text: 'PeekTimeoutMS（空闲超时，毫秒）' }), peekTimeout));
+      const ratioField = el('div', { class: 'field' },
+        el('label', { text: '非 full 占比告警阈值' }),
+        notifyRatio,
+        el('div', { class: 'hint', text: '0=关闭；取值 0–1，例如 0.3 表示非 full 占比超过 30% 时告警（严格大于才发）。' +
+          '告警经通知模块发送，同一进程每小时最多一次，样本少于 50 条不发。' }),
+        ratioHintField);
+      controlGrid.appendChild(ratioField);
       policyBox.appendChild(controlGrid);
       policyBox.appendChild(peekHintField);
       paintPolicyWarnings(warnBox, modeSel, defaultSel);
@@ -1877,7 +1936,7 @@ export default {
       if (sf.undeclared && sf.undeclared !== 'undeclaredRoutes') notes.push('未声明路由 ← ' + sf.undeclared);
       const source = '数据来源：GET /api/v1/waf/config —— config.enforcementMode / defaultBodyPolicy / peekBytes / peekTimeoutMs；' +
         'stats.bodyStates / bodyRequests / bodyFull / bodyNonFull / bodyNonFullRatio、stats.refused / wouldReject / wouldRejectKept / wouldRejectLimit、' +
-        'stats.grpc*；响应根级 wouldReject 样例（含 enforced / grpcStatus / reason / bodyState）与 undeclaredRoutes。';
+        'config.notifyBodyRatio（0–1，0=关闭）；stats.grpc*；响应根级 wouldReject 样例（含 enforced / grpcStatus / reason / bodyState）与 undeclaredRoutes。';
       policyBox.appendChild(el('div', { class: 'pwaf-compat', text: notes.length ? source + notes.join('；') : source }));
     }
 
@@ -1898,6 +1957,7 @@ export default {
       const nextDefault = val(policyF.defaultPolicy) || 'full';
       const nextBytes = numOf(policyF.peekBytes, POLICY_DEFAULTS.peekBytes);
       const nextTimeout = numOf(policyF.peekTimeoutMs, POLICY_DEFAULTS.peekTimeoutMs);
+      const ratioLimit = POLICY_LIMITS.notifyBodyRatio;
       const byteLimit = POLICY_LIMITS.peekBytes;
       const timeLimit = POLICY_LIMITS.peekTimeoutMs;
       if (nextBytes < byteLimit.min || nextBytes > byteLimit.max) {
@@ -1906,6 +1966,13 @@ export default {
       }
       if (nextTimeout < timeLimit.min || nextTimeout > timeLimit.max) {
         toast('PeekTimeoutMS 必须在 ' + timeLimit.min + ' – ' + timeLimit.max + ' 毫秒之间', 'warn');
+        return;
+      }
+      // 阈值先在前端拦一次：非法值给红框 + 红字并直接返回，不提交（后端也会拒绝越界值）。
+      const ratio = notifyRatioFromInput(policyF.notifyBodyRatio);
+      if (!ratio.ok) {
+        ratioFeedback('取值必须是 ' + ratioLimit.min + ' – ' + ratioLimit.max + ' 之间的数字（0 表示关闭），当前输入非法，未提交。', 'err');
+        toast('非 full 占比告警阈值必须在 ' + ratioLimit.min + ' – ' + ratioLimit.max + ' 之间（0 表示关闭），非法值未提交', 'warn');
         return;
       }
       if (nextBytes > 0 && nextBytes < byteLimit.low) {
@@ -1923,9 +1990,14 @@ export default {
       if (!fallback.policy) payload.defaultBodyPolicy = nextDefault;
       if (!fallback.peekBytes) payload.peekBytes = nextBytes;
       if (!fallback.peekTimeoutMs) payload.peekTimeoutMs = nextTimeout;
+      // notifyBodyRatio 的零值带 omitempty（后端在 0 时不会回传该字段），所以这里
+      // 始终提交当前输入值：否则「0 → 非 0」的开启动作永远写不进配置。
+      payload.notifyBodyRatio = ratio.value;
       try {
         await api.put('/waf/config', payload);
-        toast('请求体检查策略已保存', 'ok');
+        toast(ratio.value > 0
+          ? '请求体检查策略已保存：非 full 占比超过 ' + Math.round(ratio.value * 1000) / 10 + '% 时告警'
+          : '请求体检查策略已保存（非 full 占比告警已关闭）', 'ok');
         loadConfig();
         loadPolicy();
       } catch (e) {
