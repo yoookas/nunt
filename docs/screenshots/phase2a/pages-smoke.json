@@ -1,0 +1,122 @@
+{
+  "at": "2026-10-15T15:13:07.870Z",
+  "steps": [
+    {
+      "name": "seed: storage/mounts",
+      "ok": true,
+      "detail": "200"
+    },
+    {
+      "name": "seed: auth/tokens",
+      "ok": true,
+      "detail": "200"
+    },
+    {
+      "name": "settings: 基础表单渲染",
+      "ok": true,
+      "detail": "10"
+    },
+    {
+      "name": "settings: 用户表有数据",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "settings: 新建用户对话框字段数",
+      "ok": true,
+      "detail": "3"
+    },
+    {
+      "name": "settings: 空用户名校验",
+      "ok": true,
+      "detail": "请填写用户名"
+    },
+    {
+      "name": "settings: 新建用户后行数 +1",
+      "ok": true,
+      "detail": "2"
+    },
+    {
+      "name": "settings: 保存后出现 toast",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "settings: 删除确认文案",
+      "ok": true,
+      "detail": "确定要删除用户「smoke-user」吗？该用户的会话会立即失效。"
+    },
+    {
+      "name": "settings: 删除后行数还原",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "settings: 导入导出按钮数",
+      "ok": true,
+      "detail": "4"
+    },
+    {
+      "name": "files: 目录行数",
+      "ok": true,
+      "detail": "3"
+    },
+    {
+      "name": "files: 分享链接友好空态",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "files: 打开子目录",
+      "ok": true,
+      "detail": "/assets"
+    },
+    {
+      "name": "files: 子目录 1 行",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "files: 上一级回到根",
+      "ok": true,
+      "detail": "/"
+    },
+    {
+      "name": "files: 过滤命中 1 行",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "files: 重新检测后仍是空态",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "dashboard: 卡片标题都是 h2",
+      "ok": true,
+      "detail": "5"
+    },
+    {
+      "name": "dashboard: 主机指标平台空态",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "dashboard: 版本号不是 [object Object]",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "dashboard: 停止模块确认文案",
+      "ok": true,
+      "detail": "确定要停止模块「Web service」吗？"
+    },
+    {
+      "name": "dashboard: 取消后对话框关闭",
+      "ok": true,
+      "detail": "0"
+    }
+  ],
+  "consoleErrors": [],
+  "failed": 0
+}
