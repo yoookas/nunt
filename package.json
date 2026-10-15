@@ -1,0 +1,20 @@
+{
+  "name": "nunt-devtools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "nunt 开发期工具：Playwright UI 基线/无障碍扫描、Shoelace vendor 同步。Go 构建与 Docker 镜像不依赖本文件。",
+  "scripts": {
+    "ui:baseline": "node scripts/ui-baseline.mjs",
+    "ui:baseline:args": "node scripts/ui-baseline.mjs --keep-data",
+    "vendor:sync": "pwsh -NoProfile -File scripts/sync-vendor.ps1"
+  },
+  "devDependencies": {
+    "@shoelace-style/shoelace": "2.20.1",
+    "axe-core": "4.14.0",
+    "playwright": "1.64.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

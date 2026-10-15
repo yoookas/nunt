@@ -1,6 +1,11 @@
 .git
 .github
 .gocache
+# 仅开发期使用（Playwright / axe-core / Shoelace 同步源），镜像构建不需要
+node_modules
+.npmrc
+pnpm-lock.yaml
+package.json
 data
 dist
 bin

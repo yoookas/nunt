@@ -1,0 +1,1460 @@
+{
+  "generatedAt": "2026-10-15T08:02:08.835Z",
+  "exe": "D:\\Desktop\\nunt\\nunt.exe",
+  "exeBytes": 30037504,
+  "dataDir": "D:\\Desktop\\nunt\\.gocache\\ui-baseline\\1792051302297",
+  "dataDirKept": false,
+  "base": "http://127.0.0.1:16601",
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.4 Safari/537.36",
+  "axeVersion": "4.14.0",
+  "playwrightVersion": "1.64.1",
+  "nodeVersion": "v24.15.0",
+  "adminPort": 16601,
+  "seed": {
+    "steps": [
+      {
+        "name": "存储挂载（本地目录）",
+        "method": "POST",
+        "path": "/api/v1/storage/mounts",
+        "status": 200,
+        "ok": true,
+        "error": "",
+        "id": "e7eb52686bb68401"
+      },
+      {
+        "name": "Web 规则：静态托管",
+        "method": "POST",
+        "path": "/api/v1/web/rules",
+        "status": 200,
+        "ok": true,
+        "error": "",
+        "id": "a092163b0fed80f3"
+      },
+      {
+        "name": "Web 规则：反向代理",
+        "method": "POST",
+        "path": "/api/v1/web/rules",
+        "status": 200,
+        "ok": true,
+        "error": "",
+        "id": "7cfb53051449ff73"
+      },
+      {
+        "name": "端口转发规则",
+        "method": "POST",
+        "path": "/api/v1/forward/rules",
+        "status": 201,
+        "ok": true,
+        "error": "",
+        "id": "439458bdb5f1440f"
+      },
+      {
+        "name": "DDNS 规则",
+        "method": "POST",
+        "path": "/api/v1/ddns/rules",
+        "status": 200,
+        "ok": true,
+        "error": "",
+        "id": "586c0cc5df761ab9"
+      },
+      {
+        "name": "WAF 配置",
+        "method": "PUT",
+        "path": "/api/v1/waf/config",
+        "status": 200,
+        "ok": true,
+        "error": "",
+        "id": ""
+      },
+      {
+        "name": "通知 Webhook",
+        "method": "PUT",
+        "path": "/api/v1/notify/webhooks",
+        "status": 200,
+        "ok": true,
+        "error": "",
+        "id": ""
+      },
+      {
+        "name": "计划任务",
+        "method": "POST",
+        "path": "/api/v1/task/items",
+        "status": 201,
+        "ok": true,
+        "error": "",
+        "id": "ba41d92ea56b936a"
+      },
+      {
+        "name": "证书任务（未启用）",
+        "method": "POST",
+        "path": "/api/v1/acme/jobs",
+        "status": 200,
+        "ok": true,
+        "error": "",
+        "id": "0eeb076b6afe3d96"
+      },
+      {
+        "name": "API Token",
+        "method": "POST",
+        "path": "/api/v1/auth/tokens",
+        "status": 200,
+        "ok": true,
+        "error": "",
+        "id": "71034442657d632a"
+      },
+      {
+        "name": "第二个管理员账号",
+        "method": "POST",
+        "path": "/api/v1/auth/users",
+        "status": 200,
+        "ok": true,
+        "error": "",
+        "id": "cac8849f9abfedc4"
+      }
+    ],
+    "mountId": "e7eb52686bb68401",
+    "staticRuleId": "a092163b0fed80f3"
+  },
+  "login": {
+    "screenshot": "login.png",
+    "a11y": {
+      "version": "4.14.0",
+      "violations": [
+        {
+          "id": "button-name",
+          "impact": "critical",
+          "help": "Buttons must have discernible text",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/button-name?application=axeAPI",
+          "nodes": 1,
+          "targets": [
+            "button[data-theme-toggle=\"1\"]"
+          ]
+        },
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "help": "Elements must meet minimum color contrast ratio thresholds",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/color-contrast?application=axeAPI",
+          "nodes": 28,
+          "targets": [
+            ".brand-sub",
+            ".active > .nav-text",
+            ".meta:nth-child(4) > .mono[data-version=\"1\"][title=\"版本信息\"]"
+          ]
+        },
+        {
+          "id": "landmark-one-main",
+          "impact": "moderate",
+          "help": "Document should have one main landmark",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/landmark-one-main?application=axeAPI",
+          "nodes": 1,
+          "targets": [
+            "html"
+          ]
+        },
+        {
+          "id": "page-has-heading-one",
+          "impact": "moderate",
+          "help": "Page should contain a level-one heading",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/page-has-heading-one?application=axeAPI",
+          "nodes": 1,
+          "targets": [
+            "html"
+          ]
+        },
+        {
+          "id": "region",
+          "impact": "moderate",
+          "help": "All page content should be contained by landmarks",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/region?application=axeAPI",
+          "nodes": 20,
+          "targets": [
+            ".card:nth-child(1) > .card-header > span:nth-child(1)",
+            ".sub",
+            ".page > .card:nth-child(1) > .card-body"
+          ]
+        }
+      ],
+      "counts": {
+        "critical": 1,
+        "serious": 28,
+        "moderate": 22,
+        "minor": 0
+      },
+      "passCount": 24,
+      "incomplete": 1
+    },
+    "console": [
+      {
+        "page": "login",
+        "type": "error",
+        "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+        "location": "http://127.0.0.1:16601/api/v1/auth/session:0"
+      }
+    ],
+    "pageErrors": [],
+    "failedRequests": [],
+    "abortedRequests": [],
+    "httpErrors": [
+      {
+        "page": "login",
+        "url": "http://127.0.0.1:16601/api/v1/auth/session",
+        "status": 401,
+        "method": "GET"
+      }
+    ]
+  },
+  "pages": [
+    {
+      "id": "dashboard",
+      "title": "概览",
+      "url": "http://127.0.0.1:16601/#/dashboard",
+      "screenshot": "dashboard.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 1734,
+      "metrics": {
+        "title": "概览",
+        "hash": "#/dashboard",
+        "contentChildren": 1,
+        "bodyHeight": 1389,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [
+          {
+            "id": "button-name",
+            "impact": "critical",
+            "help": "Buttons must have discernible text",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/button-name?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "button[data-theme-toggle=\"1\"]"
+            ]
+          },
+          {
+            "id": "color-contrast",
+            "impact": "serious",
+            "help": "Elements must meet minimum color contrast ratio thresholds",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/color-contrast?application=axeAPI",
+            "nodes": 28,
+            "targets": [
+              ".brand-sub",
+              ".active > .nav-text",
+              ".meta:nth-child(4) > .mono[data-version=\"1\"][title=\"版本信息\"]"
+            ]
+          },
+          {
+            "id": "landmark-one-main",
+            "impact": "moderate",
+            "help": "Document should have one main landmark",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/landmark-one-main?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "page-has-heading-one",
+            "impact": "moderate",
+            "help": "Page should contain a level-one heading",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/page-has-heading-one?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "region",
+            "impact": "moderate",
+            "help": "All page content should be contained by landmarks",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/region?application=axeAPI",
+            "nodes": 20,
+            "targets": [
+              ".card:nth-child(1) > .card-header > span:nth-child(1)",
+              ".sub",
+              ".page > .card:nth-child(1) > .card-body"
+            ]
+          }
+        ],
+        "counts": {
+          "critical": 1,
+          "serious": 28,
+          "moderate": 22,
+          "minor": 0
+        },
+        "passCount": 24,
+        "incomplete": 1
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": []
+    },
+    {
+      "id": "web",
+      "title": "Web 服务",
+      "url": "http://127.0.0.1:16601/#/web",
+      "screenshot": "web.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 1633,
+      "metrics": {
+        "title": "Web 服务",
+        "hash": "#/web",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [
+          {
+            "id": "button-name",
+            "impact": "critical",
+            "help": "Buttons must have discernible text",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/button-name?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "button[data-theme-toggle=\"1\"]"
+            ]
+          },
+          {
+            "id": "color-contrast",
+            "impact": "serious",
+            "help": "Elements must meet minimum color contrast ratio thresholds",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/color-contrast?application=axeAPI",
+            "nodes": 5,
+            "targets": [
+              ".brand-sub",
+              "button[data-page=\"web\"] > .nav-text",
+              ".meta:nth-child(4) > .mono[data-version=\"1\"][title=\"版本信息\"]"
+            ]
+          },
+          {
+            "id": "empty-table-header",
+            "impact": "minor",
+            "help": "Table header text should not be empty",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/empty-table-header?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "th:nth-child(10)"
+            ]
+          },
+          {
+            "id": "landmark-one-main",
+            "impact": "moderate",
+            "help": "Document should have one main landmark",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/landmark-one-main?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "page-has-heading-one",
+            "impact": "moderate",
+            "help": "Page should contain a level-one heading",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/page-has-heading-one?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "region",
+            "impact": "moderate",
+            "help": "All page content should be contained by landmarks",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/region?application=axeAPI",
+            "nodes": 21,
+            "targets": [
+              ".card-head",
+              ".input",
+              "thead"
+            ]
+          }
+        ],
+        "counts": {
+          "critical": 1,
+          "serious": 5,
+          "moderate": 23,
+          "minor": 1
+        },
+        "passCount": 31,
+        "incomplete": 1
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": []
+    },
+    {
+      "id": "forward",
+      "title": "端口转发",
+      "url": "http://127.0.0.1:16601/#/forward",
+      "screenshot": "forward.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 1629,
+      "metrics": {
+        "title": "端口转发",
+        "hash": "#/forward",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [
+          {
+            "id": "button-name",
+            "impact": "critical",
+            "help": "Buttons must have discernible text",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/button-name?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "button[data-theme-toggle=\"1\"]"
+            ]
+          },
+          {
+            "id": "color-contrast",
+            "impact": "serious",
+            "help": "Elements must meet minimum color contrast ratio thresholds",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/color-contrast?application=axeAPI",
+            "nodes": 5,
+            "targets": [
+              ".brand-sub",
+              "button[data-page=\"forward\"] > .nav-text",
+              ".meta:nth-child(4) > .mono[data-version=\"1\"][title=\"版本信息\"]"
+            ]
+          },
+          {
+            "id": "empty-table-header",
+            "impact": "minor",
+            "help": "Table header text should not be empty",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/empty-table-header?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "th:nth-child(8)"
+            ]
+          },
+          {
+            "id": "landmark-one-main",
+            "impact": "moderate",
+            "help": "Document should have one main landmark",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/landmark-one-main?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "page-has-heading-one",
+            "impact": "moderate",
+            "help": "Page should contain a level-one heading",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/page-has-heading-one?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "region",
+            "impact": "moderate",
+            "help": "All page content should be contained by landmarks",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/region?application=axeAPI",
+            "nodes": 10,
+            "targets": [
+              ".card-head",
+              ".input",
+              "thead"
+            ]
+          }
+        ],
+        "counts": {
+          "critical": 1,
+          "serious": 5,
+          "moderate": 12,
+          "minor": 1
+        },
+        "passCount": 31,
+        "incomplete": 1
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": []
+    },
+    {
+      "id": "ddns",
+      "title": "动态域名",
+      "url": "http://127.0.0.1:16601/#/ddns",
+      "screenshot": "ddns.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 1661,
+      "metrics": {
+        "title": "动态域名",
+        "hash": "#/ddns",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [
+          {
+            "id": "button-name",
+            "impact": "critical",
+            "help": "Buttons must have discernible text",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/button-name?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "button[data-theme-toggle=\"1\"]"
+            ]
+          },
+          {
+            "id": "color-contrast",
+            "impact": "serious",
+            "help": "Elements must meet minimum color contrast ratio thresholds",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/color-contrast?application=axeAPI",
+            "nodes": 5,
+            "targets": [
+              ".brand-sub",
+              ".active > .nav-text",
+              ".meta:nth-child(4) > .mono[data-version=\"1\"][title=\"版本信息\"]"
+            ]
+          },
+          {
+            "id": "empty-table-header",
+            "impact": "minor",
+            "help": "Table header text should not be empty",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/empty-table-header?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "th:nth-child(9)"
+            ]
+          },
+          {
+            "id": "landmark-one-main",
+            "impact": "moderate",
+            "help": "Document should have one main landmark",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/landmark-one-main?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "page-has-heading-one",
+            "impact": "moderate",
+            "help": "Page should contain a level-one heading",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/page-has-heading-one?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "region",
+            "impact": "moderate",
+            "help": "All page content should be contained by landmarks",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/region?application=axeAPI",
+            "nodes": 12,
+            "targets": [
+              ".card:nth-child(2) > .card-head > span:nth-child(1)",
+              ".input",
+              ".card-body > div > table > thead"
+            ]
+          }
+        ],
+        "counts": {
+          "critical": 1,
+          "serious": 5,
+          "moderate": 14,
+          "minor": 1
+        },
+        "passCount": 31,
+        "incomplete": 1
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": []
+    },
+    {
+      "id": "acme",
+      "title": "证书",
+      "url": "http://127.0.0.1:16601/#/acme",
+      "screenshot": "acme.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 1690,
+      "metrics": {
+        "title": "证书",
+        "hash": "#/acme",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [
+          {
+            "id": "button-name",
+            "impact": "critical",
+            "help": "Buttons must have discernible text",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/button-name?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "button[data-theme-toggle=\"1\"]"
+            ]
+          },
+          {
+            "id": "color-contrast",
+            "impact": "serious",
+            "help": "Elements must meet minimum color contrast ratio thresholds",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/color-contrast?application=axeAPI",
+            "nodes": 6,
+            "targets": [
+              ".brand-sub",
+              ".active > .nav-text",
+              ".meta:nth-child(4) > .mono[data-version=\"1\"][title=\"版本信息\"]"
+            ]
+          },
+          {
+            "id": "empty-table-header",
+            "impact": "minor",
+            "help": "Table header text should not be empty",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/empty-table-header?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "th:nth-child(8)"
+            ]
+          },
+          {
+            "id": "landmark-one-main",
+            "impact": "moderate",
+            "help": "Document should have one main landmark",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/landmark-one-main?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "page-has-heading-one",
+            "impact": "moderate",
+            "help": "Page should contain a level-one heading",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/page-has-heading-one?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "region",
+            "impact": "moderate",
+            "help": "All page content should be contained by landmarks",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/region?application=axeAPI",
+            "nodes": 12,
+            "targets": [
+              ".card:nth-child(2) > .card-head > span:nth-child(1)",
+              "thead",
+              "td:nth-child(1)"
+            ]
+          }
+        ],
+        "counts": {
+          "critical": 1,
+          "serious": 6,
+          "moderate": 14,
+          "minor": 1
+        },
+        "passCount": 31,
+        "incomplete": 1
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": []
+    },
+    {
+      "id": "storage",
+      "title": "存储",
+      "url": "http://127.0.0.1:16601/#/storage",
+      "screenshot": "storage.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 1627,
+      "metrics": {
+        "title": "存储",
+        "hash": "#/storage",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [
+          {
+            "id": "button-name",
+            "impact": "critical",
+            "help": "Buttons must have discernible text",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/button-name?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "button[data-theme-toggle=\"1\"]"
+            ]
+          },
+          {
+            "id": "color-contrast",
+            "impact": "serious",
+            "help": "Elements must meet minimum color contrast ratio thresholds",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/color-contrast?application=axeAPI",
+            "nodes": 6,
+            "targets": [
+              ".brand-sub",
+              ".active > .nav-text",
+              ".meta:nth-child(4) > .mono[data-version=\"1\"][title=\"版本信息\"]"
+            ]
+          },
+          {
+            "id": "landmark-one-main",
+            "impact": "moderate",
+            "help": "Document should have one main landmark",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/landmark-one-main?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "page-has-heading-one",
+            "impact": "moderate",
+            "help": "Page should contain a level-one heading",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/page-has-heading-one?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "region",
+            "impact": "moderate",
+            "help": "All page content should be contained by landmarks",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/region?application=axeAPI",
+            "nodes": 8,
+            "targets": [
+              ".card-header > span:nth-child(1)",
+              ".sub",
+              "thead"
+            ]
+          }
+        ],
+        "counts": {
+          "critical": 1,
+          "serious": 6,
+          "moderate": 10,
+          "minor": 0
+        },
+        "passCount": 28,
+        "incomplete": 1
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": []
+    },
+    {
+      "id": "files",
+      "title": "文件",
+      "url": "http://127.0.0.1:16601/#/files",
+      "screenshot": "files.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 1641,
+      "metrics": {
+        "title": "文件管理",
+        "hash": "#/files",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [
+          {
+            "id": "button-name",
+            "impact": "critical",
+            "help": "Buttons must have discernible text",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/button-name?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "button[data-theme-toggle=\"1\"]"
+            ]
+          },
+          {
+            "id": "color-contrast",
+            "impact": "serious",
+            "help": "Elements must meet minimum color contrast ratio thresholds",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/color-contrast?application=axeAPI",
+            "nodes": 4,
+            "targets": [
+              ".brand-sub",
+              ".active > .nav-text",
+              ".meta:nth-child(4) > .mono[data-version=\"1\"][title=\"版本信息\"]"
+            ]
+          },
+          {
+            "id": "empty-table-header",
+            "impact": "minor",
+            "help": "Table header text should not be empty",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/empty-table-header?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "th:nth-child(5)"
+            ]
+          },
+          {
+            "id": "landmark-one-main",
+            "impact": "moderate",
+            "help": "Document should have one main landmark",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/landmark-one-main?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "page-has-heading-one",
+            "impact": "moderate",
+            "help": "Page should contain a level-one heading",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/page-has-heading-one?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "region",
+            "impact": "moderate",
+            "help": "All page content should be contained by landmarks",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/region?application=axeAPI",
+            "nodes": 20,
+            "targets": [
+              ".card:nth-child(2) > .card-head > span:nth-child(1)",
+              ".card:nth-child(2) > .card-head > .muted",
+              ".pfiles-tools > .muted"
+            ]
+          },
+          {
+            "id": "select-name",
+            "impact": "critical",
+            "help": "Select element must have an accessible name",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/select-name?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "select"
+            ]
+          }
+        ],
+        "counts": {
+          "critical": 2,
+          "serious": 4,
+          "moderate": 22,
+          "minor": 1
+        },
+        "passCount": 31,
+        "incomplete": 1
+      },
+      "console": [
+        {
+          "page": "files",
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+          "location": "http://127.0.0.1:16601/api/v1/files/shares:0"
+        },
+        {
+          "page": "files",
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+          "location": "http://127.0.0.1:16601/api/v1/files/shares:0"
+        }
+      ],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": [
+        {
+          "page": "files",
+          "url": "http://127.0.0.1:16601/api/v1/files/shares",
+          "status": 404,
+          "method": "GET"
+        },
+        {
+          "page": "files",
+          "url": "http://127.0.0.1:16601/api/v1/files/shares",
+          "status": 404,
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "id": "waf",
+      "title": "WAF",
+      "url": "http://127.0.0.1:16601/#/waf",
+      "screenshot": "waf.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 1984,
+      "metrics": {
+        "title": "WAF 防护",
+        "hash": "#/waf",
+        "contentChildren": 1,
+        "bodyHeight": 2726,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [
+          {
+            "id": "button-name",
+            "impact": "critical",
+            "help": "Buttons must have discernible text",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/button-name?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "button[data-theme-toggle=\"1\"]"
+            ]
+          },
+          {
+            "id": "color-contrast",
+            "impact": "serious",
+            "help": "Elements must meet minimum color contrast ratio thresholds",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/color-contrast?application=axeAPI",
+            "nodes": 14,
+            "targets": [
+              ".brand-sub",
+              ".active > .nav-text",
+              ".meta:nth-child(4) > .mono[data-version=\"1\"][title=\"版本信息\"]"
+            ]
+          },
+          {
+            "id": "empty-table-header",
+            "impact": "minor",
+            "help": "Table header text should not be empty",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/empty-table-header?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "th:nth-child(7)"
+            ]
+          },
+          {
+            "id": "label",
+            "impact": "critical",
+            "help": "Form elements must have labels",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/label?application=axeAPI",
+            "nodes": 2,
+            "targets": [
+              ".field:nth-child(8) > .input[type=\"number\"][min=\"0\"]",
+              ".field:nth-child(9) > .input[type=\"number\"][min=\"0\"]"
+            ]
+          },
+          {
+            "id": "landmark-one-main",
+            "impact": "moderate",
+            "help": "Document should have one main landmark",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/landmark-one-main?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "page-has-heading-one",
+            "impact": "moderate",
+            "help": "Page should contain a level-one heading",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/page-has-heading-one?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "region",
+            "impact": "moderate",
+            "help": "All page content should be contained by landmarks",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/region?application=axeAPI",
+            "nodes": 32,
+            "targets": [
+              ".card:nth-child(2) > .card-head > span:nth-child(1)",
+              ".card:nth-child(2) > .card-head > .muted",
+              ".card:nth-child(2) > .pwaf-panel.card-body"
+            ]
+          },
+          {
+            "id": "select-name",
+            "impact": "critical",
+            "help": "Select element must have an accessible name",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/select-name?application=axeAPI",
+            "nodes": 6,
+            "targets": [
+              ".card:nth-child(2) > .pwaf-panel.card-body > div > .grid > .field:nth-child(2) > select",
+              ".field:nth-child(6) > select",
+              ".field:nth-child(7) > select"
+            ]
+          }
+        ],
+        "counts": {
+          "critical": 9,
+          "serious": 14,
+          "moderate": 34,
+          "minor": 1
+        },
+        "passCount": 32,
+        "incomplete": 1
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": []
+    },
+    {
+      "id": "task",
+      "title": "计划任务",
+      "url": "http://127.0.0.1:16601/#/task",
+      "screenshot": "task.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 1689,
+      "metrics": {
+        "title": "计划任务",
+        "hash": "#/task",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [
+          {
+            "id": "button-name",
+            "impact": "critical",
+            "help": "Buttons must have discernible text",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/button-name?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "button[data-theme-toggle=\"1\"]"
+            ]
+          },
+          {
+            "id": "color-contrast",
+            "impact": "serious",
+            "help": "Elements must meet minimum color contrast ratio thresholds",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/color-contrast?application=axeAPI",
+            "nodes": 5,
+            "targets": [
+              ".brand-sub",
+              ".active > .nav-text",
+              ".meta:nth-child(4) > .mono[data-version=\"1\"][title=\"版本信息\"]"
+            ]
+          },
+          {
+            "id": "empty-table-header",
+            "impact": "minor",
+            "help": "Table header text should not be empty",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/empty-table-header?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "th:nth-child(8)"
+            ]
+          },
+          {
+            "id": "landmark-one-main",
+            "impact": "moderate",
+            "help": "Document should have one main landmark",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/landmark-one-main?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "page-has-heading-one",
+            "impact": "moderate",
+            "help": "Page should contain a level-one heading",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/page-has-heading-one?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "region",
+            "impact": "moderate",
+            "help": "All page content should be contained by landmarks",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/region?application=axeAPI",
+            "nodes": 11,
+            "targets": [
+              ".card-head > span:nth-child(1)",
+              ".card-head > .muted",
+              ".input"
+            ]
+          }
+        ],
+        "counts": {
+          "critical": 1,
+          "serious": 5,
+          "moderate": 13,
+          "minor": 1
+        },
+        "passCount": 31,
+        "incomplete": 1
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": []
+    },
+    {
+      "id": "notify",
+      "title": "通知",
+      "url": "http://127.0.0.1:16601/#/notify",
+      "screenshot": "notify.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 1668,
+      "metrics": {
+        "title": "通知",
+        "hash": "#/notify",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [
+          {
+            "id": "button-name",
+            "impact": "critical",
+            "help": "Buttons must have discernible text",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/button-name?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "button[data-theme-toggle=\"1\"]"
+            ]
+          },
+          {
+            "id": "color-contrast",
+            "impact": "serious",
+            "help": "Elements must meet minimum color contrast ratio thresholds",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/color-contrast?application=axeAPI",
+            "nodes": 6,
+            "targets": [
+              ".brand-sub",
+              ".active > .nav-text",
+              ".meta:nth-child(4) > .mono[data-version=\"1\"][title=\"版本信息\"]"
+            ]
+          },
+          {
+            "id": "landmark-one-main",
+            "impact": "moderate",
+            "help": "Document should have one main landmark",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/landmark-one-main?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "page-has-heading-one",
+            "impact": "moderate",
+            "help": "Page should contain a level-one heading",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/page-has-heading-one?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "region",
+            "impact": "moderate",
+            "help": "All page content should be contained by landmarks",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/region?application=axeAPI",
+            "nodes": 9,
+            "targets": [
+              ".card-header > span:nth-child(1)",
+              ".sub",
+              "thead"
+            ]
+          }
+        ],
+        "counts": {
+          "critical": 1,
+          "serious": 6,
+          "moderate": 11,
+          "minor": 0
+        },
+        "passCount": 28,
+        "incomplete": 1
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": []
+    },
+    {
+      "id": "logs",
+      "title": "日志",
+      "url": "http://127.0.0.1:16601/#/logs",
+      "screenshot": "logs.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 1654,
+      "metrics": {
+        "title": "日志",
+        "hash": "#/logs",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [
+          {
+            "id": "button-name",
+            "impact": "critical",
+            "help": "Buttons must have discernible text",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/button-name?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "button[data-theme-toggle=\"1\"]"
+            ]
+          },
+          {
+            "id": "color-contrast",
+            "impact": "serious",
+            "help": "Elements must meet minimum color contrast ratio thresholds",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/color-contrast?application=axeAPI",
+            "nodes": 17,
+            "targets": [
+              ".brand-sub",
+              ".active > .nav-text",
+              ".meta:nth-child(4) > .mono[data-version=\"1\"][title=\"版本信息\"]"
+            ]
+          },
+          {
+            "id": "landmark-one-main",
+            "impact": "moderate",
+            "help": "Document should have one main landmark",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/landmark-one-main?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "page-has-heading-one",
+            "impact": "moderate",
+            "help": "Page should contain a level-one heading",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/page-has-heading-one?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "region",
+            "impact": "moderate",
+            "help": "All page content should be contained by landmarks",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/region?application=axeAPI",
+            "nodes": 7,
+            "targets": [
+              ".card-header",
+              "select",
+              ".input"
+            ]
+          }
+        ],
+        "counts": {
+          "critical": 1,
+          "serious": 17,
+          "moderate": 9,
+          "minor": 0
+        },
+        "passCount": 27,
+        "incomplete": 1
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": []
+    },
+    {
+      "id": "settings",
+      "title": "设置",
+      "url": "http://127.0.0.1:16601/#/settings",
+      "screenshot": "settings.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 1610,
+      "metrics": {
+        "title": "设置",
+        "hash": "#/settings",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [
+          {
+            "id": "button-name",
+            "impact": "critical",
+            "help": "Buttons must have discernible text",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/button-name?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "button[data-theme-toggle=\"1\"]"
+            ]
+          },
+          {
+            "id": "color-contrast",
+            "impact": "serious",
+            "help": "Elements must meet minimum color contrast ratio thresholds",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/color-contrast?application=axeAPI",
+            "nodes": 9,
+            "targets": [
+              ".brand-sub",
+              "button[data-page=\"settings\"] > .nav-text",
+              ".meta:nth-child(4) > .mono[data-version=\"1\"][title=\"版本信息\"]"
+            ]
+          },
+          {
+            "id": "label",
+            "impact": "critical",
+            "help": "Form elements must have labels",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/label?application=axeAPI",
+            "nodes": 3,
+            "targets": [
+              "input[max=\"720\"]",
+              "input[max=\"100\"]",
+              "input[max=\"1440\"]"
+            ]
+          },
+          {
+            "id": "landmark-one-main",
+            "impact": "moderate",
+            "help": "Document should have one main landmark",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/landmark-one-main?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "page-has-heading-one",
+            "impact": "moderate",
+            "help": "Page should contain a level-one heading",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/page-has-heading-one?application=axeAPI",
+            "nodes": 1,
+            "targets": [
+              "html"
+            ]
+          },
+          {
+            "id": "region",
+            "impact": "moderate",
+            "help": "All page content should be contained by landmarks",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/region?application=axeAPI",
+            "nodes": 2,
+            "targets": [
+              ".card-header",
+              ".grid"
+            ]
+          },
+          {
+            "id": "select-name",
+            "impact": "critical",
+            "help": "Select element must have an accessible name",
+            "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/select-name?application=axeAPI",
+            "nodes": 2,
+            "targets": [
+              ".field:nth-child(3) > select",
+              ".field:nth-child(9) > select"
+            ]
+          }
+        ],
+        "counts": {
+          "critical": 6,
+          "serious": 9,
+          "moderate": 4,
+          "minor": 0
+        },
+        "passCount": 28,
+        "incomplete": 1
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": []
+    }
+  ],
+  "a11yTotals": {
+    "critical": 26,
+    "serious": 110,
+    "moderate": 188,
+    "minor": 7
+  },
+  "axeRuntimeVersion": "4.14.0",
+  "visualReview": ""
+}

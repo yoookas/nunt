@@ -8,7 +8,6 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
-	"strings"
 )
 
 //go:embed all:assets
@@ -19,7 +18,10 @@ func FS() (fs.FS, error) {
 	return fs.Sub(assets, "assets")
 }
 
-// Handler serves the SPA, falling back to index.html for client side routes.
+// Handler serves the SPA: an embedded asset when the path matches one, the
+// index.html shell for client side routes.
+//
+// 文本资源在第一次被请求时压缩一次并留在内存里，见 compress.go。
 func Handler() http.Handler {
 	sub, err := FS()
 	if err != nil {
@@ -27,39 +29,5 @@ func Handler() http.Handler {
 			http.Error(w, "admin interface is unavailable", http.StatusInternalServerError)
 		})
 	}
-	fileServer := http.FileServer(http.FS(sub))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := strings.TrimPrefix(r.URL.Path, "/")
-		if p == "" {
-			p = "index.html"
-		}
-		if strings.HasPrefix(p, "api/") || strings.HasPrefix(p, "healthz") {
-			http.NotFound(w, r)
-			return
-		}
-		if _, err := fs.Stat(sub, p); err != nil {
-			// Client side route: serve the shell.
-			r = r.Clone(r.Context())
-			r.URL.Path = "/"
-			serveIndex(sub, w, r)
-			return
-		}
-		if strings.HasSuffix(p, ".html") {
-			w.Header().Set("Cache-Control", "no-cache")
-		} else {
-			w.Header().Set("Cache-Control", "public, max-age=600")
-		}
-		fileServer.ServeHTTP(w, r)
-	})
-}
-
-func serveIndex(sub fs.FS, w http.ResponseWriter, r *http.Request) {
-	data, err := fs.ReadFile(sub, "index.html")
-	if err != nil {
-		http.Error(w, "admin interface is unavailable", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	_, _ = w.Write(data)
+	return newAssetHandler(sub)
 }

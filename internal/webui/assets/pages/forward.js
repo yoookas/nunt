@@ -57,7 +57,7 @@ function makeEl(tag, attrs, kids, ns) {
 }
 
 function el(tag, attrs, ...kids) {
-  if (typeof tag === 'string' && /^[a-zA-Z]+$/.test(tag)) return makeEl(tag, attrs, kids, false);
+  if (typeof tag === 'string' && /^[a-zA-Z][a-zA-Z0-9]*$/.test(tag)) return makeEl(tag, attrs, kids, false);
   return makeEl('span', null, [tag].concat(kids || []), false);
 }
 

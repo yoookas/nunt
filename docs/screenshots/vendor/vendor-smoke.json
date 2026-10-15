@@ -1,0 +1,18 @@
+{
+  "at": "2026-10-15T08:33:14.015Z",
+  "vendorDir": "internal/webui/assets/vendor/shoelace",
+  "componentsChecked": 39,
+  "missingComponents": [],
+  "iconLoaded": true,
+  "theme": {
+    "themeClass": "sl-theme-dark sl-scroll-lock",
+    "primary600": "hsl(198.7 97.9% 57.2%)",
+    "neutral0": "hsl(240, 5.9%, 11%)",
+    "buttonHeight": 40
+  },
+  "consoleErrors": [],
+  "failedRequests": [],
+  "externalRequests": [],
+  "screenshot": "docs/screenshots/vendor/shoelace-vendor-smoke.png",
+  "result": "PASS"
+}

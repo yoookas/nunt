@@ -7,6 +7,10 @@
 # local go caches (sandbox-local)
 /.gocache/
 
+# node dev tooling only (Playwright UI baseline / axe-core / Shoelace 同步源)
+# 构建与镜像不依赖 Node：这里只有开发期脚本需要的依赖。
+/node_modules/
+
 # runtime data
 /data/
 *.log
