@@ -1,0 +1,136 @@
+{
+  "at": "2026-10-15T18:29:52.504Z",
+  "seeded": [
+    "ddns/rules 200",
+    "acme/jobs 400"
+  ],
+  "theme": "sl-theme-light",
+  "pages": {
+    "ddns": {
+      "a11y": {
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "violations": [],
+        "viewport": 900
+      },
+      "probe": {
+        "htmlClass": "sl-theme-light",
+        "bodyBg": "rgb(244, 244, 245)",
+        "h2Count": 2,
+        "h3Count": 0,
+        "tables": 2,
+        "bars": [],
+        "states": []
+      },
+      "consoleErrors": [],
+      "external": [],
+      "dialog": {
+        "a11y": {
+          "counts": {
+            "critical": 0,
+            "serious": 0,
+            "moderate": 2,
+            "minor": 0
+          },
+          "violations": [
+            "label-title-only:serious:视口外(不计)  sl-select[data-nunt-field=\"ipv4Mode\"],.select__display-input[part=\"display-input\"][spellcheck=\"false\"]",
+            "label-title-only:serious:视口外(不计)  sl-select[data-nunt-field=\"ipv6Mode\"],.select__display-input[part=\"display-input\"][spellcheck=\"false\"]",
+            "landmark-no-duplicate-banner:moderate:计入  .topbar",
+            "landmark-unique:moderate:计入  .topbar"
+          ],
+          "viewport": 900
+        },
+        "probe": {
+          "title": "新建 DDNS 规则",
+          "fields": 31,
+          "switches": 4,
+          "selects": 5,
+          "inputs": 21,
+          "buttons": [
+            "添加一项",
+            "取消",
+            "保存"
+          ]
+        }
+      }
+    },
+    "acme": {
+      "a11y": {
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "violations": [],
+        "viewport": 900
+      },
+      "probe": {
+        "htmlClass": "sl-theme-light",
+        "bodyBg": "rgb(244, 244, 245)",
+        "h2Count": 2,
+        "h3Count": 0,
+        "tables": 1,
+        "bars": [
+          "50",
+          "11",
+          "0"
+        ],
+        "states": [
+          "还没有证书任务\n      点右上角「新建任务」配置 ACME 签发与自动续期。"
+        ]
+      },
+      "consoleErrors": [],
+      "external": [],
+      "dialog": {
+        "a11y": {
+          "counts": {
+            "critical": 0,
+            "serious": 0,
+            "moderate": 2,
+            "minor": 0
+          },
+          "violations": [
+            "landmark-no-duplicate-banner:moderate:计入  .topbar",
+            "landmark-unique:moderate:计入  .topbar"
+          ],
+          "viewport": 900
+        },
+        "probe": {
+          "title": "新建证书任务",
+          "fields": 9,
+          "switches": 1,
+          "selects": 3,
+          "inputs": 5,
+          "buttons": [
+            "取消",
+            "保存"
+          ]
+        }
+      }
+    }
+  },
+  "control": {
+    "id": "notify",
+    "dialog": {
+      "a11y": {
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 2,
+          "minor": 0
+        },
+        "violations": [
+          "landmark-no-duplicate-banner:moderate:计入  .topbar",
+          "landmark-unique:moderate:计入  .topbar"
+        ],
+        "viewport": 900
+      },
+      "consoleErrors": []
+    }
+  }
+}

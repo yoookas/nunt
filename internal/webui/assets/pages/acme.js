@@ -1,575 +1,81 @@
 // nunt 前端页面模块：acme.js
-// 依赖 lib/ui.js 的导出，同时每个文件内置本地兜底实现（类名与 style.css 对齐），
-// 因此 lib/ui.js 尚未完成时页面也不会白屏。
-
-// ---------------------------------------------------------------------------
-// 页面本地基础工具（自包含，无构建步骤）
 //
-// 优先使用 lib/ui.js 的导出；lib/ui.js 尚未就绪时退回到本地实现，并把本地
-// 实现产生的 DOM 对齐 style.css 的类名（.card/.btn/.table/...），因此两种
-// 情况下页面的外观保持一致。导入名与本项目前端契约一致。
-// ---------------------------------------------------------------------------
+// 阶段 2 批次 C：渲染层迁移到 kit（组件层），数据流与接口一字未改。
+//   * 证书任务表 / 证书列表换成 nunt-table：操作列走 actions（右对齐、不换行），
+//     列标题全部有文字，消掉迁移前的 empty-table-header；
+//   * 新建 / 编辑任务走 openDialog + formGrid（域名多行、密钥类型、挑战方式、DNS 提供商与
+//     由 /api/v1/ddns/providers 元数据动态生成的凭据表单、解析服务器、续期天数），
+//     选 dns-01 才显示 DNS 字段（迁移前同款联动）；
+//   * 剩余天数用 sl-progress-bar + 剩余天数文案（沿用「按 90 天有效期估算」的口径）；
+//   * 签发走 POST /api/v1/acme/jobs/{id}/issue（异步）：每 5 秒轮询 /certificates，
+//     出现该域名即结束，期间显示进度、可取消等待（清理函数会停掉轮询）；
+//   * 上传证书对话框保留 PEM 两个文本域 + 文件选择读为文本 + 域名，提交体保持多别名写法；
+//   * 删除确认走 confirmDialog，空 / 加载 / 错误态走 nunt-empty / nunt-loading / nunt-error；
+//   * 卡片标题一律 h2，页面私有样式用 pacme- 前缀并随 mount 的清理函数移除。
+//
+// 接口与提交体形状与迁移前逐条一致：
+//   GET/POST/PUT/DELETE /api/v1/acme/jobs[/{id}]、POST /api/v1/acme/jobs/{id}/toggle
+//   POST /api/v1/acme/jobs/{id}/issue、GET /api/v1/acme/certificates
+//   DELETE /api/v1/acme/certificates/{id}、POST /api/v1/acme/certificates/upload
+//   GET  /api/v1/ddns/providers（DNS 凭据表单的元数据来源）
+// 任务提交体：name/enable/domains/keyType/challenge/dnsProvider/dnsCreds/dnsResolvers/
+//             renewDays/remark；上传提交体：name/domains/cert/certificate/key/privateKey/chain。
 import {
-  el as libEl,
-  toast as libToast,
-  confirmDialog as libConfirm,
-  openModal as libOpenModal,
-  fmtBytes as libFmtBytes,
-  fmtTime as libFmtTime,
-  escapeHtml as libEscapeHtml,
-  renderTable as libRenderTable,
-} from '../lib/ui.js';
+  NuntElement, html, nothing, define, renderInto, formGrid, openDialog, confirmDialog, toast,
+  errorMessage, fmtTime,
+} from '../lib/kit.js';
 
-const SVGNS = 'http://www.w3.org/2000/svg';
-const TXT = (s) => (s === null || s === undefined ? '' : String(s));
+const EOL = String.fromCharCode(10);
+const TAB = String.fromCharCode(9);
+const ISSUE_POLL_MS = 5000;
 
-function attach(parent, kids) {
-  for (const kid of kids) {
-    if (kid === null || kid === undefined || kid === false || kid === true) continue;
-    if (Array.isArray(kid)) { attach(parent, kid); continue; }
-    if (typeof kid === 'object' && kid.nodeType) { parent.appendChild(kid); continue; }
-    parent.appendChild(document.createTextNode(String(kid)));
-  }
+const CHALLENGE_LABEL = { 'http-01': 'HTTP-01', 'dns-01': 'DNS-01', 'tls-alpn-01': 'TLS-ALPN-01' };
+const KEY_LABEL = { ecdsa: 'ECDSA P-256', rsa2048: 'RSA 2048', rsa4096: 'RSA 4096' };
+
+const CHALLENGE_OPTIONS = [
+  { value: 'http-01', label: 'HTTP-01（需要 80 端口可访问）' },
+  { value: 'dns-01', label: 'DNS-01（泛域名必须用这个）' },
+  { value: 'tls-alpn-01', label: 'TLS-ALPN-01（需要 443 端口）' },
+];
+
+const KEY_OPTIONS = [
+  { value: '', label: '使用全局默认' },
+  { value: 'ecdsa', label: 'ECDSA P-256' },
+  { value: 'rsa2048', label: 'RSA 2048' },
+  { value: 'rsa4096', label: 'RSA 4096' },
+];
+
+/* ------------------------------------------------------------------ 局部样式 */
+
+const PAGE_CSS = [
+  '.pacme-name{font-weight:600;word-break:break-word}',
+  '.pacme-remark{font-size:11px;color:var(--text-faint);word-break:break-word}',
+  '.pacme-chips{display:flex;flex-wrap:wrap;gap:4px}',
+  '.pacme-ip{font-family:var(--sl-font-mono);font-size:12.5px;word-break:break-all}',
+  '.pacme-switch{font-size:12px}',
+  '.pacme-note{margin:0 0 10px;font-size:12.5px;color:var(--text-dim)}',
+  '.pacme-creds{margin-bottom:4px}',
+  '.pacme-legend{font-size:12px;font-weight:600;color:var(--text-dim);margin:6px 0 8px}',
+  '.pacme-days{display:flex;align-items:center;gap:8px;min-width:150px}',
+  '.pacme-bar{flex:1 1 auto;min-width:90px;--height:8px;--track-color:var(--line);--indicator-color:var(--ok)}',
+  '.pacme-bar.is-warn{--indicator-color:var(--warn)}',
+  '.pacme-bar.is-err{--indicator-color:var(--err)}',
+  '.pacme-bar.is-neutral{--indicator-color:var(--sl-color-neutral-400)}',
+  '.pacme-daystext{font-size:12.5px;white-space:nowrap}',
+  '.pacme-pem{display:flex;flex-direction:column;gap:6px;align-items:flex-start}',
+  '.pacme-pem sl-textarea{width:100%}',
+  '.pacme-progress{--height:6px;margin:4px 0 10px}',
+].join(EOL);
+
+function pageStyle(root, css) {
+  if (!css) return () => {};
+  const tag = document.createElement('style');
+  tag.textContent = css;
+  root.appendChild(tag);
+  return () => { if (tag.parentNode) tag.parentNode.removeChild(tag); };
 }
 
-function makeEl(tag, attrs, kids, ns) {
-  const node = ns ? document.createElementNS(SVGNS, tag) : document.createElement(tag);
-  if (attrs && typeof attrs === 'object' && !attrs.nodeType && !Array.isArray(attrs)) {
-    for (const key of Object.keys(attrs)) {
-      const value = attrs[key];
-      if (value === null || value === undefined || value === false) continue;
-      if (key === 'class' || key === 'className') node.setAttribute('class', TXT(value));
-      else if (key === 'style' && typeof value === 'object') Object.assign(node.style, value);
-      else if (key === 'dataset' && typeof value === 'object') Object.assign(node.dataset, value);
-      else if (key === 'text') node.textContent = TXT(value);
-      else if (key === 'value') node.value = TXT(value);
-      else if (key === 'checked') node.checked = !!value;
-      else if (key === 'disabled') node.disabled = !!value;
-      else if (key === 'selected') node.selected = !!value;
-      else if (/^on[a-z]+$/.test(key) && typeof value === 'function') node.addEventListener(key.slice(2).toLowerCase(), value);
-      else node.setAttribute(key, value === true ? '' : TXT(value));
-    }
-  } else if (attrs !== null && attrs !== undefined && typeof attrs !== 'object') {
-    kids = [attrs].concat(kids || []);
-  }
-  attach(node, kids || []);
-  return node;
-}
-
-function el(tag, attrs, ...kids) {
-  if (typeof tag === 'string' && /^[a-zA-Z][a-zA-Z0-9]*$/.test(tag)) return makeEl(tag, attrs, kids, false);
-  return makeEl('span', null, [tag].concat(kids || []), false);
-}
-
-const h = libEl || el;
-
-/* ------------------------------------------------------------------ 提示 */
-
-function toast(msg, type) {
-  if (libToast) { try { libToast(TXT(msg), type || 'info'); return; } catch (err) { /* 回退 */ } }
-  let host = document.querySelector('.toast-host');
-  if (!host) {
-    host = el('div', { class: 'toast-host', role: 'status', 'aria-live': 'polite' });
-    document.body.appendChild(host);
-  }
-  const kind = (type === 'ok' || type === 'warn' || type === 'err' || type === 'info') ? type : 'info';
-  const node = el('div', { class: 'toast ' + kind, text: TXT(msg) });
-  host.appendChild(node);
-  setTimeout(() => node.remove(), kind === 'err' ? 6000 : 3200);
-}
-
-/* ------------------------------------------------------------------ 弹窗 */
-
-function modal(options) {
-  const opts = options || {};
-  const bodyNode = el('div', { class: 'modal-body' });
-  if (opts.body && opts.body.nodeType) bodyNode.appendChild(opts.body);
-  else if (opts.body !== undefined && opts.body !== null) bodyNode.textContent = TXT(opts.body);
-
-  const footerNode = el('div', { class: 'modal-footer' });
-  const card = el('div', { class: 'modal-card' + (opts.wide ? ' wide' : ''), role: 'dialog', 'aria-modal': 'true' });
-  const titleId = 'page-modal-' + Math.random().toString(36).slice(2, 8);
-  card.setAttribute('aria-labelledby', titleId);
-
-  const closeBtn = el('button', {
-    class: 'icon-btn', type: 'button', title: '关闭', 'aria-label': '关闭',
-    text: String.fromCharCode(10005),
-    onclick: () => close(),
-  });
-  const header = el('div', { class: 'modal-header' }, el('span', { id: titleId, text: TXT(opts.title) }), el('span', { class: 'spacer' }), closeBtn);
-  const root = el('div', { class: 'modal' }, card);
-  card.appendChild(header);
-  card.appendChild(bodyNode);
-  if (opts.actions && opts.actions.length) card.appendChild(footerNode);
-
-  let closed = false;
-  function close() {
-    if (closed) return;
-    closed = true;
-    document.removeEventListener('keydown', onKey, true);
-    root.remove();
-    if (!document.querySelector('.modal')) document.body.classList.remove('modal-open');
-    if (typeof opts.onClose === 'function') { try { opts.onClose(); } catch (err) { /* 忽略 */ } }
-  }
-  function onKey(event) { if (event.key === 'Escape' && opts.onEscape !== false) close(); }
-
-  const api = { root, card, body: bodyNode, footer: footerNode, buttons: {}, close, setBusy() {} };
-  for (const action of opts.actions || []) {
-    if (!action) continue;
-    const kind = action.kind === 'primary' ? 'btn btn-primary'
-      : action.kind === 'danger' ? 'btn btn-danger'
-        : action.kind === 'ghost' ? 'btn btn-ghost' : 'btn';
-    const node = el('button', { class: kind, type: 'button', disabled: !!action.disabled, text: TXT(action.label) });
-    node.addEventListener('click', async () => {
-      if (typeof action.onClick !== 'function') { close(); return; }
-      let result;
-      try { result = await action.onClick(api); } catch (err) { return; }
-      if (result !== false && action.close !== false) close();
-    });
-    footerNode.appendChild(node);
-    api.buttons[TXT(action.label)] = node;
-  }
-  if (opts.maskClose !== false) root.addEventListener('mousedown', (event) => { if (event.target === root) close(); });
-  document.addEventListener('keydown', onKey, true);
-  document.body.classList.add('modal-open');
-  document.body.appendChild(root);
-  return api;
-}
-
-function openModal(options) {
-  if (libOpenModal) { try { return libOpenModal(options); } catch (err) { /* 回退 */ } }
-  return modal(options);
-}
-
-function confirmDialog(msg, options) {
-  if (libConfirm) {
-    try {
-      const p = libConfirm(TXT(msg), options);
-      if (p && typeof p.then === 'function') return p;
-      return Promise.resolve(!!p);
-    } catch (err) { /* 回退 */ }
-  }
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = (value) => { if (!done) { done = true; resolve(value); } };
-    modal({
-      title: '请确认',
-      body: el('div', null, el('p', { style: { margin: '0' }, text: TXT(msg) })),
-      onClose: () => finish(false),
-      actions: [
-        { label: '取消', onClick: () => finish(false) },
-        { label: '确定', kind: 'primary', onClick: () => finish(true) },
-      ],
-    });
-  });
-}
-
-/* ------------------------------------------------------------------ 格式化 */
-
-function fmtBytes(n) {
-  if (libFmtBytes) { try { return libFmtBytes(n); } catch (err) { /* 回退 */ } }
-  if (n === null || n === undefined || n === '') return '-';
-  const num = Number(n);
-  if (!isFinite(num)) return '-';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  let value = Math.abs(num);
-  let i = 0;
-  while (value >= 1024 && i < units.length - 1) { value /= 1024; i += 1; }
-  const text = i === 0 ? String(Math.round(value)) : (value >= 100 ? value.toFixed(0) : value.toFixed(1));
-  return (num < 0 ? '-' : '') + text + ' ' + units[i];
-}
-
-function fmtTime(t) {
-  if (libFmtTime) { try { return libFmtTime(t); } catch (err) { /* 回退 */ } }
-  if (t === null || t === undefined || t === '') return '-';
-  let date;
-  if (t instanceof Date) date = t;
-  else if (typeof t === 'number') date = new Date(t < 1e12 ? t * 1000 : t);
-  else {
-    date = new Date(String(t));
-    if (isNaN(date.getTime())) {
-      const num = Number(String(t));
-      if (!isNaN(num) && String(t).trim() !== '') date = new Date(num < 1e12 ? num * 1000 : num);
-    }
-  }
-  if (!date || isNaN(date.getTime())) return TXT(t);
-  const p = (x) => (x < 10 ? '0' + x : String(x));
-  return date.getFullYear() + '-' + p(date.getMonth() + 1) + '-' + p(date.getDate()) + ' ' + p(date.getHours()) + ':' + p(date.getMinutes()) + ':' + p(date.getSeconds());
-}
-
-function dateAgo(t) {
-  if (!t) return '-';
-  const date = (t instanceof Date) ? t : new Date(String(t));
-  if (isNaN(date.getTime())) return TXT(t);
-  const secs = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (secs < 0) return fmtTime(t);
-  if (secs < 60) return secs + ' 秒前';
-  if (secs < 3600) return Math.floor(secs / 60) + ' 分钟前';
-  if (secs < 86400) return Math.floor(secs / 3600) + ' 小时前';
-  return Math.floor(secs / 86400) + ' 天前';
-}
-
-function escapeHtml(s) {
-  if (libEscapeHtml) { try { return libEscapeHtml(s); } catch (err) { /* 回退 */ } }
-  return TXT(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
-function textOf(v, fallback) {
-  if (v === null || v === undefined || v === '') return fallback === undefined ? '-' : fallback;
-  if (Array.isArray(v)) {
-    const parts = v.filter((x) => x !== null && x !== undefined && String(x) !== '');
-    return parts.length ? parts.map((x) => String(x)).join(', ') : (fallback === undefined ? '-' : fallback);
-  }
-  return String(v);
-}
-
-/* ------------------------------------------------------------------ 组件 */
-
-function clear(node) { if (node) while (node.firstChild) node.removeChild(node.firstChild); return node; }
-
-function spinner(label) {
-  return el('div', { class: 'loading' }, el('span', { class: 'spinner' }), el('span', { text: label || '加载中…' }));
-}
-
-function emptyBox(msg) {
-  return el('div', { class: 'empty' }, el('div', { class: 'empty-title', text: msg || '暂无数据' }));
-}
-
-function errorCard(err, onRetry) {
-  const msg = (err && err.message) ? err.message : TXT(err || '未知错误');
-  const notice = el('div', { class: 'notice' },
-    el('div', { style: { fontWeight: '600' }, text: '接口调用失败' }),
-    el('div', { text: msg }),
-    el('div', { style: { opacity: '.85', marginTop: '4px' }, text: '该功能可能尚未实现，或后台服务异常；可稍后重试。' }),
-  );
-  if (onRetry) {
-    notice.appendChild(el('div', { style: { marginTop: '8px' } }, el('button', { class: 'btn btn-sm', type: 'button', text: '重试', onclick: () => onRetry() })));
-  }
-  return notice;
-}
-
-function btn(label, opts) {
-  const o = opts || {};
-  const kind = o.kind === 'primary' ? ' btn-primary' : (o.kind === 'danger' ? ' btn-danger' : (o.kind === 'ghost' ? ' btn-ghost' : ''));
-  const node = el('button', {
-    class: 'btn' + kind + (o.small ? ' btn-sm' : ''),
-    type: 'button',
-    title: o.title || '',
-    disabled: !!o.disabled,
-    onclick: o.onClick,
-  }, o.icon || null, el('span', { text: TXT(label) }));
-  if (o.tag) node.dataset.tag = o.tag;
-  return node;
-}
-
-function iconBtn(icon, opts) {
-  const o = opts || {};
-  const node = el('button', {
-    class: 'icon-btn',
-    type: 'button',
-    title: o.title || '',
-    'aria-label': o.title || '',
-    onclick: o.onClick,
-  }, icon || null);
-  if (o.tag) node.dataset.tag = o.tag;
-  return node;
-}
-
-function svgIcon(paths) {
-  return makeEl('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', width: '16', height: '16' },
-    paths.map((d) => makeEl('path', { d: d }, [], true)), true);
-}
-
-function editIcon() { return svgIcon(['M4 20h4l10-10-4-4L4 16v4z', 'M14 6l4 4']); }
-function trashIcon() { return svgIcon(['M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13']); }
-function logIcon() { return svgIcon(['M4 5h16v14H4z', 'M7 9h10M7 13h7']); }
-function runIcon() { return svgIcon(['M7 5l12 7-12 7z']); }
-
-function switchEl(on, onToggle) {
-  const box = el('input', { type: 'checkbox' });
-  box.checked = !!on;
-  const textNode = el('span', { text: on ? '已启用' : '已停用' });
-  const label = el('label', { class: 'switch', title: on ? '点击停用' : '点击启用' }, box, el('span', { class: 'track' }), textNode);
-  label.dataset.tag = 'toggle';
-  let busy = false;
-  const state = { on: !!on, set(next) { busy = false; state.on = !!next; box.checked = state.on; textNode.textContent = state.on ? '已启用' : '已停用'; } };
-  label.addEventListener('click', (event) => event.stopPropagation());
-  box.addEventListener('change', () => {
-    if (busy) return;
-    busy = true;
-    label.dataset.busy = '1';
-    const next = box.checked;
-    Promise.resolve(onToggle ? onToggle({ target: label, value: next }) : next)
-      .then((result) => { busy = false; delete label.dataset.busy; if (result === false) state.set(!next); })
-      .catch(() => { busy = false; delete label.dataset.busy; state.set(!next); });
-  });
-  return label;
-}
-
-function chip(txt) { return el('span', { class: 'chip', text: TXT(txt) }); }
-
-function chips(list, max) {
-  const arr = (list || []).filter((x) => x !== null && x !== undefined && String(x) !== '');
-  if (!arr.length) return el('span', { class: 'muted', text: '-' });
-  const box = el('span', { class: 'row' });
-  const limit = max || 3;
-  for (const item of arr.slice(0, limit)) box.appendChild(chip(item));
-  if (arr.length > limit) box.appendChild(el('span', { class: 'faint', style: { fontSize: '12px' }, text: '+' + (arr.length - limit) }));
-  return box;
-}
-
-function badge(txt, kind) {
-  const k = (kind === 'ok' || kind === 'warn' || kind === 'err') ? ' ' + kind : '';
-  return el('span', { class: 'badge' + k, text: TXT(txt) });
-}
-
-function bar(pct, kind) {
-  const p = Math.max(0, Math.min(100, Number(pct) || 0));
-  const k = (kind === 'warn' || kind === 'err') ? ' ' + kind : '';
-  return el('span', { class: 'bar' + k, style: { flex: '1 1 auto', minWidth: '70px' }, title: Math.round(p) + '%' },
-    el('i', { style: { width: p + '%' } }));
-}
-
-function card(title, headExtra, body) {
-  return el('div', { class: 'card' },
-    el('div', { class: 'card-header' }, el('h3', { text: TXT(title) }), el('span', { class: 'spacer' }), headExtra || null),
-    el('div', { class: 'card-body' }, body || null),
-  );
-}
-
-function tableEl(cols, rows, empty) {
-  const list = rows || [];
-  if (!list.length) return emptyBox(empty || '暂无数据');
-  const thead = el('thead', null, el('tr', null, (cols || []).map((c) => el('th', { text: c.title, style: c.align === 'right' ? { textAlign: 'right' } : null }))));
-  const tbody = el('tbody', null, list.map((row) => el('tr',
-    { class: row.onClick ? 'clickable' : null, dataset: row.tag ? { row: row.tag } : null, onclick: row.onClick || null },
-    (cols || []).map((c) => {
-      // 行包装对象 {raw, tag, onClick}：渲染函数始终拿到真实数据对象。
-      const data = (row && row.raw !== undefined) ? row.raw : row;
-      const value = c.render ? c.render(data) : (data ? data[c.key] : '');
-      const cell = el('td', { class: c.cls || null });
-      attach(cell, [value === null || value === undefined ? '-' : value]);
-      return cell;
-    }),
-  )));
-  return el('table', { class: 'table' }, thead, tbody);
-}
-
-/**
- * renderTable 渲染表格。
- * 优先使用 lib/ui.js 的 renderTable(container, config)；不可用时按同样的配置
- * 形状在本地渲染（columns[{title,key,render,align,cls}] + rows[{tag,onClick,raw}]）。
- * 返回承载表格的容器元素。
- */
-// dataTable 是本地表格渲染函数（renderTable 的兜底实现）。
-const dataTable = tableEl;
-
-function renderTable(container, config) {
-  const cfg = config || {};
-  const host = typeof container === 'string' ? document.querySelector(container) : container;
-  if (!host) return null;
-  const cols = cfg.columns || [];
-  const rows = cfg.rows || [];
-  if (libRenderTable) {
-    try {
-      libRenderTable(host, cfg);
-      const box = el('div', { class: 'page-table' });
-      while (host.firstChild) box.appendChild(host.firstChild);
-      host.appendChild(box);
-      return box;
-    } catch (err) { clear(host); }
-  }
-  clear(host);
-  host.appendChild(tableEl(cols, rows, cfg.empty));
-  return host;
-}
-
-function field(label, control, hint, wide) {
-  const node = el('div', { class: 'field' + (wide ? ' wide' : '') });
-  if (wide) node.style.gridColumn = '1 / -1';
-  if (label) node.appendChild(el('label', { text: TXT(label) }));
-  node.appendChild(control);
-  if (hint) node.appendChild(el('div', { class: 'hint', text: TXT(hint) }));
-  return node;
-}
-
-function fieldSet(legend, kids) {
-  const box = el('div', { class: 'stack', style: { margin: '14px 0' } });
-  if (legend) box.appendChild(el('div', { class: 'muted', style: { fontSize: '12px', fontWeight: '600' }, text: TXT(legend) }));
-  const grid = el('div', { class: 'grid' });
-  attach(grid, kids || []);
-  box.appendChild(grid);
-  return box;
-}
-
-function input(attrs) { return el('input', Object.assign({ class: 'input', type: 'text' }, attrs || {})); }
-function textarea(attrs) { return el('textarea', Object.assign({ class: 'input', rows: '4' }, attrs || {})); }
-
-function selectEl(items, value, attrs) {
-  const node = el('select', Object.assign({ class: 'select' }, attrs || {}));
-  for (const item of (items || [])) {
-    const o = (typeof item === 'string') ? { value: item, label: item } : item;
-    node.appendChild(el('option', { value: TXT(o.value), text: TXT(o.label) }));
-  }
-  node.value = (value === undefined || value === null) ? '' : String(value);
-  if (node.selectedIndex < 0 && node.options.length) node.selectedIndex = 0;
-  return node;
-}
-
-function checkEl(label, isChecked, attrs) {
-  const box = el('input', Object.assign({ type: 'checkbox' }, attrs || {}));
-  box.checked = !!isChecked;
-  return el('label', { class: 'check' }, box, el('span', { text: TXT(label) }));
-}
-
-function tabs(names, active, onPick) {
-  const box = el('div', { class: 'tabs', style: { borderBottom: '0', marginBottom: '0' } });
-  for (const item of names) {
-    const n = (typeof item === 'string') ? { id: item, label: item } : item;
-    box.appendChild(el('button', {
-      class: 'tab' + (String(n.id) === String(active) ? ' active' : ''),
-      type: 'button',
-      text: TXT(n.label),
-      onclick: () => onPick(n.id),
-    }));
-  }
-  return box;
-}
-
-function kv(pairs) {
-  const box = el('div', { class: 'kv' });
-  for (const pair of (pairs || [])) {
-    box.appendChild(el('span', { class: 'k', text: TXT(pair[0]) }));
-    const cell = el('span', { class: 'v' });
-    attach(cell, [pair[1] === null || pair[1] === undefined ? '-' : pair[1]]);
-    box.appendChild(cell);
-  }
-  return box;
-}
-
-function logView(lines, max) {
-  const arr = (lines || []).slice(-1 * (max || 300));
-  if (!arr.length) return emptyBox('暂无日志');
-  return el('div', { class: 'log-view', style: { minHeight: '140px' } }, arr.map((line) => el('div', { class: 'log-line' },
-    el('span', { class: 'msg', text: typeof line === 'string' ? line : JSON.stringify(line) }))));
-}
-
-/* ------------------------------------------------------------------ 表单取值 */
-
-function val(node) { return node && node.value !== undefined ? String(node.value).trim() : ''; }
-function lines(node) { return val(node).split(/[\n,]/).map((s) => s.trim()).filter((s) => s.length > 0); }
-
-function keyValues(node) {
-  const out = {};
-  for (const raw of val(node).split('\n')) {
-    const line = raw.trim();
-    if (!line) continue;
-    const idx = line.indexOf(':');
-    if (idx <= 0) continue;
-    const key = line.slice(0, idx).trim();
-    const value = line.slice(idx + 1).trim();
-    if (key) out[key] = value;
-  }
-  return out;
-}
-
-function kvText(map) {
-  const src = map || {};
-  return Object.keys(src).map((k) => k + ': ' + src[k]).join('\n');
-}
-
-function numOf(node, dflt) {
-  const text = val(node);
-  const n = Number(text);
-  return (text !== '' && isFinite(n)) ? n : (dflt === undefined ? 0 : dflt);
-}
-function checked(node) { return !!(node && node.checked); }
-
-/* ------------------------------------------------------------------ API */
-
-function currentToken() {
-  const w = typeof window !== 'undefined' ? window : {};
-  const boot = w.__NUNT__ || w.__DSH_BOOT__ || null;
-  if (boot && typeof boot === 'object' && boot.csrf) return boot.csrf;
-  const meta = document.querySelector('meta[name="csrf-token"]');
-  if (meta && meta.content) return meta.content;
-  const jar = (typeof document !== 'undefined' && document.cookie) ? document.cookie : '';
-  const m = jar.match(/(?:^|;\s*)csrf_token=([^;]+)/);
-  return m ? decodeURIComponent(m[1]) : '';
-}
-
-async function fetchJSON(method, path, payload, timeoutMs) {
-  const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
-  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs || 20000) : null;
-  try {
-    const res = await fetch(path, {
-      method,
-      credentials: 'same-origin',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': currentToken() },
-      body: (payload === undefined || payload === null) ? undefined : JSON.stringify(payload),
-      signal: ctrl ? ctrl.signal : undefined,
-    });
-    if (res.status === 204) return null;
-    const text = await res.text();
-    let data = null;
-    if (text) { try { data = JSON.parse(text); } catch (err) { data = text; } }
-    if (!res.ok) {
-      let msg = '';
-      if (data && typeof data === 'object') {
-        if (data.error && data.error.message) msg = data.error.message;
-        else if (data.message) msg = data.message;
-      }
-      if (!msg && typeof data === 'string' && data) msg = data.slice(0, 180);
-      if (!msg && res.status === 404) msg = '接口不存在（404），该功能可能尚未实现';
-      if (!msg) msg = '请求失败（HTTP ' + res.status + '）';
-      const err = new Error(msg);
-      err.status = res.status;
-      err.notFound = res.status === 404;
-      throw err;
-    }
-    return data;
-  } catch (e) {
-    if (e && e.name === 'AbortError') { const err = new Error('请求超时（服务器无响应）'); err.timeout = true; throw err; }
-    if (e instanceof Error) throw e;
-    throw new Error(String(e));
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-function wrapAPI(raw) {
-  const base = '/api/v1';
-  const qs = (params) => {
-    if (!params) return '';
-    const sp = new URLSearchParams();
-    for (const key of Object.keys(params)) {
-      const value = params[key];
-      if (value === undefined || value === null || value === '') continue;
-      sp.append(key, String(value));
-    }
-    const text = sp.toString();
-    return text ? '?' + text : '';
-  };
-  const call = (name, method, path, body, isQuery) => {
-    const fn = (raw && typeof raw[name] === 'function') ? raw[name].bind(raw) : null;
-    const full = base + path;
-    if (!fn) return fetchJSON(method, full + qs(isQuery ? body : null), isQuery ? undefined : body);
-    return Promise.resolve().then(() => (isQuery ? fn(full, body) : fn(full, body))).catch((err) => {
-      const retryable = err && (err.notFound === true || err.status === 404 || err.status >= 500 || err.name === 'TypeError');
-      if (!retryable) throw err;
-      return fetchJSON(method, full + qs(isQuery ? body : null), isQuery ? undefined : body);
-    });
-  };
-  return {
-    get: (p, params) => call('get', 'GET', p, params, true),
-    post: (p, b) => call('post', 'POST', p, b, false),
-    put: (p, b) => call('put', 'PUT', p, b, false),
-    del: (p, b) => call('del', 'DELETE', p, b, false),
-    raw,
-  };
-}
-
-/* ------------------------------------------------------------------ 数据 */
+/* ------------------------------------------------------------------ 纯函数（语义与迁移前一致） */
 
 function unwrap(data, keys) {
   if (Array.isArray(data)) return data;
@@ -581,45 +87,88 @@ function unwrap(data, keys) {
   return [];
 }
 
-function debounce(fn, wait) {
-  let timer = null;
-  return function () {
-    const args = arguments;
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => { timer = null; fn.apply(null, args); }, wait || 220);
-  };
+// splitLines / splitDomains：换行、逗号（上传的域名还接受空白）分隔，避免正则转义。
+function splitLines(value) {
+  return String(value === undefined || value === null ? '' : value)
+    .split(EOL).join(',')
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
 }
 
-function makePoller(fn, ms) {
-  let timer = null;
-  let stopped = false;
-  async function tick() {
-    if (stopped) return;
-    try { await fn(); } catch (err) { /* 轮询失败静默 */ }
-    if (!stopped) timer = setTimeout(tick, ms);
-  }
-  timer = setTimeout(tick, ms);
-  return () => { stopped = true; if (timer) clearTimeout(timer); timer = null; };
+function splitDomains(value) {
+  return String(value === undefined || value === null ? '' : value)
+    .split(EOL).join(',')
+    .split(TAB).join(',')
+    .split(' ').join(',')
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
 }
 
-function apiErr(e) { return (e && e.message) ? e.message : TXT(e || '未知错误'); }
-function notFoundHint(e) { return !!(e && (e.notFound === true || e.status === 404)); }
-
-function pageStyle(root, css) {
-  if (!css) return () => {};
-  const tag = document.createElement('style');
-  tag.textContent = css;
-  root.appendChild(tag);
-  return () => { if (tag.parentNode) tag.parentNode.removeChild(tag); };
+function certDomains(c) {
+  const list = c.domains || (c.domain ? [c.domain] : []);
+  return list.filter((x) => x);
 }
 
-// --- DNS 提供商元数据（DDNS 与证书页共用） ---------------------------------
-let dnsProviderCache = null;
-let dnsProviderFinal = false;
-let dnsProviderInflight = null;
+// baseDomain：去掉通配前缀（迁移前是 replace(/^\*\./, '')）。
+function baseDomain(value) {
+  const text = String(value === undefined || value === null ? '' : value);
+  return text.slice(0, 2) === '*.' ? text.slice(2) : text;
+}
 
-// fallbackProviderFields 在 /api/v1/ddns/providers 不可用时提供已知提供商的
-// 凭据输入，保证表单仍然可用。
+function certExpiry(c) {
+  return c.notAfter || c.expiresAt || c.expiry || c.expireTime || c.validTo || null;
+}
+
+function certRemainDays(c) {
+  const direct = c.remainDays !== undefined ? c.remainDays : (c.remainingDays !== undefined ? c.remainingDays : (c.daysLeft !== undefined ? c.daysLeft : undefined));
+  if (direct !== undefined && direct !== null) return Number(direct);
+  const exp = certExpiry(c);
+  if (!exp) return null;
+  const d = new Date(exp);
+  if (isNaN(d.getTime())) return null;
+  return Math.round((d.getTime() - Date.now()) / 86400000);
+}
+
+// daysPercent / daysTone：迁移前的进度条口径（按 90 天有效期估算），换成 sl-progress-bar。
+function daysPercent(days) {
+  if (days === null || days === undefined || !isFinite(days)) return null;
+  return Math.max(0, Math.min(100, (days / 90) * 100));
+}
+
+function daysTone(days) {
+  if (days === null || days === undefined || !isFinite(days)) return 'neutral';
+  if (days <= 0) return 'err';
+  if (days <= 15) return 'warn';
+  return 'ok';
+}
+
+function dateAgo(t) {
+  if (!t) return '-';
+  const date = (t instanceof Date) ? t : new Date(String(t));
+  if (isNaN(date.getTime())) return String(t);
+  const secs = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (secs < 0) return fmtTime(t);
+  if (secs < 60) return secs + ' 秒前';
+  if (secs < 3600) return Math.floor(secs / 60) + ' 分钟前';
+  if (secs < 86400) return Math.floor(secs / 3600) + ' 小时前';
+  return Math.floor(secs / 86400) + ' 天前';
+}
+
+function certPairs(c) {
+  const cert = c || {};
+  const days = certRemainDays(cert);
+  return [
+    { key: 'domains', label: '域名', value: certDomains(cert).join(', ') || '-', mono: true },
+    { key: 'issuer', label: '签发者', value: cert.issuer || cert.ca || '-' },
+    { key: 'expiry', label: '到期时间', value: fmtTime(certExpiry(cert)) },
+    { key: 'remain', label: '剩余', value: (days === null || days === undefined || !isFinite(days)) ? '-' : String(days) + ' 天' },
+  ];
+}
+
+// --- DNS 提供商元数据（与 ddns 页同一份 /api/v1/ddns/providers） -----------------
+
 function fallbackProviderFields(id) {
   const map = {
     cloudflare: [{ key: 'token', label: 'API Token', secret: true, required: true, placeholder: 'Zone.DNS 编辑权限的 API Token' }],
@@ -649,477 +198,814 @@ function normalizeProviders(data) {
   })).filter((p) => p.id);
 }
 
-// loadDNSProviders 带缓存：404 视为该接口不存在并记住，其它失败下次重试。
-async function loadDNSProviders() {
-  if (dnsProviderCache && dnsProviderCache.length) return dnsProviderCache;
-  if (dnsProviderFinal) return dnsProviderCache || [];
-  if (dnsProviderInflight) return dnsProviderInflight;
-  dnsProviderInflight = (async () => {
+let providerCache = null;
+let providerFinal = false;
+let providerInflight = null;
+
+// loadDNSProviders 带缓存：404 视为该接口不存在并记住，其它失败下次重试（迁移前同款）。
+async function loadDNSProviders(api) {
+  if (providerCache && providerCache.length) return providerCache;
+  if (providerFinal) return providerCache || [];
+  if (providerInflight) return providerInflight;
+  providerInflight = (async () => {
     try {
-      const data = await api.get('/ddns/providers');
+      const data = await api.get('/api/v1/ddns/providers');
       const list = normalizeProviders(data);
-      dnsProviderCache = list;
-      dnsProviderFinal = true;
+      providerCache = list;
+      providerFinal = true;
       return list;
-    } catch (e) {
-      if (e && (e.notFound === true || e.status === 404)) { dnsProviderFinal = true; dnsProviderCache = []; return []; }
+    } catch (err) {
+      if (err && (err.notFound === true || err.status === 404)) {
+        providerFinal = true;
+        providerCache = [];
+        return [];
+      }
       return [];
     } finally {
-      dnsProviderInflight = null;
+      providerInflight = null;
     }
   })();
-  return dnsProviderInflight;
+  return providerInflight;
 }
 
-// 页面模块只导出 default；下面的名字供页面内部使用，不再二次导出（避免与
-// lib/ui.js 的语义混淆）。
-const LF = String.fromCharCode(10);
+/* ------------------------------------------------------------------ PEM 文本域 + 文件选择 */
 
-// ---------------------------------------------------------------------------
-// 证书：ACME 签发任务 + 证书列表 + 手动上传
-// ---------------------------------------------------------------------------
-const CHALLENGE_LABEL = { 'http-01': 'HTTP-01', 'dns-01': 'DNS-01', 'tls-alpn-01': 'TLS-ALPN-01' };
-const KEY_LABEL = { ecdsa: 'ECDSA P-256', rsa2048: 'RSA 2048', rsa4096: 'RSA 4096' };
-const PAGE_CSS = [
-  '.pacme-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
-  '.pacme-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}',
-  '@media (max-width:860px){.pacme-grid{grid-template-columns:1fr}}',
-  '.pacme-days{display:flex;align-items:center;gap:8px;min-width:130px}',
-  '.pacme-area{min-height:120px}',
-].join(String.fromCharCode(10));
+// pemBox：一个带「选择文件…」按钮的 PEM 文本域。读文件用 FileReader.readAsText，
+// 与迁移前一致（不新增接口、不产生外部请求）。
+function pemBox(label, placeholder) {
+  const box = document.createElement('div');
+  box.className = 'pacme-pem';
 
-function challengeOptions(value) {
-  return selectEl([
-    { value: 'http-01', label: 'HTTP-01（需要 80 端口可访问）' },
-    { value: 'dns-01', label: 'DNS-01（泛域名必须用这个）' },
-    { value: 'tls-alpn-01', label: 'TLS-ALPN-01（需要 443 端口）' },
-  ], value || 'http-01');
-}
+  const picker = document.createElement('input');
+  picker.type = 'file';
+  picker.accept = '.pem,.crt,.cer,.key,.txt';
+  picker.style.display = 'none';
 
-function keyTypeOptions(value) {
-  return selectEl([
-    { value: '', label: '使用全局默认' },
-    { value: 'ecdsa', label: 'ECDSA P-256' },
-    { value: 'rsa2048', label: 'RSA 2048' },
-    { value: 'rsa4096', label: 'RSA 4096' },
-  ], value || '');
-}
+  const area = document.createElement('sl-textarea');
+  area.setAttribute('label', label);
+  area.setAttribute('rows', '6');
+  area.setAttribute('placeholder', placeholder);
+  area.setAttribute('help-text', '可以直接粘贴 PEM 文本，也可以用「选择文件…」把文件读成文本');
 
-function certDomains(c) {
-  const list = c.domains || (c.domain ? [c.domain] : []);
-  return list.filter((x) => x);
-}
-
-function certExpiry(c) {
-  return c.notAfter || c.expiresAt || c.expiry || c.expireTime || c.validTo || null;
-}
-
-function certRemainDays(c) {
-  const direct = c.remainDays !== undefined ? c.remainDays : (c.remainingDays !== undefined ? c.remainingDays : (c.daysLeft !== undefined ? c.daysLeft : undefined));
-  if (direct !== undefined && direct !== null) return Number(direct);
-  const exp = certExpiry(c);
-  if (!exp) return null;
-  const d = new Date(exp);
-  if (isNaN(d.getTime())) return null;
-  return Math.round((d.getTime() - Date.now()) / 86400000);
-}
-
-function daysBar(days) {
-  if (days === null || days === undefined || !isFinite(days)) return el('span', { class: 'muted', text: '-' });
-  const pct = Math.max(0, Math.min(100, (days / 90) * 100));
-  const kind = days <= 0 ? 'err' : (days <= 15 ? 'warn' : '');
-  return el('div', { class: 'pacme-days' }, bar(pct, kind), el('span', { text: days + ' 天' }));
-}
-
-function openJobForm(job, providers, ctx, reload) {
-  const base = job || {};
-  const editing = !!base.id;
-  const creds = Object.assign({}, base.dnsCreds || {});
-  const name = input({ value: base.name || '', placeholder: '例如 主站证书' });
-  const enable = checkEl('启用（参与自动续期）', base.enable !== false);
-  const domains = textarea({ rows: '4', placeholder: '每行一个域名：' + LF + 'example.com' + LF + '*.example.com', value: (base.domains || []).join(LF) });
-  const keyType = keyTypeOptions(base.keyType);
-  const challenge = challengeOptions(base.challenge);
-  const provider = selectEl(
-    [{ value: '', label: '（不使用 DNS 提供商）' }].concat(providers.length
-      ? providers.map((p) => ({ value: p.id, label: p.title }))
-      : [{ value: base.dnsProvider || '', label: base.dnsProvider || '（未获取到提供商列表）' }]),
-    base.dnsProvider || '',
-  );
-  const resolvers = textarea({ rows: '2', placeholder: '每行一个 DNS 解析服务器：' + LF + '1.1.1.1:53' + LF + '8.8.8.8:53', value: (base.dnsResolvers || []).join(LF) });
-  const renewDays = input({ type: 'number', min: '1', value: String(base.renewDays || 30), placeholder: '30' });
-  const remark = input({ value: base.remark || '', placeholder: '备注（可选）' });
-  const credsHost = el('div', { class: 'grid' });
-  let credNodes = [];
-
-  function rebuildCreds() {
-    clear(credsHost);
-    credNodes = [];
-    const id = val(provider);
-    if (!id) return;
-    const meta = providers.filter((p) => p.id === id)[0];
-    const fields = (meta && meta.fields.length) ? meta.fields : (fallbackProviderFields(id) || []);
-    if (!fields.length) {
-      credsHost.appendChild(el('div', { class: 'notice', text: '未获取到该提供商的凭据说明（/ddns/providers 可能不可用）。' }));
-      return;
-    }
-    for (const f of fields) {
-      const node = input({
-        type: f.secret ? 'password' : 'text',
-        autocomplete: 'new-password',
-        placeholder: f.placeholder || (editing ? '留空表示不修改' : ''),
-        value: creds[f.key] || '',
-      });
-      credNodes.push({ key: f.key, node });
-      credsHost.appendChild(field(f.label + (f.required ? ' *' : ''), node, f.help || ''));
-    }
-  }
-  provider.addEventListener('change', rebuildCreds);
-  rebuildCreds();
-
-  function paintChallenge() {
-    const isDNS = val(challenge) === 'dns-01';
-    provider.parentNode.parentNode.style.display = isDNS ? '' : 'none';
-    resolvers.parentNode.parentNode.style.display = isDNS ? '' : 'none';
-    credsHost.style.display = isDNS ? '' : 'none';
-  }
-  challenge.addEventListener('change', paintChallenge);
-  paintChallenge();
-
-  openModal({
-    title: editing ? '编辑证书任务' : '新建证书任务',
-    body: el('div', {},
-      el('div', { class: 'notice', text: '泛域名（*.example.com）必须使用 DNS-01 挑战并配置对应 DNS 提供商凭据；签发在后台异步进行，可在列表中查看进度。' }),
-      fieldSet('任务', [
-        field('名称', name),
-        field('启用', enable),
-        field('域名', domains, '每行一个', true),
-        field('密钥类型', keyType),
-        field('挑战方式', challenge),
-        field('续期提前天数', renewDays),
-      ]),
-      fieldSet('DNS 挑战', [
-        field('DNS 提供商', provider, '用于自动添加 TXT 记录'),
-        field('解析服务器', resolvers, '校验时使用的 DNS 服务器'),
-        field('凭据', credsHost, '', true),
-      ]),
-      fieldSet('其他', [field('备注', remark, '', true)]),
-    ),
-    actions: [
-      { label: '取消', kind: 'ghost' },
-      {
-        label: '保存', kind: 'primary',
-        onClick: async () => {
-          if (!val(name)) { toast('请填写任务名称', 'warn'); return false; }
-          const list = lines(domains);
-          if (!list.length) { toast('请至少填写一个域名', 'warn'); return false; }
-          if (val(challenge) === 'dns-01' && !val(provider)) { toast('DNS-01 挑战需要选择 DNS 提供商', 'warn'); return false; }
-          const outCreds = Object.assign({}, creds);
-          for (const c of credNodes) {
-            const v = val(c.node);
-            if (v) outCreds[c.key] = v;
-          }
-          const payload = {
-            name: val(name),
-            enable: checked(enable),
-            domains: list,
-            keyType: val(keyType),
-            challenge: val(challenge) || 'http-01',
-            dnsProvider: val(provider),
-            dnsCreds: outCreds,
-            dnsResolvers: lines(resolvers),
-            renewDays: numOf(renewDays, 30),
-            remark: val(remark),
-          };
-          try {
-            if (editing) await api.put('/acme/jobs/' + encodeURIComponent(base.id), payload);
-            else await api.post('/acme/jobs', payload);
-            toast('保存成功', 'ok');
-            reload();
-          } catch (e) {
-            toast('保存失败：' + apiErr(e), 'error');
-            return false;
-          }
-        },
-      },
-    ],
-  });
-}
-
-function issueJob(job, ctx, reload) {
-  const view = el('div', {},
-    el('div', { class: 'notice', text: '签发在后台异步执行：DNS-01 需要等待 TXT 记录生效，通常需要几十秒到几分钟。' }),
-    el('div', { class: 'loading' }, el('span', { class: 'spacerin' }), el('span', { text: '正在提交签发请求…' })),
-  );
-  let stopPoll = null;
-  let done = false;
-  const logBox = el('div', { class: 'scroll' });
-
-  function finish(msg, kind) {
-    done = true;
-    if (stopPoll) stopPoll();
-    clear(view);
-    view.appendChild(el('div', { class: 'notice', text: msg }));
-    view.appendChild(el('div', { style: 'height:8px' }));
-    view.appendChild(el('button', { class: 'btn', type: 'button', text: '关闭', onclick: () => m.close() }));
-    toast(msg, kind || 'ok');
-    reload();
-  }
-
-  const m = openModal({
-    title: '签发证书 - ' + (job.name || job.id),
-    body: view,
-    onClose: () => { if (stopPoll) stopPoll(); },
-    actions: [{ label: '后台执行', kind: 'ghost' }],
+  const pick = document.createElement('sl-button');
+  pick.setAttribute('size', 'small');
+  pick.textContent = '选择文件…';
+  pick.addEventListener('click', () => picker.click());
+  picker.addEventListener('change', () => {
+    const file = picker.files && picker.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      area.value = String(reader.result || '');
+      toast('已读取文件 ' + file.name, 'ok');
+    };
+    reader.onerror = () => toast('读取文件失败', 'err');
+    reader.readAsText(file);
   });
 
-  async function poll() {
-    if (done) return;
+  box.appendChild(pick);
+  box.appendChild(picker);
+  box.appendChild(area);
+  return { box, area };
+}
+
+/* ------------------------------------------------------------------ 页面 */
+
+class AcmePage extends NuntElement {
+  static properties = {
+    jobs: { attribute: false },
+    jobsLoading: { type: Boolean },
+    jobsError: { attribute: false },
+    certs: { attribute: false },
+    certsLoading: { type: Boolean },
+    certsError: { attribute: false },
+    busyId: { type: String },
+  };
+
+  constructor() {
+    super();
+    this.ctx = null;
+    this.jobs = [];
+    this.jobsLoading = true;
+    this.jobsError = null;
+    this.certs = [];
+    this.certsLoading = true;
+    this.certsError = null;
+    this.busyId = '';
+    this.providers = [];
+    this.pollers = new Set();
+    this.dialogHosts = new Set();
+    this.dialogs = new Set();
+    this.disposed = false;
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.loadProviders();
+    this.loadJobs();
+    this.loadCerts();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this.disposed = true;
+  }
+
+  /** dispose 由 mount 返回的清理函数调用：停掉签发轮询、关掉对话框、移除元素。 */
+  dispose() {
+    this.disposed = true;
+    this.stopPollers();
+    for (const host of Array.from(this.dialogHosts)) {
+      try { renderInto(host, nothing); } catch (err) { /* 忽略 */ }
+    }
+    this.dialogHosts.clear();
+    for (const dialog of Array.from(this.dialogs)) {
+      try { dialog.close(); } catch (err) { /* 忽略 */ }
+    }
+    this.dialogs.clear();
+    this.remove();
+  }
+
+  stopPollers() {
+    for (const stop of Array.from(this.pollers)) {
+      try { stop(); } catch (err) { /* 忽略 */ }
+    }
+    this.pollers.clear();
+  }
+
+  openPageDialog(options) {
+    const api = openDialog(options);
+    this.dialogs.add(api);
+    if (api.dialog) api.dialog.addEventListener('sl-after-hide', () => this.dialogs.delete(api));
+    return api;
+  }
+
+  /* ---------------------------------------------------------------- 取数 */
+
+  async loadProviders() {
     try {
-      const data = await api.get('/acme/certificates');
-      const list = unwrap(data, ['certificates', 'items']);
-      const want = (job.domains || []).map((d) => String(d).replace(/^\*\./, ''));
-      const hit = list.filter((c) => {
-        const ds = certDomains(c).map((d) => String(d).replace(/^\*\./, ''));
-        return want.length && want.every((d) => ds.indexOf(d) >= 0);
-      })[0];
-      clear(logBox);
-      if (hit) {
-        logBox.appendChild(kv([
-          ['域名', certDomains(hit).join(', ')],
-          ['签发者', hit.issuer || hit.ca || '-'],
-          ['到期时间', fmtTime(certExpiry(hit))],
-          ['剩余', String(certRemainDays(hit)) + ' 天'],
-        ]));
-        finish('证书已签发：' + (certDomains(hit).join(', ') || '') , 'ok');
+      const list = await loadDNSProviders(this.ctx.api);
+      if (this.disposed) return;
+      this.providers = list;
+    } catch (err) {
+      // 提供商列表拿不到时凭据表单退回 fallbackProviderFields。
+    }
+  }
+
+  async loadJobs() {
+    this.jobsLoading = true;
+    try {
+      const data = await this.ctx.api.get('/api/v1/acme/jobs');
+      if (this.disposed) return;
+      this.jobs = unwrap(data, ['jobs', 'items']);
+      this.jobsError = null;
+    } catch (err) {
+      if (this.disposed) return;
+      this.jobs = [];
+      this.jobsError = err;
+    } finally {
+      if (!this.disposed) this.jobsLoading = false;
+    }
+  }
+
+  async loadCerts() {
+    this.certsLoading = true;
+    try {
+      const data = await this.ctx.api.get('/api/v1/acme/certificates');
+      if (this.disposed) return;
+      this.certs = unwrap(data, ['certificates', 'items']);
+      this.certsError = null;
+    } catch (err) {
+      if (this.disposed) return;
+      this.certs = [];
+      this.certsError = err;
+    } finally {
+      if (!this.disposed) this.certsLoading = false;
+    }
+  }
+
+  loadAll() {
+    this.loadJobs();
+    this.loadCerts();
+  }
+
+  /* ---------------------------------------------------------------- 动作 */
+
+  async toggleJob(job, next) {
+    const want = (next === undefined) ? !job.enable : !!next;
+    this.busyId = String(job.id || '');
+    try {
+      try {
+        await this.ctx.api.post('/api/v1/acme/jobs/' + encodeURIComponent(job.id) + '/toggle');
+      } catch (err) {
+        // 兼容没有 toggle 路由的旧后端：退回整条任务的更新（与迁移前一致）。
+        await this.ctx.api.put('/api/v1/acme/jobs/' + encodeURIComponent(job.id), Object.assign({}, job, { enable: want }));
+      }
+      if (this.disposed) return;
+      toast(want ? '已启用' : '已停用', 'ok');
+      await this.loadJobs();
+    } catch (err) {
+      if (this.disposed) return;
+      toast('切换失败：' + errorMessage(err), 'err');
+    } finally {
+      if (!this.disposed) this.busyId = '';
+    }
+  }
+
+  async removeJob(job) {
+    const ok = await confirmDialog('确定删除证书任务「' + (job.name || job.id) + '」吗？已签发的证书不会被删除。', { danger: true, okLabel: '删除' });
+    if (!ok) return;
+    try {
+      await this.ctx.api.del('/api/v1/acme/jobs/' + encodeURIComponent(job.id));
+      if (this.disposed) return;
+      toast('已删除', 'ok');
+      await this.loadJobs();
+    } catch (err) {
+      if (this.disposed) return;
+      toast('删除失败：' + errorMessage(err), 'err');
+    }
+  }
+
+  async removeCert(cert) {
+    const label = certDomains(cert).join(', ') || cert.name || cert.id;
+    const ok = await confirmDialog('确定删除证书「' + label + '」吗？使用该证书的站点会失去 TLS。', { danger: true, okLabel: '删除' });
+    if (!ok) return;
+    try {
+      await this.ctx.api.del('/api/v1/acme/certificates/' + encodeURIComponent(cert.id || cert.name));
+      if (this.disposed) return;
+      toast('已删除', 'ok');
+      await this.loadCerts();
+    } catch (err) {
+      if (this.disposed) return;
+      toast('删除失败：' + errorMessage(err), 'err');
+    }
+  }
+
+  /* ---------------------------------------------------------------- 任务表单 */
+
+  openJobForm(job) {
+    const base = job || {};
+    const editing = !!base.id;
+    const providers = Array.isArray(this.providers) ? this.providers : [];
+    const creds = Object.assign({}, base.dnsCreds || {});
+    const initialProvider = base.dnsProvider || '';
+
+    // DNS 凭据：字段由 /api/v1/ddns/providers 的元数据决定，换提供商时整块重建。
+    const credsHost = document.createElement('div');
+    credsHost.className = 'pacme-creds';
+    let credForm = null;
+    let credFields = [];
+
+    const paintCreds = (providerId) => {
+      const meta = providers.filter((p) => p.id === providerId)[0] || null;
+      const fields = providerId ? ((meta && meta.fields.length) ? meta.fields : (fallbackProviderFields(providerId) || [])) : [];
+      credForm = null;
+      credFields = fields;
+      while (credsHost.firstChild) credsHost.removeChild(credsHost.firstChild);
+      if (!providerId) {
+        const note = document.createElement('p');
+        note.className = 'pacme-note';
+        note.textContent = '选择 DNS 提供商后，这里会按它的元数据生成凭据字段。';
+        credsHost.appendChild(note);
         return;
       }
-      logBox.appendChild(el('div', { class: 'muted', text: '已等待 ' + Math.round(waited / 1000) + ' 秒，尚未在证书列表中看到该域名…' }));
-    } catch (e) {
-      clear(logBox);
-      logBox.appendChild(errorCard(e, null));
-    }
-  }
+      if (!fields.length) {
+        const note = document.createElement('p');
+        note.className = 'pacme-note';
+        note.textContent = '未获取到该提供商的凭据说明（/ddns/providers 可能不可用）。';
+        credsHost.appendChild(note);
+        return;
+      }
+      credForm = formGrid(fields.map((f) => ({
+        name: 'cred_' + f.key,
+        label: f.label + (f.required ? ' *' : ''),
+        type: f.secret ? 'password' : 'text',
+        value: creds[f.key] || '',
+        placeholder: f.placeholder || (editing ? '留空表示不修改' : ''),
+        autocomplete: 'new-password',
+        hint: f.help || (f.secret ? '密钥不会明文回显，留空表示不修改' : ''),
+      })));
+      credsHost.appendChild(credForm.node);
+      if (meta && meta.authNote) {
+        const note = document.createElement('p');
+        note.className = 'pacme-note';
+        note.textContent = meta.authNote;
+        credsHost.appendChild(note);
+      }
+    };
+    paintCreds(initialProvider);
 
-  let waited = 0;
-  (async () => {
-    try {
-      const res = await api.post('/acme/jobs/' + encodeURIComponent(job.id) + '/issue');
-      const data = res || {};
-      clear(view);
-      view.appendChild(el('div', { class: 'notice', text: data.message || '签发请求已提交，正在等待结果…' }));
-      view.appendChild(el('div', { class: 'muted', style: 'font-size:12px', text: '每 5 秒刷新一次证书列表。' }));
-      view.appendChild(el('div', { style: 'height:8px' }));
-      view.appendChild(logBox);
-    } catch (e) {
-      finish('签发失败：' + apiErr(e), 'error');
-      return;
-    }
-    stopPoll = makePoller(() => { waited += 5000; return poll(); }, 5000);
-    poll();
-  })();
-}
-
-function openUpload(ctx, reload) {
-  const domains = input({ placeholder: '证书包含的域名，逗号分隔，例如 example.com,*.example.com' });
-  const name = input({ placeholder: '名称（可选）' });
-  const certArea = textarea({ class: 'input pacme-area', placeholder: '-----BEGIN CERTIFICATE-----' + LF + '（把证书全文粘贴到这里）' });
-  const keyArea = textarea({ class: 'input pacme-area', placeholder: '-----BEGIN PRIVATE KEY-----' + LF + '（把私钥全文粘贴到这里）' });
-  const chainArea = textarea({ rows: '3', placeholder: '中间证书链（可选）' });
-
-  function bindFile(btn, target) {
-    const picker = el('input', { type: 'file', accept: '.pem,.crt,.cer,.key,.txt', style: 'display:none' });
-    picker.addEventListener('change', () => {
-      const file = picker.files && picker.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => { target.value = String(reader.result || ''); toast('已读取文件 ' + file.name, 'ok'); };
-      reader.onerror = () => toast('读取文件失败', 'error');
-      reader.readAsText(file);
-    });
-    btn.addEventListener('click', () => picker.click());
-    return picker;
-  }
-
-  const certPick = el('button', { class: 'btn btn-sm', type: 'button', text: '选择文件…' });
-  const keyPick = el('button', { class: 'btn btn-sm', type: 'button', text: '选择文件…' });
-  const certPicker = bindFile(certPick, certArea);
-  const keyPicker = bindFile(keyPick, keyArea);
-
-  openModal({
-    title: '上传证书',
-    body: el('div', {},
-      el('div', { class: 'notice', text: '用于导入自签名或第三方签发的证书；证书与私钥必须匹配。' }),
-      fieldSet('证书信息', [
-        field('名称', name),
-        field('域名', domains, '逗号或换行分隔', true),
-      ]),
-      fieldSet('证书内容', [
-        field('证书（PEM）', el('div', {}, el('div', { class: 'bar', style: 'margin-bottom:4px' }, certPick, certPicker), certArea), '', true),
-        field('私钥（PEM）', el('div', {}, el('div', { class: 'bar', style: 'margin-bottom:4px' }, keyPick, keyPicker), keyArea), '', true),
-        field('证书链（可选）', chainArea, '', true),
-      ]),
-    ),
-    actions: [
-      { label: '取消', kind: 'ghost' },
+    const form = formGrid([
+      { name: 'name', label: '名称', value: base.name || '', placeholder: '例如 主站证书' },
+      { name: 'enable', label: '启用', type: 'switch', value: base.enable !== false, text: '启用（参与自动续期）' },
+      { name: 'domains', label: '域名', type: 'textarea', rows: 4, wide: true, value: (base.domains || []).join(EOL), placeholder: '每行一个域名：' + EOL + 'example.com' + EOL + '*.example.com', hint: '每行一个；泛域名必须使用 DNS-01' },
+      { name: 'keyType', label: '密钥类型', type: 'select', value: base.keyType || '', options: KEY_OPTIONS },
       {
-        label: '上传', kind: 'primary',
-        onClick: async () => {
-          if (!val(certArea)) { toast('请粘贴或选择证书文件', 'warn'); return false; }
-          if (!val(keyArea)) { toast('请粘贴或选择私钥文件', 'warn'); return false; }
-          const list = val(domains).split(/[\s,]+/).filter((s) => s.length > 0);
-          const payload = {
-            name: val(name),
-            domains: list,
-            cert: val(certArea),
-            certificate: val(certArea),
-            key: val(keyArea),
-            privateKey: val(keyArea),
-            chain: val(chainArea),
-          };
-          try {
-            await api.post('/acme/certificates/upload', payload);
-            toast('上传成功', 'ok');
-            reload();
-          } catch (e) {
-            toast('上传失败：' + apiErr(e), 'error');
-            return false;
-          }
+        name: 'challenge',
+        label: '挑战方式',
+        type: 'select',
+        value: base.challenge || 'http-01',
+        options: CHALLENGE_OPTIONS,
+        onChange: (value) => paintChallenge(String(value || 'http-01')),
+      },
+      { name: 'renewDays', label: '续期提前天数', type: 'number', min: 1, value: String(base.renewDays || 30), placeholder: '30' },
+
+      legendFieldJob('legendDns', 'DNS 挑战'),
+      {
+        name: 'dnsProvider',
+        label: 'DNS 提供商',
+        type: 'select',
+        value: initialProvider,
+        options: [{ value: '', label: '（不使用 DNS 提供商）' }].concat(providers.length
+          ? providers.map((p) => ({ value: p.id, label: p.title }))
+          : (base.dnsProvider ? [{ value: base.dnsProvider, label: base.dnsProvider + '（未获取到提供商列表）' }] : [])),
+        hint: '用于自动添加 TXT 记录',
+        onChange: (value) => paintCreds(String(value || '')),
+      },
+      { name: 'dnsResolvers', label: '解析服务器', type: 'textarea', rows: 2, wide: true, value: (base.dnsResolvers || []).join(EOL), placeholder: '每行一个 DNS 解析服务器：' + EOL + '1.1.1.1:53' + EOL + '8.8.8.8:53', hint: '校验时使用的 DNS 服务器' },
+      { name: 'dnsCreds', label: false, type: 'custom', wide: true, node: credsHost },
+
+      legendFieldJob('legendOther', '其他'),
+      { name: 'remark', label: '备注', value: base.remark || '', placeholder: '备注（可选）', wide: true },
+    ]);
+
+    // 选 dns-01 才显示 DNS 字段（迁移前同款联动；值仍然照旧提交）。
+    function paintChallenge(value) {
+      const isDNS = value === 'dns-01';
+      form.toggle('dnsProvider', isDNS);
+      form.toggle('dnsResolvers', isDNS);
+      form.toggle('dnsCreds', isDNS);
+    }
+    paintChallenge(String(base.challenge || 'http-01'));
+
+    this.openPageDialog({
+      title: editing ? '编辑证书任务' : '新建证书任务',
+      body: form.node,
+      wide: true,
+      actions: [
+        { label: '取消' },
+        {
+          label: '保存',
+          kind: 'primary',
+          close: false,
+          onClick: async (dlg, button) => {
+            form.clearErrors();
+            const values = form.read();
+            const name = String(values.name || '').trim();
+            const list = splitLines(values.domains);
+            const challenge = String(values.challenge || 'http-01');
+            const dnsProvider = String(values.dnsProvider || '').trim();
+            if (!name) { form.fieldError('name', '请填写任务名称'); return; }
+            if (!list.length) { form.fieldError('domains', '请至少填写一个域名'); return; }
+            if (challenge === 'dns-01' && !dnsProvider) { form.fieldError('dnsProvider', 'DNS-01 挑战需要选择 DNS 提供商'); return; }
+
+            const outCreds = Object.assign({}, creds);
+            if (credForm) {
+              const credValues = credForm.read();
+              for (const field of credFields) {
+                const value = String(credValues['cred_' + field.key] || '').trim();
+                if (value) outCreds[field.key] = value;
+              }
+            }
+            const payload = {
+              name,
+              enable: !!values.enable,
+              domains: list,
+              keyType: String(values.keyType || ''),
+              challenge: challenge || 'http-01',
+              dnsProvider,
+              dnsCreds: outCreds,
+              dnsResolvers: splitLines(values.dnsResolvers),
+              renewDays: Number(values.renewDays) || 30,
+              remark: String(values.remark || '').trim(),
+            };
+            dlg.setBusy(true, button);
+            try {
+              if (editing) await this.ctx.api.put('/api/v1/acme/jobs/' + encodeURIComponent(base.id), payload);
+              else await this.ctx.api.post('/api/v1/acme/jobs', payload);
+              if (this.disposed) return;
+              toast('保存成功', 'ok');
+              dlg.close();
+              await this.loadJobs();
+            } catch (err) {
+              form.error(errorMessage(err, '保存失败'));
+            } finally {
+              dlg.setBusy(false, button);
+            }
+          },
+        },
+      ],
+    });
+  }
+
+  /* ---------------------------------------------------------------- 签发（异步 + 5 秒轮询） */
+
+  issueJob(job) {
+    const state = { phase: 'submitting', message: '正在提交签发请求…', waited: 0, polls: 0, cert: null, error: null };
+    const host = document.createElement('div');
+    this.dialogHosts.add(host);
+
+    let timer = null;
+    let stopped = false;
+    let api = null;
+    const stop = () => {
+      stopped = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      this.pollers.delete(stop);
+    };
+    this.pollers.add(stop);
+
+    const paint = () => renderInto(host, this.issueView(state));
+
+    const finish = (message, tone) => {
+      state.phase = 'done';
+      state.message = message;
+      stop();
+      paint();
+      toast(message, tone || 'ok');
+      if (!this.disposed) this.loadAll();
+      const button = api && api.buttons['取消等待'];
+      if (button) {
+        button.textContent = '关闭';
+        button.removeAttribute('outline');
+      }
+    };
+
+    // poll：每 5 秒读一次 /certificates，直到出现该任务的全部域名（去掉通配前缀后比较）。
+    const poll = async () => {
+      if (this.disposed || stopped) return;
+      if (state.polls > 0) state.waited += ISSUE_POLL_MS;
+      state.polls += 1;
+      try {
+        const data = await this.ctx.api.get('/api/v1/acme/certificates');
+        if (this.disposed || stopped) return;
+        const list = unwrap(data, ['certificates', 'items']);
+        const want = (job.domains || []).map(baseDomain);
+        const hit = list.filter((c) => {
+          const ds = certDomains(c).map(baseDomain);
+          return want.length && want.every((d) => ds.indexOf(d) >= 0);
+        })[0];
+        state.error = null;
+        if (hit) {
+          state.cert = hit;
+          finish('证书已签发：' + (certDomains(hit).join(', ') || ''), 'ok');
+          return;
+        }
+        state.phase = 'waiting';
+        paint();
+      } catch (err) {
+        if (this.disposed || stopped) return;
+        state.error = err;
+        state.phase = 'waiting';
+        paint();
+      }
+      if (!stopped) timer = setTimeout(poll, ISSUE_POLL_MS);
+    };
+
+    api = this.openPageDialog({
+      title: '签发证书 - ' + (job.name || job.id),
+      body: host,
+      wide: true,
+      actions: [{
+        label: '取消等待',
+        kind: 'ghost',
+        onClick: () => {
+          if (state.phase === 'done') return;
+          stop();
+          toast('已停止等待，签发仍在后台继续', 'info');
+        },
+      }],
+      onClose: () => { stop(); this.dialogHosts.delete(host); this.dialogs.delete(api); },
+    });
+    paint();
+
+    (async () => {
+      try {
+        const res = await this.ctx.api.post('/api/v1/acme/jobs/' + encodeURIComponent(job.id) + '/issue');
+        if (this.disposed) return;
+        const data = res || {};
+        state.message = data.message || '签发请求已提交，正在等待结果…';
+        state.phase = 'waiting';
+      } catch (err) {
+        if (this.disposed) return;
+        finish('签发失败：' + errorMessage(err), 'err');
+        return;
+      }
+      paint();
+      poll();
+    })();
+  }
+
+  issueView(state) {
+    const waiting = state.phase !== 'done';
+    const waitingText = state.error
+      ? '读取证书列表失败，会自动重试；签发仍在后台继续。'
+      : '已等待 ' + Math.round(state.waited / 1000) + ' 秒，尚未在证书列表中看到该域名…';
+    return html`
+      <p class="pacme-note">签发在后台异步执行：DNS-01 需要等待 TXT 记录生效，通常需要几十秒到几分钟。每 5 秒刷新一次证书列表。</p>
+      <sl-progress-bar class="pacme-progress" ?indeterminate=${waiting} value=${waiting ? 0 : 100}></sl-progress-bar>
+      <p class="pacme-note">${state.message}</p>
+      ${state.error
+        ? html`<nunt-error .error=${state.error} heading="读取证书列表失败" compact
+            hint="签发仍在后台继续，稍后可在证书列表中查看结果。"></nunt-error>`
+        : nothing}
+      ${waiting ? html`<p class="pacme-note">${waitingText}</p>` : nothing}
+      ${state.cert
+        ? html`<nunt-table caption="已签发的证书" .columns=${this.pairColumns()} .rows=${certPairs(state.cert)} .rowKey=${(row) => row.key}></nunt-table>`
+        : nothing}
+    `;
+  }
+
+  /* ---------------------------------------------------------------- 上传证书 */
+
+  openUpload() {
+    const certBox = pemBox('证书（PEM）', '-----BEGIN CERTIFICATE-----' + EOL + '（把证书全文粘贴到这里）');
+    const keyBox = pemBox('私钥（PEM）', '-----BEGIN PRIVATE KEY-----' + EOL + '（把私钥全文粘贴到这里）');
+
+    const form = formGrid([
+      { name: 'name', label: '名称', value: '', placeholder: '名称（可选）' },
+      { name: 'domains', label: '域名', value: '', wide: true, placeholder: '证书包含的域名，逗号分隔，例如 example.com,*.example.com', hint: '逗号或换行分隔' },
+      { name: 'cert', label: false, type: 'custom', wide: true, node: certBox.box },
+      { name: 'key', label: false, type: 'custom', wide: true, node: keyBox.box },
+      { name: 'chain', label: '证书链（可选）', type: 'textarea', rows: 3, wide: true, value: '', placeholder: '中间证书链（可选）' },
+    ]);
+
+    this.openPageDialog({
+      title: '上传证书',
+      body: form.node,
+      wide: true,
+      actions: [
+        { label: '取消' },
+        {
+          label: '上传',
+          kind: 'primary',
+          close: false,
+          onClick: async (dlg, button) => {
+            form.clearErrors();
+            const values = form.read();
+            const cert = String(certBox.area.value || '').trim();
+            const key = String(keyBox.area.value || '').trim();
+            if (!cert) { form.error('请粘贴或选择证书文件'); return; }
+            if (!key) { form.error('请粘贴或选择私钥文件'); return; }
+            // 提交体保持迁移前的多别名写法（cert/certificate、key/privateKey 都带上）。
+            const payload = {
+              name: String(values.name || '').trim(),
+              domains: splitDomains(values.domains),
+              cert,
+              certificate: cert,
+              key,
+              privateKey: key,
+              chain: String(values.chain || '').trim(),
+            };
+            dlg.setBusy(true, button);
+            try {
+              await this.ctx.api.post('/api/v1/acme/certificates/upload', payload);
+              if (this.disposed) return;
+              toast('上传成功', 'ok');
+              dlg.close();
+              await this.loadCerts();
+            } catch (err) {
+              form.error(errorMessage(err, '上传失败'));
+            } finally {
+              dlg.setBusy(false, button);
+            }
+          },
+        },
+      ],
+    });
+  }
+
+  /* ---------------------------------------------------------------- 渲染 */
+
+  pairColumns() {
+    return [
+      { key: 'label', title: '项目', width: 140, render: (row) => html`<span class="muted">${row.label}</span>` },
+      { key: 'value', title: '值', render: (row) => (row.mono ? html`<span class="pacme-ip">${row.value}</span>` : html`<span>${row.value}</span>`) },
+    ];
+  }
+
+  jobColumns() {
+    return [
+      {
+        key: 'name',
+        title: '名称',
+        sort: (row) => String((row && (row.name || row.id)) || ''),
+        render: (row) => html`<div>
+          <div class="pacme-name">${String(row.name || row.id || '')}</div>
+          ${row.remark ? html`<div class="pacme-remark">${String(row.remark)}</div>` : nothing}
+        </div>`,
+      },
+      {
+        key: 'domains',
+        title: '域名',
+        sort: (row) => certDomains(row).join(','),
+        render: (row) => {
+          const list = certDomains(row);
+          if (!list.length) return html`<span class="muted">-</span>`;
+          const shown = list.slice(0, 2);
+          return html`<span class="pacme-chips">
+            ${shown.map((name) => html`<sl-tag size="small">${String(name)}</sl-tag>`)}
+            ${list.length > shown.length ? html`<span class="muted">+${list.length - shown.length}</span>` : nothing}
+          </span>`;
         },
       },
-    ],
-  });
+      {
+        key: 'challenge',
+        title: '挑战',
+        width: 130,
+        sort: (row) => String((row && row.challenge) || ''),
+        render: (row) => html`<sl-badge pill variant="neutral">${CHALLENGE_LABEL[row.challenge] || row.challenge || '-'}</sl-badge>`,
+      },
+      {
+        key: 'dnsProvider',
+        title: 'DNS 提供商',
+        width: 150,
+        render: (row) => (row.dnsProvider
+          ? html`<sl-badge pill variant="neutral">${String(row.dnsProvider)}</sl-badge>`
+          : html`<span class="muted">-</span>`),
+      },
+      {
+        key: 'keyType',
+        title: '密钥',
+        width: 130,
+        render: (row) => html`<span>${KEY_LABEL[row.keyType] || row.keyType || '默认'}</span>`,
+      },
+      {
+        key: 'renewDays',
+        title: '续期提前',
+        width: 110,
+        sort: (row) => Number((row && row.renewDays) || 30),
+        render: (row) => html`<span>${String((row.renewDays || 30))} 天</span>`,
+      },
+      {
+        key: 'enable',
+        title: '状态',
+        width: 130,
+        sort: (row) => (row && row.enable ? 1 : 0),
+        // 状态文字必须放进 sl-switch 的可见标签（原因见 forward.js 同名列的说明）。
+        render: (row) => html`<sl-switch size="small" class="pacme-switch"
+          ?checked=${!!row.enable} ?disabled=${this.busyId === String(row.id || '')}
+          title=${row.enable ? '点击停用' : '点击启用'}
+          @sl-change=${(event) => this.toggleJob(row, !!event.target.checked)}>${row.enable ? '已启用' : '已停用'}</sl-switch>`,
+      },
+      {
+        title: '操作',
+        actions: true,
+        width: 200,
+        render: (row) => html`
+          <sl-button size="small" variant="primary" ?loading=${this.busyId === String(row.id || '')}
+            @click=${() => this.issueJob(row)}>签发</sl-button>
+          <sl-button size="small" title="编辑" @click=${() => this.openJobForm(row)}>
+            <sl-icon name="pencil-square" label="编辑"></sl-icon>
+          </sl-button>
+          <sl-button size="small" variant="danger" outline title="删除" @click=${() => this.removeJob(row)}>
+            <sl-icon name="trash" label="删除"></sl-icon>
+          </sl-button>`,
+      },
+    ];
+  }
+
+  certColumns() {
+    return [
+      {
+        key: 'domains',
+        title: '域名',
+        render: (row) => {
+          const list = certDomains(row);
+          if (!list.length) return html`<span class="muted">${String(row.name || row.id || '-')}</span>`;
+          const shown = list.slice(0, 3);
+          return html`<span class="pacme-chips">
+            ${shown.map((name) => html`<sl-tag size="small">${String(name)}</sl-tag>`)}
+            ${list.length > shown.length ? html`<span class="muted">+${list.length - shown.length}</span>` : nothing}
+          </span>`;
+        },
+      },
+      {
+        key: 'issuer',
+        title: '签发者',
+        width: 200,
+        render: (row) => html`<span class="pacme-issuer">${String(row.issuer || row.ca || row.issuerCN || '-')}</span>`,
+      },
+      {
+        key: 'notAfter',
+        title: '到期时间',
+        width: 190,
+        sort: (row) => {
+          const time = certExpiry(row) ? new Date(String(certExpiry(row))).getTime() : 0;
+          return isNaN(time) ? 0 : time;
+        },
+        render: (row) => {
+          const exp = certExpiry(row);
+          return html`<div>
+            <div>${fmtTime(exp)}</div>
+            ${exp ? html`<div class="pacme-remark">${dateAgo(exp)} 到期</div>` : nothing}
+          </div>`;
+        },
+      },
+      {
+        key: 'remainDays',
+        title: '剩余天数',
+        width: 200,
+        sort: (row) => {
+          const days = certRemainDays(row);
+          return (days === null || days === undefined || !isFinite(days)) ? -1 : Number(days);
+        },
+        // 剩余天数进度条：sl-progress-bar + 剩余天数文案（进度按 90 天有效期估算，与迁移前一致）。
+        render: (row) => {
+          const days = certRemainDays(row);
+          const percent = daysPercent(days);
+          if (percent === null) return html`<span class="muted">-</span>`;
+          const tone = daysTone(days);
+          return html`<div class="pacme-days">
+            <sl-progress-bar class=${'pacme-bar is-' + tone} value=${Math.round(percent)}></sl-progress-bar>
+            <span class="pacme-daystext">${String(days)} 天</span>
+          </div>`;
+        },
+      },
+      {
+        key: 'source',
+        title: '来源',
+        width: 120,
+        render: (row) => html`<sl-badge pill variant="neutral">${String(row.source || row.type || (row.uploaded ? '手动上传' : 'ACME'))}</sl-badge>`,
+      },
+      {
+        title: '操作',
+        actions: true,
+        width: 110,
+        render: (row) => html`<sl-button size="small" variant="danger" outline title="删除证书"
+          @click=${() => this.removeCert(row)}>
+          <sl-icon name="trash" label="删除证书"></sl-icon>
+        </sl-button>`,
+      },
+    ];
+  }
+
+  render() {
+    return html`<section class="card">
+      <div class="card-header">
+        <h2>证书任务</h2>
+        <span class="sub">${this.jobs.length ? '共 ' + this.jobs.length + ' 个任务' : ''}</span>
+        <span class="spacer"></span>
+        <sl-button size="small" ?loading=${this.jobsLoading} @click=${() => this.loadJobs()}>
+          <sl-icon slot="prefix" name="arrow-clockwise" aria-hidden="true"></sl-icon>刷新
+        </sl-button>
+        <sl-button size="small" variant="primary" @click=${() => this.openJobForm(null)}>
+          <sl-icon slot="prefix" name="plus-lg" aria-hidden="true"></sl-icon>新建任务
+        </sl-button>
+      </div>
+      <div class="card-body tight">
+        <nunt-table caption="证书任务"
+          .columns=${this.jobColumns()} .rows=${this.jobs} .loading=${this.jobsLoading}
+          .error=${this.jobsError} .onRetry=${() => this.loadJobs()}
+          .rowKey=${(row) => (row && row.id) || ''}
+          empty="还没有证书任务"
+          emptyHint="点右上角「新建任务」配置 ACME 签发与自动续期。"></nunt-table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>证书列表</h2>
+        <span class="sub">剩余天数按 90 天有效期估算进度</span>
+        <span class="spacer"></span>
+        <sl-button size="small" ?loading=${this.certsLoading} @click=${() => this.loadCerts()}>
+          <sl-icon slot="prefix" name="arrow-clockwise" aria-hidden="true"></sl-icon>刷新
+        </sl-button>
+        <sl-button size="small" @click=${() => this.openUpload()}>
+          <sl-icon slot="prefix" name="upload" aria-hidden="true"></sl-icon>上传证书
+        </sl-button>
+      </div>
+      <div class="card-body tight">
+        <nunt-table caption="证书列表"
+          .columns=${this.certColumns()} .rows=${this.certs} .loading=${this.certsLoading}
+          .error=${this.certsError} .onRetry=${() => this.loadCerts()}
+          .rowKey=${(row) => (row && (row.id || row.name)) || ''}
+          empty="暂无已签发的证书"
+          emptyHint="签发任务完成后，证书会出现在这里；也可以手动上传已有证书。"></nunt-table>
+      </div>
+    </section>`;
+  }
 }
+
+// legendFieldJob：任务表单里的小标题（div，避免 h3 触发 heading-order）。
+function legendFieldJob(name, text) {
+  const node = document.createElement('div');
+  node.className = 'pacme-legend';
+  node.textContent = text;
+  return { name, label: false, type: 'custom', wide: true, node };
+}
+
+define('nunt-page-acme', AcmePage);
 
 export default {
   id: 'acme',
   title: '证书',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>',
   async mount(root, ctx) {
-    const api = wrapAPI(ctx && ctx.api);
     const offStyle = pageStyle(root, PAGE_CSS);
-    const jobsBox = el('div', {});
-    const certsBox = el('div', {});
-    let providers = [];
-
-    async function toggleJob(job, next) {
-    const want = (next === undefined) ? !job.enable : !!next;
-      try {
-        await api.post('/acme/jobs/' + encodeURIComponent(job.id) + '/toggle');
-      } catch (e) {
-        try {
-          await api.put('/acme/jobs/' + encodeURIComponent(job.id), Object.assign({}, job, { enable: want }));
-        } catch (e2) {
-          toast('切换失败：' + apiErr(e2), 'error');
-          return false;
-        }
-      }
-      toast(want ? '已启用' : '已停用', 'ok');
-      loadJobs();
-    }
-
-    const jobColumns = [
-      { title: '名称', render: (j) => el('div', {}, el('div', { text: j.name || j.id }), j.remark ? el('div', { class: 'muted', style: 'font-size:11px', text: j.remark }) : null) },
-      { title: '域名', render: (j) => chips(j.domains, 2) },
-      { title: '挑战', render: (j) => badge(CHALLENGE_LABEL[j.challenge] || j.challenge || '-') },
-      { title: 'DNS 提供商', render: (j) => (j.dnsProvider ? badge(j.dnsProvider) : el('span', { class: 'muted', text: '-' })) },
-      { title: '密钥', render: (j) => textOf(KEY_LABEL[j.keyType] || j.keyType || '默认') },
-      { title: '续期提前', cls: 'num', render: (j) => textOf((j.renewDays || 30) + ' 天') },
-      { title: '状态', render: (j) => switchEl(!!j.enable, (next) => toggleJob(j, next)) },
-      { title: '', cls: 'acts', render: (j) => el('span', {},
-        btn('签发', { small: true, kind: 'primary', tag: 'issue', onClick: () => issueJob(j, ctx, loadAll) }),
-        iconBtn(editIcon(), { title: '编辑', tag: 'edit', onClick: () => openJobForm(j, providers, ctx, loadJobs) }),
-        iconBtn(trashIcon(), { title: '删除', tag: 'remove', onClick: () => removeJob(j) }),
-      ) },
-    ];
-
-    async function removeJob(job) {
-      const ok = await confirmDialog('确定删除证书任务「' + (job.name || job.id) + '」吗？已签发的证书不会被删除。');
-      if (!ok) return;
-      try {
-        await api.del('/acme/jobs/' + encodeURIComponent(job.id));
-        toast('已删除', 'ok');
-        loadJobs();
-      } catch (e) {
-        toast('删除失败：' + apiErr(e), 'error');
-      }
-    }
-
-    const certColumns = [
-      { title: '域名', render: (c) => { const d = certDomains(c); return d.length ? chips(d, 3) : el('span', { class: 'muted', text: c.name || c.id || '-' }); } },
-      { title: '签发者', render: (c) => textOf(c.issuer || c.ca || c.issuerCN || '-') },
-      { title: '到期时间', render: (c) => el('div', {}, el('div', { text: fmtTime(certExpiry(c)) }), el('div', { class: 'muted', style: 'font-size:11px', text: certExpiry(c) ? dateAgo(certExpiry(c)) + ' 到期' : '' })) },
-      { title: '剩余天数', render: (c) => daysBar(certRemainDays(c)) },
-      { title: '来源', render: (c) => badge(c.source || c.type || (c.uploaded ? '手动上传' : 'ACME')) },
-      { title: '', cls: 'acts', render: (c) => el('span', {},
-        iconBtn(trashIcon(), { title: '删除证书', tag: 'remove', onClick: () => removeCert(c) }),
-      ) },
-    ];
-
-    async function removeCert(c) {
-      const label = certDomains(c).join(', ') || c.name || c.id;
-      const ok = await confirmDialog('确定删除证书「' + label + '」吗？使用该证书的站点会失去 TLS。');
-      if (!ok) return;
-      try {
-        await api.del('/acme/certificates/' + encodeURIComponent(c.id || c.name));
-        toast('已删除', 'ok');
-        loadCerts();
-      } catch (e) {
-        toast('删除失败：' + apiErr(e), 'error');
-      }
-    }
-
-    async function loadJobs() {
-      clear(jobsBox);
-      jobsBox.appendChild(spinner('正在加载证书任务…'));
-      try {
-        const data = await api.get('/acme/jobs');
-        const list = unwrap(data, ['jobs', 'items']);
-        clear(jobsBox);
-        jobsBox.appendChild(dataTable(jobColumns, list.map((j) => ({ raw: j, tag: j.id })), '还没有证书任务，点击右上角“新建任务”开始'));
-      } catch (e) {
-        clear(jobsBox);
-        jobsBox.appendChild(errorCard(e, () => loadJobs()));
-      }
-    }
-
-    async function loadCerts() {
-      clear(certsBox);
-      certsBox.appendChild(spinner('正在加载证书…'));
-      try {
-        const data = await api.get('/acme/certificates');
-        const list = unwrap(data, ['certificates', 'items']);
-        clear(certsBox);
-        certsBox.appendChild(dataTable(certColumns, list.map((c) => ({ raw: c, tag: c.id || c.name })), '暂无已签发的证书'));
-      } catch (e) {
-        clear(certsBox);
-        certsBox.appendChild(errorCard(e, () => loadCerts()));
-      }
-    }
-
-    function loadAll() { loadJobs(); loadCerts(); }
-
-    root.appendChild(el('div', { class: 'card' },
-      el('div', { class: 'card-head' },
-        el('h3', { text: '证书任务' }),
-        el('span', { class: 'grow' }),
-        el('button', { class: 'btn', type: 'button', text: '刷新', onclick: () => loadAll() }),
-        el('button', { class: 'btn btn-primary', type: 'button', text: '新建任务', onclick: () => openJobForm(null, providers, ctx, loadJobs) }),
-      ),
-      el('div', { class: 'card-body' }, jobsBox),
-    ));
-    root.appendChild(el('div', { class: 'card' },
-      el('div', { class: 'card-head' },
-        el('h3', { text: '证书列表' }),
-        el('span', { class: 'grow' }),
-        el('span', { class: 'muted', style: 'font-size:12px', text: '剩余天数按 90 天有效期估算进度' }),
-        el('button', { class: 'btn', type: 'button', text: '上传证书', onclick: () => openUpload(ctx, loadCerts) }),
-      ),
-      el('div', { class: 'card-body' }, certsBox),
-    ));
-
-    loadDNSProviders().then((list) => { providers = list; });
-    loadAll();
-    return () => { offStyle(); };
+    const page = document.createElement('nunt-page-acme');
+    page.ctx = ctx;              // 必须在 appendChild 之前赋值：connectedCallback 里要取数据
+    root.appendChild(page);
+    return () => { page.dispose(); offStyle(); };
   },
 };
