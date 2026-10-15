@@ -1,0 +1,96 @@
+{
+  "at": "2026-10-15T16:51:58.596Z",
+  "seeded": [
+    "storage/mounts(local) 200",
+    "storage/mounts(webdav) 200",
+    "forward/rules 201",
+    "task/items 201"
+  ],
+  "theme": "sl-theme-light",
+  "pages": {
+    "logs": {
+      "a11y": {
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "violations": []
+      },
+      "probe": {
+        "htmlClass": "sl-theme-light",
+        "bodyBg": "rgb(244, 244, 245)",
+        "h2Count": 1,
+        "h3Count": 0,
+        "tables": 1,
+        "states": []
+      },
+      "consoleErrors": [],
+      "external": []
+    },
+    "storage": {
+      "a11y": {
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "violations": []
+      },
+      "probe": {
+        "htmlClass": "sl-theme-light",
+        "bodyBg": "rgb(244, 244, 245)",
+        "h2Count": 1,
+        "h3Count": 0,
+        "tables": 1,
+        "states": []
+      },
+      "consoleErrors": [],
+      "external": []
+    },
+    "forward": {
+      "a11y": {
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "violations": []
+      },
+      "probe": {
+        "htmlClass": "sl-theme-light",
+        "bodyBg": "rgb(244, 244, 245)",
+        "h2Count": 1,
+        "h3Count": 0,
+        "tables": 1,
+        "states": []
+      },
+      "consoleErrors": [],
+      "external": []
+    },
+    "task": {
+      "a11y": {
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "violations": []
+      },
+      "probe": {
+        "htmlClass": "sl-theme-light",
+        "bodyBg": "rgb(244, 244, 245)",
+        "h2Count": 1,
+        "h3Count": 0,
+        "tables": 1,
+        "states": []
+      },
+      "consoleErrors": [],
+      "external": []
+    }
+  }
+}
