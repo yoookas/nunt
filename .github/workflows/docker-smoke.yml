@@ -50,9 +50,24 @@ jobs:
             -e TZ=UTC \
             nunt:ci
 
+      - name: Probe the entrypoint in the foreground
+        # Runs the image in the foreground so a startup failure is visible even
+        # when the detached container dies before writing any log line.
+        run: |
+          set -x
+          docker ps -a
+          docker inspect --format 'state={{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}}' nunt || true
+          mkdir -p "$PWD/ci-probe"
+          docker run --rm --network host -v "$PWD/ci-probe:/data" nunt:ci nunt -v || true
+          docker run --rm --network host -v "$PWD/ci-probe:/data" nunt:ci id -u || true
+          timeout 12 docker run --rm --network host -v "$PWD/ci-probe:/data" nunt:ci nunt -d /data -log-level debug || true
+
       - name: Dump the log when anything fails
         if: failure()
-        run: docker logs nunt || true
+        run: |
+          docker logs nunt || true
+          docker ps -a || true
+          docker inspect --format 'state={{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}}' nunt || true
 
       - name: Wait for the health endpoint
         run: |
