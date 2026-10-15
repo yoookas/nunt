@@ -115,6 +115,13 @@ func (m *Mux) Delete(path string, h HandlerFunc, mw ...Middleware) {
 
 func (m *Mux) join(path string) string {
 	if path == "" {
+		// An empty route means "the group itself": registering it as "/" would
+		// only create a subtree pattern and every client that asks for the
+		// group path without the trailing slash would get a 301 instead of the
+		// response.
+		if prefix := strings.TrimSuffix(m.prefix, "/"); prefix != "" {
+			return prefix
+		}
 		path = "/"
 	}
 	if !strings.HasPrefix(path, "/") {

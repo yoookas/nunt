@@ -123,7 +123,7 @@ jobs:
           jq -e '.csrf' /tmp/session.json > /dev/null
 
           # every module is registered and the registry is reachable with the session
-          curl -fsS -b /tmp/cookies http://127.0.0.1:16601/api/v1/modules \
+          curl -fsSL -b /tmp/cookies http://127.0.0.1:16601/api/v1/modules \
             | jq -e 'length >= 6' > /dev/null
 
       - name: Stop the container

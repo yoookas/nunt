@@ -11,6 +11,7 @@ import (
 func (s *Server) registerModules() {
 	g := s.mux.Group("/api/v1/modules")
 	g.Get("", s.handleListModules)
+	g.Get("/", s.handleListModules)
 	g.Post("/{name}/start", s.handleModuleAction("start"))
 	g.Post("/{name}/stop", s.handleModuleAction("stop"))
 	g.Post("/{name}/restart", s.handleModuleAction("restart"))
