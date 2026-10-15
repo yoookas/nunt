@@ -186,9 +186,12 @@ or set the access control to allow + IP list
 - [x] FileBrowser/WebDAV 默认要求认证（未配认证时显式拒绝）—— **代码已实现并有测试**：保存配置即被拒绝（fail-closed），见第 3.2 节
 - [ ] ACME 对真实 CA（先 staging 再正式）实测签发 + 续期 + 热加载 —— **保持未勾**：代码在，真实 CA 没跑过（见第 7 节第 2 条）
 - [x] CI 加 govulncheck + Dependabot —— **已实现**：阻塞式 `govulncheck` job + `.github/dependabot.yml`（见第 3.6 节）
-- [ ] 真实 Docker 环境跑通 compose up（host + bridge）—— **保持未勾**：本仓库仍未在真实 docker 上跑过 `docker compose up`，
-      只在 CI 里用 `docker compose config` 解析过两个 compose 文件。该场景由 **CI: docker-smoke.yml**（push / PR 触发）负责，
-      在它真实执行过一次并绿之前不要勾（见第 7 节第 1 条）
+- [x] 容器契约在 CI 的真实 docker daemon 上验证通过 —— **已验证**：`docker-smoke.yml` 于 2026-10-15 首次全绿，覆盖镜像构建、
+      以 uid 1000 运行、`setcap` 允许绑定低端口、`/data` 下 `config.json`/`secret.key` 权限 600、Dockerfile 的 HEALTHCHECK 变为
+      `healthy`、管理 UI 与静态资源可访问、用日志里的随机密码登录并拉到模块列表。该轮同时修掉两个真实缺陷（WebDAV 上传字节计数
+      的数据竞争；`GET /api/v1/modules` 因子树模式返回 301 而非数据）
+- [ ] 在目标主机上实跑 `docker compose up`（host + bridge）—— **保持未勾**：CI 只做了 `docker compose config` 解析与直接 `docker run`，
+      真正的 `compose up`（含卷权限、host 网络下的端口占用）仍需在你自己的机器或服务器上跑一次（见第 7 节第 1 条）
 
 > 勾选说明：打勾代表**已验证**（在当前仓库里已实现并被测试覆盖），**不代表已部署**——是否已经在你的实例上生效，
 > 仍要按第 6 节的判据自己跑一遍（与开头的说明一致）。
