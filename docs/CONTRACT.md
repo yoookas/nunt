@@ -96,12 +96,41 @@ Lucky v1.10.8 源码（Go module 缓存里已下载好）：
 | F | `internal/modules/waf` | Coraza v3 引擎、CRS 内置规则、自定义规则、按规则开关、拦截统计与日志、管理接口 |
 | G/H | `internal/webui/assets` | 纯静态前端（无构建步骤） |
 
-## 7. 前端契约（纯静态，无打包）
+## 7. 前端契约（纯静态、零构建、Web Components）
 
-- 目录 `internal/webui/assets/`：`index.html`、`style.css`、`app.js`、`pages/<id>.js`、`lib/*.js`。
-- 通过 `//go:embed all:assets` 打进二进制，浏览器直接加载 ES Module，**不引入任何 CDN/外部依赖，不使用内联脚本**（后台 CSP 不允许内联）。
-- `app.js` 负责：hash 路由、登录页、整体布局（侧边栏/顶栏）、SSE 日志、API 客户端、主题切换、页面懒加载。
-- 每个页面模块默认导出：
+### 7.1 技术栈与硬约束
+
+- 组件库 **Shoelace 2.20.1**（MIT）vendor 在 `internal/webui/assets/vendor/shoelace/`，
+  同步与校验：`pwsh -File scripts/sync-vendor.ps1` / `... -VerifyOnly`；
+- 自研组件的编写层 **Lit 3.3.3**（MIT）vendor 在 `internal/webui/assets/vendor/lit/`，
+  同步与校验：`pwsh -File scripts/sync-lit.ps1` / `... -VerifyOnly`。
+  两棵 vendor 树都只包含用到的文件，都是「相对导入、没有裸模块说明符」的 ESM，浏览器直接当模块加载，
+  **没有任何构建步骤**（npm 只用于 devDependencies 与这两个同步脚本；Go 构建与 Docker 镜像不需要 Node）。
+- 通过 `//go:embed all:assets` 打进二进制。CSP 保持不变（`script-src 'self'`）：
+  **不允许 CDN / 外部请求，不允许内联脚本与事件属性，不允许 import map**；
+  图标与字体全部来自本地 vendor（`sl-icon` 的 base path 指向 `vendor/shoelace/`）。
+- 所有自研组件都是 **light DOM**：`NuntElement.createRenderRoot()` 返回 `this`，
+  全局样式与设计 token 直接生效；微调 Shoelace 控件用 `::part()` 与 `--sl-*` 变量，
+  **不要**用 shadow DOM 把样式隔断。
+- 主题：`<html>` 上挂 `sl-theme-dark` / `sl-theme-light`（`index.html` 默认 dark，`app.js` 切换），
+  持久化在 `localStorage['nunt.theme']`，跨标签页用 `storage` 事件同步。
+  nunt 的语义变量（`--bg/--bg-elev/--text/--brand/--ok/--warn/--err/...`）在 `style.css` 第 1 节里
+  全部是 Shoelace token 的别名，浅色一套、深色一套 —— 页面里不要再写死颜色。
+- `style.css` 分层：1 主题 token 映射、2 基础排版、3 外壳布局、4 kit 组件样式、5 登录页、
+  6 **迁移期遗留层**（只服务还没迁到 kit 的老页面；阶段 2 每迁一页删一段，阶段 3 整节删除）。
+
+### 7.2 目录
+
+- `index.html`：外壳，只引 3 个样式（`vendor/shoelace/themes/light.css`、`dark.css`、`style.css`）与 `/app.js`；
+- `app.js`：hash 路由、页面清单、动态 import、登录页、外壳（侧边栏/顶栏/窄屏 sl-drawer）、SSE、主题；
+- `lib/api.js`：API 客户端（自动带 `X-CSRF-Token`）——**不要改**；
+- `lib/kit.js`：共享组件层（表格/表单/反馈/对话框/状态块），页面一律用它；
+- `lib/ui.js`：迁移期遗留的手写构件，只服务老页面，阶段 3 删除；
+- `pages/<id>.js`：页面模块。
+
+### 7.3 页面模块契约（不变）
+
+每个页面模块默认导出：
 
 ```js
 export default {
@@ -147,6 +176,129 @@ DELETE /api/v1/auth/users/{id}|tokens/{id}
 GET    /api/v1/modules                   POST /api/v1/modules/{name}/start|stop|restart
 GET    /api/v1/events                    (SSE，消息格式 {"type":"log|status|event","data":...})
 ```
+
+### 7.4 共享组件层（lib/kit.js）
+
+页面不要自己拼表格 / 表单 / 弹窗，统一用 kit（导出清单见文件末尾注释）：
+
+| 用途 | 导出 | 说明 |
+| --- | --- | --- |
+| 数据表格 | `nunt-table` 元素 / `table(config)` / `applyTableConfig(node, config)` | 原生 table + 设计 token。列定义 `{key,title,width,align,sortable,sort(row),render(row,i),actions}`；内置排序（点表头）、空状态、加载态、错误卡＋重试、分页（给了 `onPage` 就出现）；`title` 省略时按「操作」渲染，避免 axe 的 `empty-table-header`；`actions: true` 的列右对齐、不换行、统一包在 `.nunt-actions` 里（不会再被裁切） |
+| 表单 | `nunt-form` / `formGrid(fields)` | 字段定义与老的 `formGrid` 一致（text/password/number/url/email/textarea/select/switch/checkbox/tags/kv/custom，`wide` 跨列）；`read()/get()/set()/error(msg)/fieldError(name,msg)/toggle(name,show)`。标签交给 `sl-input/sl-select` 的 `label`，控件与标签天然关联（axe 的 `label`/`select-name` 不再报） |
+| 多行标签输入 | `nunt-tags` | 值是字符串数组；回车/逗号/换行都能加标签，可单独删除 |
+| 键值对编辑 | `nunt-kv` | 值是对象，用于自定义请求头之类 |
+| 反馈 | `toast(msg, tone)` / `confirmDialog(msg, opts)` / `promptDialog(msg, def)` / `badge(text, tone)` | `tone` 取 `ok/warn/err/info/neutral`；toast 用 `<sl-alert toast>` 进 Shoelace 右上角堆栈，`confirmDialog` 用 `sl-dialog` |
+| 空 / 加载 / 错误 | `emptyState()` / `loadingState()` / `errorCard(err, {onRetry})`（或 `nunt-empty` 等元素） | 错误文案走 `friendlyMessage()`：404 显示成人话，不把后端的 `404 page not found` 摊在界面上 |
+| 对话框 | `openDialog({title, body, actions, wide, onClose, onMount})` | `actions = [{label, kind, onClick(dialogApi, button), close}]`；`dialogApi.setBusy(bool, button)` 做提交中的忙碌态 |
+| 工具 | `versionText()` / `infoVersionText()` / `errorMessage()` / `friendlyMessage()` / `html/nothing/repeat/classMap/ifDefined` / `NuntElement` / `define` / `NuntPager` | `versionText` 把 `/api/v1/system/info` 的对象版本号变成 `dev` 这样的字符串 |
+
+两条硬规矩：
+
+1. **light DOM 没有 `<slot>`**：组件的「插槽」用属性传 —— 表格操作列用 `columns[].render`，
+   状态块的附加内容用 `action`，对话框内容用 `openDialog({body})`；
+2. **不要拼 `innerHTML`**：数据一律走 Lit 的文本绑定或 DOM 节点（后端字符串不会变成 HTML）。
+
+### 7.5 页面模板（新页面照抄这一份）
+
+```js
+// pages/demo.js
+import { NuntElement, html, define, formGrid, openDialog, toast, errorMessage } from '../lib/kit.js';
+
+class DemoPage extends NuntElement {
+  static properties = { rows: { attribute: false }, loading: { type: Boolean }, error: { attribute: false } };
+
+  constructor() {
+    super();
+    this.ctx = null;              // 由 mount() 注入
+    this.rows = [];
+    this.loading = true;
+    this.error = null;
+    this.disposed = false;
+  }
+
+  connectedCallback() { super.connectedCallback(); this.load(); }
+  disconnectedCallback() { super.disconnectedCallback(); this.disposed = true; }
+
+  async load() {
+    this.loading = true;
+    try {
+      this.rows = (await this.ctx.api.get('/api/v1/demo/items')) || [];
+      this.error = null;
+    } catch (err) {
+      this.error = err;
+    } finally {
+      if (!this.disposed) this.loading = false;
+    }
+  }
+
+  async edit(row) {
+    const form = formGrid([
+      { name: 'name', label: '名称', value: row ? row.name : '' },
+      { name: 'enable', label: '启用', type: 'switch', value: row ? row.enable !== false : true, text: '启用' },
+    ]);
+    openDialog({
+      title: row ? '编辑' : '新建',
+      body: form.node,
+      actions: [
+        { label: '取消' },
+        { label: '保存', kind: 'primary', close: false, onClick: async (dlg, button) => {
+            const values = form.read();
+            if (!values.name) { form.fieldError('name', '请填写名称'); return; }
+            dlg.setBusy(true, button);
+            try { await this.ctx.api.put('/api/v1/demo/items/' + row.id, values); toast('已保存', 'ok'); dlg.close(); }
+            catch (err) { form.error(errorMessage(err, '保存失败')); }
+            finally { dlg.setBusy(false, button); }
+          } },
+      ],
+    });
+  }
+
+  render() {
+    const columns = [
+      { key: 'name', title: '名称' },
+      { key: 'mode', title: '模式', width: 90, render: (row) => html`<sl-badge pill variant="neutral">${row.mode || '-'}</sl-badge>` },
+      { title: '操作', actions: true, width: 140,
+        render: (row) => html`<sl-button size="small" @click=${() => this.edit(row)}>编辑</sl-button>` },
+    ];
+    return html`
+      <section class="card">
+        <div class="card-header">
+          <h2>演示列表</h2>
+          <span class="sub">${this.rows.length ? '共 ' + this.rows.length + ' 条' : ''}</span>
+          <span class="spacer"></span>
+          <sl-button size="small" @click=${() => this.load()}>刷新</sl-button>
+        </div>
+        <div class="card-body tight">
+          <nunt-table caption="演示列表" .columns=${columns} .rows=${this.rows}
+            .loading=${this.loading} .error=${this.error} .onRetry=${() => this.load()}
+            empty="还没有数据"></nunt-table>
+        </div>
+      </section>`;
+  }
+}
+
+define('nunt-page-demo', DemoPage);
+
+export default {
+  id: 'demo',
+  title: '示例',
+  icon: '<svg viewBox="0 0 24 24" ...></svg>',
+  async mount(root, ctx) {
+    const page = document.createElement('nunt-page-demo');
+    page.ctx = ctx;            // 必须在 appendChild 之前赋值：connectedCallback 里要取数据
+    root.appendChild(page);
+    return () => { page.disposed = true; page.remove(); };
+  },
+};
+```
+
+约定：
+
+- 页面模块契约与 `ctx` 语义**不变**（见 7.3）；页面内部怎么渲染随意，但请用 kit；
+- 卡片标题用 `<h2>`：`<h1>` 是外壳顶栏的当前页标题，从 h3 起会被 axe 判 `heading-order`；
+- 每个 `ctx.api` 调用都要有 loading / error 分支，错误用 `errorCard` 或 `toast` 呈现；
+- 页面卸载时把 `disposed` 打开，异步回调不要再写已经卸载的节点；
+- 页面自己的样式（很少需要）写在页面里并随 `mount` 的清理函数移除，不要往 `style.css` 加。
 
 ---
 

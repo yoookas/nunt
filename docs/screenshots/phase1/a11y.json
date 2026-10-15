@@ -1,0 +1,398 @@
+{
+  "generatedAt": "2026-10-15T14:31:26.087Z",
+  "tool": {
+    "axe": "4.14.0",
+    "playwright": "1.64.1",
+    "chromium": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.4 Safari/537.36",
+    "viewport": "1440x900",
+    "colorScheme": "dark"
+  },
+  "tags": [
+    "wcag2a",
+    "wcag2aa",
+    "wcag21a",
+    "wcag21aa",
+    "best-practice"
+  ],
+  "summary": {
+    "pages": 12,
+    "critical": 14,
+    "serious": 0,
+    "moderate": 7,
+    "minor": 7
+  },
+  "pages": [
+    {
+      "id": "dashboard",
+      "url": "http://127.0.0.1:16601/#/dashboard",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 0,
+        "minor": 0
+      },
+      "violations": [],
+      "passCount": 35,
+      "incomplete": 1,
+      "error": ""
+    },
+    {
+      "id": "web",
+      "url": "http://127.0.0.1:16601/#/web",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 1,
+        "minor": 1
+      },
+      "violations": [
+        {
+          "id": "empty-table-header",
+          "impact": "minor",
+          "help": "Table header text should not be empty",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/empty-table-header?application=axeAPI",
+          "nodes": 1,
+          "targets": [
+            "th:nth-child(10)"
+          ]
+        },
+        {
+          "id": "heading-order",
+          "impact": "moderate",
+          "help": "Heading levels should only increase by one",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/heading-order?application=axeAPI",
+          "nodes": 1,
+          "targets": [
+            "h3"
+          ]
+        }
+      ],
+      "passCount": 42,
+      "incomplete": 1,
+      "error": ""
+    },
+    {
+      "id": "forward",
+      "url": "http://127.0.0.1:16601/#/forward",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 1,
+        "minor": 1
+      },
+      "violations": [
+        {
+          "id": "empty-table-header",
+          "impact": "minor",
+          "help": "Table header text should not be empty",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/empty-table-header?application=axeAPI",
+          "nodes": 1,
+          "targets": [
+            "th:nth-child(8)"
+          ]
+        },
+        {
+          "id": "heading-order",
+          "impact": "moderate",
+          "help": "Heading levels should only increase by one",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/heading-order?application=axeAPI",
+          "nodes": 1,
+          "targets": [
+            "h3"
+          ]
+        }
+      ],
+      "passCount": 42,
+      "incomplete": 1,
+      "error": ""
+    },
+    {
+      "id": "ddns",
+      "url": "http://127.0.0.1:16601/#/ddns",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 1,
+        "minor": 1
+      },
+      "violations": [
+        {
+          "id": "empty-table-header",
+          "impact": "minor",
+          "help": "Table header text should not be empty",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/empty-table-header?application=axeAPI",
+          "nodes": 1,
+          "targets": [
+            "th:nth-child(9)"
+          ]
+        },
+        {
+          "id": "heading-order",
+          "impact": "moderate",
+          "help": "Heading levels should only increase by one",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/heading-order?application=axeAPI",
+          "nodes": 1,
+          "targets": [
+            ".card:nth-child(2) > .card-head > h3"
+          ]
+        }
+      ],
+      "passCount": 42,
+      "incomplete": 1,
+      "error": ""
+    },
+    {
+      "id": "acme",
+      "url": "http://127.0.0.1:16601/#/acme",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 1,
+        "minor": 1
+      },
+      "violations": [
+        {
+          "id": "empty-table-header",
+          "impact": "minor",
+          "help": "Table header text should not be empty",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/empty-table-header?application=axeAPI",
+          "nodes": 1,
+          "targets": [
+            "th:nth-child(8)"
+          ]
+        },
+        {
+          "id": "heading-order",
+          "impact": "moderate",
+          "help": "Heading levels should only increase by one",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/heading-order?application=axeAPI",
+          "nodes": 1,
+          "targets": [
+            ".card:nth-child(2) > .card-head > h3"
+          ]
+        }
+      ],
+      "passCount": 42,
+      "incomplete": 1,
+      "error": ""
+    },
+    {
+      "id": "storage",
+      "url": "http://127.0.0.1:16601/#/storage",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 0,
+        "minor": 0
+      },
+      "violations": [],
+      "passCount": 39,
+      "incomplete": 1,
+      "error": ""
+    },
+    {
+      "id": "files",
+      "url": "http://127.0.0.1:16601/#/files",
+      "counts": {
+        "critical": 1,
+        "serious": 0,
+        "moderate": 1,
+        "minor": 1
+      },
+      "violations": [
+        {
+          "id": "empty-table-header",
+          "impact": "minor",
+          "help": "Table header text should not be empty",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/empty-table-header?application=axeAPI",
+          "nodes": 1,
+          "targets": [
+            "th:nth-child(5)"
+          ]
+        },
+        {
+          "id": "heading-order",
+          "impact": "moderate",
+          "help": "Heading levels should only increase by one",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/heading-order?application=axeAPI",
+          "nodes": 1,
+          "targets": [
+            ".card:nth-child(2) > .card-head > h3"
+          ]
+        },
+        {
+          "id": "select-name",
+          "impact": "critical",
+          "help": "Select element must have an accessible name",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/select-name?application=axeAPI",
+          "nodes": 1,
+          "targets": [
+            "select"
+          ]
+        }
+      ],
+      "passCount": 42,
+      "incomplete": 1,
+      "error": ""
+    },
+    {
+      "id": "waf",
+      "url": "http://127.0.0.1:16601/#/waf",
+      "counts": {
+        "critical": 8,
+        "serious": 0,
+        "moderate": 1,
+        "minor": 1
+      },
+      "violations": [
+        {
+          "id": "empty-table-header",
+          "impact": "minor",
+          "help": "Table header text should not be empty",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/empty-table-header?application=axeAPI",
+          "nodes": 1,
+          "targets": [
+            "th:nth-child(7)"
+          ]
+        },
+        {
+          "id": "heading-order",
+          "impact": "moderate",
+          "help": "Heading levels should only increase by one",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/heading-order?application=axeAPI",
+          "nodes": 1,
+          "targets": [
+            ".card:nth-child(2) > .card-head > h3"
+          ]
+        },
+        {
+          "id": "label",
+          "impact": "critical",
+          "help": "Form elements must have labels",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/label?application=axeAPI",
+          "nodes": 2,
+          "targets": [
+            ".field:nth-child(8) > .input[type=\"number\"][min=\"0\"]",
+            ".field:nth-child(9) > .input[type=\"number\"][min=\"0\"]"
+          ]
+        },
+        {
+          "id": "select-name",
+          "impact": "critical",
+          "help": "Select element must have an accessible name",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/select-name?application=axeAPI",
+          "nodes": 6,
+          "targets": [
+            ".card:nth-child(2) > .pwaf-panel.card-body > div > .grid > .field:nth-child(2) > select",
+            ".field:nth-child(6) > select",
+            ".field:nth-child(7) > select"
+          ]
+        }
+      ],
+      "passCount": 43,
+      "incomplete": 1,
+      "error": ""
+    },
+    {
+      "id": "task",
+      "url": "http://127.0.0.1:16601/#/task",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 1,
+        "minor": 1
+      },
+      "violations": [
+        {
+          "id": "empty-table-header",
+          "impact": "minor",
+          "help": "Table header text should not be empty",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/empty-table-header?application=axeAPI",
+          "nodes": 1,
+          "targets": [
+            "th:nth-child(8)"
+          ]
+        },
+        {
+          "id": "heading-order",
+          "impact": "moderate",
+          "help": "Heading levels should only increase by one",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/heading-order?application=axeAPI",
+          "nodes": 1,
+          "targets": [
+            "h3"
+          ]
+        }
+      ],
+      "passCount": 42,
+      "incomplete": 1,
+      "error": ""
+    },
+    {
+      "id": "notify",
+      "url": "http://127.0.0.1:16601/#/notify",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 0,
+        "minor": 0
+      },
+      "violations": [],
+      "passCount": 40,
+      "incomplete": 1,
+      "error": ""
+    },
+    {
+      "id": "logs",
+      "url": "http://127.0.0.1:16601/#/logs",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 0,
+        "minor": 0
+      },
+      "violations": [],
+      "passCount": 38,
+      "incomplete": 1,
+      "error": ""
+    },
+    {
+      "id": "settings",
+      "url": "http://127.0.0.1:16601/#/settings",
+      "counts": {
+        "critical": 5,
+        "serious": 0,
+        "moderate": 0,
+        "minor": 0
+      },
+      "violations": [
+        {
+          "id": "label",
+          "impact": "critical",
+          "help": "Form elements must have labels",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/label?application=axeAPI",
+          "nodes": 3,
+          "targets": [
+            "input[max=\"720\"]",
+            "input[max=\"100\"]",
+            "input[max=\"1440\"]"
+          ]
+        },
+        {
+          "id": "select-name",
+          "impact": "critical",
+          "help": "Select element must have an accessible name",
+          "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/select-name?application=axeAPI",
+          "nodes": 2,
+          "targets": [
+            ".field:nth-child(3) > select",
+            ".field:nth-child(9) > select"
+          ]
+        }
+      ],
+      "passCount": 39,
+      "incomplete": 1,
+      "error": ""
+    }
+  ]
+}

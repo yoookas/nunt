@@ -1,11 +1,17 @@
 // nunt 控制台外壳：登录、布局、hash 路由、页面懒加载、SSE 事件总线、主题。
+//
+// 阶段 1：外壳与登录页改用 Shoelace 组件（sl-drawer / sl-dropdown / sl-menu / sl-dialog /
+// sl-badge / sl-icon-button / sl-input / sl-button / sl-alert / sl-card），自研部分用 Lit 写成
+// light DOM（NuntElement.createRenderRoot() 返回 this），外观全部来自 style.css 的 token 映射。
+// 路由、页面清单、动态 import、ctx 契约与 lib/api.js 与迁移前保持一致。
 import { api, setCsrf, onUnauthorized } from './lib/api.js';
 import {
-  el, toast, confirmDialog as uiConfirm, promptDialog, openModal,
-  fmtBytes, fmtTime, escapeHtml, renderIcon, clear,
-} from './lib/ui.js';
+  NuntElement, html, nothing, define, toast, confirmDialog, openDialog, promptDialog, formGrid,
+  emptyState, loadingState, errorCard, infoVersionText, errorMessage,
+} from './lib/kit.js';
+import { renderIcon, fmtBytes, fmtTime, escapeHtml } from './lib/ui.js';
 
-/* ------------------------------------------------------------------ 页面清单 */
+/* ------------------------------------------------------------------ 页面清单（保持不变） */
 
 const PAGES = [
   { id: 'dashboard', title: '概览', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>' },
@@ -24,8 +30,13 @@ const PAGES = [
 const PAGE_MAP = new Map(PAGES.map((page) => [page.id, page]));
 const DEFAULT_PAGE = 'dashboard';
 const THEME_KEY = 'nunt.theme';
+// 会话提示：未登录时 /api/v1/auth/session 会返回 401，浏览器网络层会把 401 记成一条
+// console 错误。没登录过的浏览器直接渲染登录页、不做探测；登录成功后写这个标记，
+// 之后刷新才会去恢复会话（详见 boot()）。
+const SESSION_KEY = 'nunt.session';
+const NARROW_QUERY = '(max-width: 900px)';
 
-/* ------------------------------------------------------------------ 全局状态 */
+/* ------------------------------------------------------------------ 全局状态（字段与迁移前一致） */
 
 const state = {
   ready: false,
@@ -44,20 +55,24 @@ const state = {
 
 const dom = {
   app: null,
-  layout: null,
-  sidebar: null,
+  shell: null,
   nav: null,
-  mainBody: null,
-  topTitle: null,
-  topStatus: null,
-  topMeta: null,
-  sseStatus: null,
+  navSlot: null,
+  drawerNavSlot: null,
+  drawer: null,
   content: null,
+  menu: null,
 };
 
 const subscribers = new Set();
 let pendingHash = '';
 let pendingHashTimer = null;
+let cleanupCurrent = null;
+let navToken = 0;
+let sseSource = null;
+let sseRetry = 0;
+let sseTimer = null;
+let narrowMedia = null;
 
 function markPendingHash(hash) {
   pendingHash = hash;
@@ -73,13 +88,8 @@ function clearPendingHash() {
     pendingHashTimer = null;
   }
 }
-let cleanupCurrent = null;
-let navToken = 0;
-let sseSource = null;
-let sseRetry = 0;
-let sseTimer = null;
 
-/* ------------------------------------------------------------------ 主题 */
+/* ------------------------------------------------------------------ 主题（html 上切换 sl-theme-*） */
 
 function readStoredTheme() {
   try {
@@ -92,24 +102,32 @@ function readStoredTheme() {
   return 'dark';
 }
 
+/** applyTheme：主题 = <html> 上的 sl-theme-dark / sl-theme-light（Shoelace 的设计 token 由此切换）。 */
 function applyTheme(theme, persist) {
   state.theme = theme === 'light' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', state.theme);
+  const root = document.documentElement;
+  root.classList.toggle('sl-theme-dark', state.theme === 'dark');
+  root.classList.toggle('sl-theme-light', state.theme === 'light');
+  // 兼容：老页面/自定义样式里可能还在用 html[data-theme="light"]。
+  root.setAttribute('data-theme', state.theme);
   if (persist) {
     try { localStorage.setItem(THEME_KEY, state.theme); } catch (err) { /* 忽略 */ }
   }
-  const button = dom.topMeta ? dom.topMeta.querySelector('[data-theme-toggle]') : null;
-  if (button) {
-    button.title = state.theme === 'dark' ? '切换到浅色主题' : '切换到深色主题';
-    button.setAttribute('aria-label', button.title);
-    clear(button);
-    button.appendChild(state.theme === 'dark'
-      ? renderIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg>')
-      : renderIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 019.5 4a8.5 8.5 0 1010.5 10.5z"/></svg>'));
-  }
+  if (dom.shell) dom.shell.theme = state.theme;
 }
 
-/* ------------------------------------------------------------------ 上下文 */
+function hasSessionHint() {
+  try { return localStorage.getItem(SESSION_KEY) === '1'; } catch (err) { return true; }
+}
+
+function setSessionHint(on) {
+  try {
+    if (on) localStorage.setItem(SESSION_KEY, '1');
+    else localStorage.removeItem(SESSION_KEY);
+  } catch (err) { /* 忽略 */ }
+}
+
+/* ------------------------------------------------------------------ 上下文（语义不变） */
 
 function onSSE(handler) {
   if (typeof handler !== 'function') return () => {};
@@ -120,7 +138,7 @@ function onSSE(handler) {
 const ctx = {
   api,
   toast,
-  confirm: (msg, options) => uiConfirm(msg, options),
+  confirm: (msg, options) => confirmDialog(msg, options),
   prompt: (msg, def) => promptDialog(msg, def),
   state,
   navigate,
@@ -134,15 +152,229 @@ const ctx = {
   },
 };
 
+
+/* ------------------------------------------------------------------ 登录页 */
+
+class NuntLogin extends NuntElement {
+  static properties = {
+    errorText: { type: String },
+    notice: { type: String },
+    busy: { type: Boolean },
+  };
+
+  constructor() {
+    super();
+    this.errorText = '';
+    this.notice = '';
+    this.busy = false;
+  }
+
+  firstUpdated() {
+    const input = this.querySelector('sl-input[name="username"]');
+    if (input && typeof input.focus === 'function') {
+      try { input.focus(); } catch (err) { /* 忽略 */ }
+    }
+  }
+
+  field(name) {
+    return this.querySelector('sl-input[name="' + name + '"]');
+  }
+
+  async submit() {
+    const usernameInput = this.field('username');
+    const passwordInput = this.field('password');
+    const username = usernameInput ? String(usernameInput.value || '').trim() : '';
+    const password = passwordInput ? String(passwordInput.value || '') : '';
+    if (!username || !password) {
+      this.errorText = '请输入用户名和密码';
+      return;
+    }
+    this.busy = true;
+    this.errorText = '';
+    try {
+      const result = await api.post('/api/v1/auth/login', { username, password });
+      setCsrf(result && result.csrf ? result.csrf : '');
+      state.username = String((result && result.username) || username);
+      state.mustChangePassword = !!(result && result.mustChangePassword);
+      setSessionHint(true);
+      let session = null;
+      try { session = await api.get('/api/v1/auth/session'); } catch (err) { session = null; }
+      if (session) applySession(session);
+      else state.admin = true;
+      await afterLogin();
+    } catch (err) {
+      this.errorText = errorMessage(err, '登录失败');
+      if (passwordInput) {
+        passwordInput.value = '';
+        try { passwordInput.focus(); } catch (err2) { /* 忽略 */ }
+      }
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  render() {
+    return html`<main class="login-main">
+      <div class="login-card">
+        ${this.notice ? html`<sl-alert variant="warning" open class="login-notice">${this.notice}</sl-alert>` : nothing}
+        <sl-card>
+          <div class="login-brand">
+            <span class="brand-mark" aria-hidden="true">n</span>
+            <h1 class="name">nunt</h1>
+          </div>
+          <form class="login-form" novalidate
+            @submit=${(event) => { event.preventDefault(); this.submit(); }}
+            @keydown=${(event) => {
+              if (event.key !== 'Enter') return;
+              event.preventDefault();
+              this.submit();
+            }}>
+            <sl-alert class=${'login-alert' + (this.errorText ? '' : ' hidden')} variant="danger" ?open=${!!this.errorText}>
+              <sl-icon slot="icon" name="exclamation-octagon" aria-hidden="true"></sl-icon>
+              ${this.errorText}
+            </sl-alert>
+            <sl-input name="username" label="用户名" autocomplete="username" placeholder="用户名" required></sl-input>
+            <sl-input name="password" type="password" label="密码" autocomplete="current-password" placeholder="密码" password-toggle required></sl-input>
+            <sl-button class="login-submit" type="submit" variant="primary" ?loading=${this.busy} ?disabled=${this.busy}>登录</sl-button>
+          </form>
+        </sl-card>
+        <p class="login-foot">轻量级反向代理与内网穿透控制台</p>
+      </div>
+    </main>`;
+  }
+}
+
+define('nunt-login', NuntLogin);
+
+/* ------------------------------------------------------------------ 外壳 */
+
+const SSE_STATES = {
+  open: { variant: 'success', text: '实时推送已连接' },
+  connecting: { variant: 'warning', text: '实时推送连接中…' },
+  retry: { variant: 'warning', text: '实时推送已断开，正在重连…' },
+  closed: { variant: 'danger', text: '实时推送已断开' },
+  unsupported: { variant: 'warning', text: '浏览器不支持实时推送' },
+  idle: { variant: 'neutral', text: '实时推送未启用' },
+};
+
+class NuntShell extends NuntElement {
+  static properties = {
+    pageId: { attribute: false },
+    pageTitle: { type: String },
+    username: { type: String },
+    version: { type: String },
+    versionTitle: { type: String },
+    sse: { type: String },
+    theme: { type: String },
+  };
+
+  constructor() {
+    super();
+    this.pageId = '';
+    this.pageTitle = '';
+    this.username = '';
+    this.version = '—';
+    this.versionTitle = '版本信息';
+    this.sse = 'connecting';
+    this.theme = 'dark';
+  }
+
+  firstUpdated() {
+    const menuBtn = this.querySelector('#menuBtn');
+    if (menuBtn) menuBtn.addEventListener('click', () => openDrawer());
+    const themeBtn = this.querySelector('#themeBtn');
+    if (themeBtn) themeBtn.addEventListener('click', () => toggleTheme());
+    const menu = this.querySelector('#userMenu sl-menu');
+    if (menu) {
+      menu.addEventListener('sl-select', (event) => {
+        const value = event.detail && event.detail.item ? event.detail.item.value : '';
+        if (value === 'password') openChangePassword();
+        else if (value === 'logout') confirmLogout();
+      });
+    }
+    const dropdown = this.querySelector('#userMenu');
+    if (dropdown && typeof dropdown.addEventListener === 'function') {
+      // sl-select 之后下拉要收起来（Shoelace 的 sl-menu 默认会关，但显式关一次更稳）。
+      dropdown.addEventListener('sl-after-hide', () => { /* 无操作，保留钩子 */ });
+    }
+    const drawer = this.querySelector('#navDrawer');
+    if (drawer) {
+      drawer.addEventListener('sl-after-hide', () => {
+        const link = dom.nav ? dom.nav.querySelector('.app-nav-item[aria-current="page"]') : null;
+        if (link && typeof link.focus === 'function' && narrowMedia && narrowMedia.matches) {
+          try { link.focus(); } catch (err) { /* 忽略 */ }
+        }
+      });
+    }
+  }
+
+  render() {
+    const sse = SSE_STATES[this.sse] || SSE_STATES.idle;
+    const dark = this.theme === 'dark';
+    return html`
+      <a class="skip-link" href="#content">跳到主要内容</a>
+      <div class="layout">
+        <aside class="app-sidebar">
+          <div class="app-brand">
+            <span class="brand-mark" aria-hidden="true">n</span>
+            <span class="app-brand-text">
+              <span class="app-brand-name">nunt</span>
+              <span class="brand-sub">控制台</span>
+            </span>
+          </div>
+          <div class="app-sidebar-nav" id="navSlot"></div>
+          <div class="app-sidebar-foot">
+            <span class="mono" data-version="1" title=${this.versionTitle}>${this.version}</span>
+          </div>
+        </aside>
+        <div class="main">
+          <header class="topbar">
+            <sl-icon-button class="menu-btn" id="menuBtn" name="list-ul" label="展开导航"></sl-icon-button>
+            <h1 class="title">${this.pageTitle}</h1>
+            <span class="spacer"></span>
+            <span class="topbar-meta">
+              <span class="mono" data-version="1">${this.version}</span>
+            </span>
+            <sl-badge class=${'sse-badge sse-' + this.sse} pill variant=${sse.variant} role="status" aria-live="polite">${sse.text}</sl-badge>
+            <sl-icon-button id="themeBtn" name=${dark ? 'sun' : 'moon'}
+              label=${dark ? '切换到浅色主题' : '切换到深色主题'}></sl-icon-button>
+            <sl-dropdown id="userMenu" placement="bottom-end" distance="6">
+              <sl-button slot="trigger" size="small" outline class="topbar-user">
+                <sl-icon slot="prefix" name="person" aria-hidden="true"></sl-icon>${this.username || '账户'}<sl-icon slot="suffix" name="chevron-down" aria-hidden="true"></sl-icon>
+              </sl-button>
+              <sl-menu>
+                <sl-menu-item value="password"><sl-icon slot="prefix" name="key" aria-hidden="true"></sl-icon>修改密码</sl-menu-item>
+                <sl-menu-item value="logout"><sl-icon slot="prefix" name="box-arrow-right" aria-hidden="true"></sl-icon>退出登录</sl-menu-item>
+              </sl-menu>
+            </sl-dropdown>
+          </header>
+          <main class="content" id="content" tabindex="-1"></main>
+        </div>
+      </div>
+      <sl-drawer id="navDrawer" label="主导航" placement="start" class="nav-drawer">
+        <div class="app-sidebar-nav" id="drawerNavSlot"></div>
+      </sl-drawer>`;
+  }
+}
+
+define('nunt-shell', NuntShell);
+
 /* ------------------------------------------------------------------ 启动 */
 
 async function boot() {
   dom.app = document.getElementById('app');
   applyTheme(readStoredTheme(), false);
+  if (window.matchMedia) {
+    narrowMedia = window.matchMedia(NARROW_QUERY);
+    const onChange = () => syncNavPlacement();
+    if (typeof narrowMedia.addEventListener === 'function') narrowMedia.addEventListener('change', onChange);
+    else if (typeof narrowMedia.addListener === 'function') narrowMedia.addListener(onChange);
+  }
   onUnauthorized(() => {
     if (state.ready) {
       toast('登录状态已失效，请重新登录', 'warn');
       stopSSE();
+      setSessionHint(false);
       showLogin();
     }
   });
@@ -166,6 +398,12 @@ async function boot() {
   });
 
   state.ready = false;
+  // 没有会话提示（这个浏览器从没登录过）时不去探测 /auth/session：后端会回 401，
+  // 而浏览器网络层会把 401 记成一条 console 错误。直接渲染登录页即可。
+  if (!hasSessionHint()) {
+    showLogin();
+    return;
+  }
   let session = null;
   try {
     session = await api.get('/api/v1/auth/session');
@@ -176,6 +414,7 @@ async function boot() {
     applySession(session);
     await afterLogin();
   } else {
+    setSessionHint(false);
     showLogin();
   }
 }
@@ -185,6 +424,12 @@ function applySession(session) {
   state.admin = !!session.admin;
   state.mustChangePassword = !!session.mustChangePassword;
   setCsrf(session.csrf || '');
+}
+
+function clearNode(node) {
+  if (!node) return node;
+  while (node.firstChild) node.removeChild(node.firstChild);
+  return node;
 }
 
 /* ------------------------------------------------------------------ 登录界面 */
@@ -198,82 +443,12 @@ function showLogin(message) {
     try { cleanupCurrent(); } catch (err) { /* 忽略 */ }
     cleanupCurrent = null;
   }
-  clear(dom.app);
+  clearNode(dom.app);
   document.body.classList.remove('modal-open');
-  closeAllModals();
-
-  const usernameInput = el('input', { class: 'input', name: 'username', autocomplete: 'username', placeholder: '用户名', required: true, autofocus: true });
-  const passwordInput = el('input', { class: 'input', name: 'password', type: 'password', autocomplete: 'current-password', placeholder: '密码', required: true });
-  const alert = el('div', { class: 'login-alert hidden' });
-  const submit = el('button', { class: 'btn btn-primary', type: 'submit', style: { width: '100%' } }, '登录');
-  const spinner = el('span', { class: 'spinner hidden', style: { width: '14px', height: '14px', borderWidth: '2px' } });
-
-  const form = el('form', { novalidate: true },
-    alert,
-    el('div', { class: 'field' }, el('label', null, '用户名'), usernameInput),
-    el('div', { class: 'field' }, el('label', null, '密码'), passwordInput),
-    el('div', { class: 'row', style: { marginTop: '4px' } }, submit, spinner),
-  );
-
-  function showError(text) {
-    alert.textContent = text;
-    alert.classList.remove('hidden');
-  }
-
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    alert.classList.add('hidden');
-    const username = usernameInput.value.trim();
-    const password = passwordInput.value;
-    if (!username || !password) {
-      showError('请输入用户名和密码');
-      return;
-    }
-    submit.disabled = true;
-    spinner.classList.remove('hidden');
-    try {
-      const result = await api.post('/api/v1/auth/login', { username, password });
-      setCsrf(result && result.csrf ? result.csrf : '');
-      state.username = String((result && result.username) || username);
-      state.mustChangePassword = !!(result && result.mustChangePassword);
-      let session = null;
-      try { session = await api.get('/api/v1/auth/session'); } catch (err) { session = null; }
-      if (session) applySession(session);
-      else state.admin = true;
-      form.reset();
-      await afterLogin();
-    } catch (err) {
-      showError(err && err.message ? err.message : '登录失败');
-      passwordInput.value = '';
-      passwordInput.focus();
-    } finally {
-      submit.disabled = false;
-      spinner.classList.add('hidden');
-    }
-  });
-
-  const card = el('div', { class: 'card' },
-    el('div', { class: 'card-body' },
-      el('div', { class: 'login-brand' },
-        el('span', { class: 'brand-mark' }, 'n'),
-        el('span', { class: 'name' }, 'nunt'),
-      ),
-      form,
-    ),
-  );
-
-  dom.app.appendChild(el('div', { class: 'login' },
-    el('div', { class: 'login-card' },
-      message ? el('div', { class: 'login-alert', style: { marginBottom: '12px' } }, message) : null,
-      card,
-      el('div', { class: 'login-foot' }, '轻量级反向代理与内网穿透控制台'),
-    ),
-  ));
-  setTimeout(() => { try { usernameInput.focus(); } catch (err) { /* 忽略 */ } }, 0);
-}
-
-function closeAllModals() {
-  for (const node of Array.from(document.querySelectorAll('.modal'))) node.remove();
+  const login = document.createElement('nunt-login');
+  if (message) login.notice = String(message);
+  dom.app.appendChild(login);
+  dom.shell = null;
 }
 
 /* ------------------------------------------------------------------ 登录之后 */
@@ -283,7 +458,7 @@ async function afterLogin() {
     await forceChangePassword();
   }
   state.ready = true;
-  renderShell();
+  await renderShell();
   startSSE();
   if (!location.hash || location.hash === '#' || location.hash === '#/') {
     markPendingHash('#/' + DEFAULT_PAGE);
@@ -293,198 +468,94 @@ async function afterLogin() {
   await loadInfo();
 }
 
-function forceChangePassword() {
-  return new Promise((resolve) => {
-    const current = el('input', { class: 'input', type: 'password', autocomplete: 'current-password' });
-    const next = el('input', { class: 'input', type: 'password', autocomplete: 'new-password' });
-    const again = el('input', { class: 'input', type: 'password', autocomplete: 'new-password' });
-    const error = el('div', { class: 'field error hidden' });
-    const form = el('div', null,
-      el('div', { class: 'notice' }, '当前账号要求修改初始密码后才能继续使用控制台。'),
-      el('div', { class: 'field' }, el('label', null, '当前密码'), current),
-      el('div', { class: 'field' }, el('label', null, '新密码（至少 8 位）'), next),
-      el('div', { class: 'field' }, el('label', null, '确认新密码'), again),
-      error,
-    );
-    const modal = openModal({
-      title: '修改密码',
-      body: form,
-      onEscape: false,
-      actions: [
-        {
-          label: '退出登录',
-          kind: 'ghost',
-          close: false,
-          onClick: async () => {
-            await logout();
-            modal.close();
-            resolve();
-          },
-        },
-        {
-          label: '保存',
-          kind: 'primary',
-          close: false,
-          onClick: async () => {
-            error.classList.add('hidden');
-            if (next.value.length < 8) {
-              error.textContent = '新密码至少需要 8 位';
-              error.classList.remove('hidden');
-              return;
-            }
-            if (next.value !== again.value) {
-              error.textContent = '两次输入的新密码不一致';
-              error.classList.remove('hidden');
-              return;
-            }
-            modal.setBusy(true);
-            try {
-              await api.post('/api/v1/auth/password', { current: current.value, new: next.value });
-              state.mustChangePassword = false;
-              toast('密码已更新，请使用新密码重新登录', 'ok');
-              modal.close();
-              await logout();
-              resolve();
-            } catch (err) {
-              error.textContent = err && err.message ? err.message : '修改失败';
-              error.classList.remove('hidden');
-            } finally {
-              modal.setBusy(false);
-            }
-          },
-        },
-      ],
-      onClose: () => resolve(),
-    });
-  });
-}
-
-async function logout() {
-  try {
-    await api.post('/api/v1/auth/logout', {});
-  } catch (err) { /* 即使失败也要回到登录页 */ }
-  setCsrf('');
-  state.username = '';
-  state.admin = false;
-  state.info = null;
-  stopSSE();
-  if (location.hash) location.hash = '';
-  showLogin();
-}
-
 /* ------------------------------------------------------------------ 外壳布局 */
 
-function renderShell() {
-  dom.app = document.getElementById('app');
-  clear(dom.app);
-  dom.nav = el('nav', { class: 'nav', 'aria-label': '主导航' });
-
-  const sidebar = el('aside', { class: 'sidebar' },
-    el('div', { class: 'brand' },
-      el('span', { class: 'brand-mark' }, 'n'),
-      el('span', null, 'nunt', el('span', { class: 'brand-sub' }, '控制台')),
-    ),
-    dom.nav,
-    el('div', { class: 'sidebar-foot' },
-      el('div', { class: 'row' },
-        el('span', { class: 'muted mono', 'data-version': '1' }, '—'),
-        el('span', { class: 'spacer', style: { flex: '1' } }),
-      ),
-    ),
-  );
-
-  const menuBtn = el('button', {
-    class: 'icon-btn menu-btn', type: 'button', title: '展开导航', 'aria-label': '展开导航',
-    on: { click: () => dom.layout.classList.toggle('nav-open') },
-  }, renderIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>'));
-
-  dom.topTitle = el('div', { class: 'title' }, '概览');
-  dom.sseStatus = statusBadge('连接中', 'warn');
-  const themeBtn = el('button', { class: 'icon-btn', type: 'button', 'data-theme-toggle': '1', 'data-compact-hide': '1' });
-  themeBtn.addEventListener('click', () => {
-    applyTheme(state.theme === 'dark' ? 'light' : 'dark', true);
-    toast(state.theme === 'dark' ? '已切换到深色主题' : '已切换到浅色主题');
-  });
-  const passwordBtn = el('button', {
-    class: 'icon-btn', type: 'button', title: '修改密码', 'aria-label': '修改密码', 'data-compact-hide': '1',
-    on: { click: () => openChangePassword() },
-  }, renderIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg>'));
-  const logoutBtn = el('button', {
-    class: 'icon-btn', type: 'button', title: '退出登录', 'aria-label': '退出登录',
-    on: {
-      click: async () => {
-        if (await uiConfirm('确定要退出登录吗？', { danger: true, okLabel: '退出登录' })) await logout();
-      },
-    },
-  }, renderIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3"/><path d="M10 8l-4 4 4 4"/><path d="M6 12h9"/></svg>'));
-
-  dom.topMeta = el('div', { class: 'meta' }, dom.sseStatus);
-  const topbar = el('header', { class: 'topbar' },
-    menuBtn,
-    dom.topTitle,
-    el('div', { class: 'spacer' }),
-    el('div', { class: 'meta' },
-      el('span', { class: 'mono', 'data-version': '1' }, '—'),
-      el('span', null, state.username),
-    ),
-    dom.topMeta,
-    themeBtn,
-    passwordBtn,
-    logoutBtn,
-  );
-
-  dom.content = el('section', { class: 'content', id: 'content', tabindex: '-1' });
-  const skipLink = el('a', { class: 'skip-link', href: '#content' }, '跳到主要内容');
-  dom.mainBody = el('div', { class: 'main' }, topbar, dom.content);
-  const backdrop = el('button', { class: 'sidebar-backdrop', type: 'button', 'aria-label': '关闭导航', on: { click: () => dom.layout.classList.remove('nav-open') } });
-  dom.layout = el('div', { class: 'layout' }, skipLink, sidebar, dom.mainBody, backdrop);
-  dom.app.appendChild(dom.layout);
-
-  applyTheme(state.theme, false);
-  renderNav();
-  applyInfoToShell();
-}
-
-function statusBadge(text, kind) {
-  return el('span', { class: 'status' + (kind ? ' ' + kind : '') }, el('span', { class: 'dot' }), el('span', { class: 'label' }, text));
-}
-
-function setStatus(node, text, kind) {
-  if (!node) return;
-  node.className = 'status' + (kind ? ' ' + kind : '');
-  const label = node.querySelector('.label');
-  if (label) label.textContent = text;
-}
-
-function renderNav() {
-  if (!dom.nav) return;
-  clear(dom.nav);
+function buildNav() {
+  const nav = document.createElement('nav');
+  nav.className = 'app-nav';
+  nav.setAttribute('aria-label', '主导航');
   for (const page of PAGES) {
-    const button = el('button', {
-      class: 'nav-item' + (page.id === state.pageId ? ' active' : ''),
-      type: 'button',
-      'data-page': page.id,
-      title: page.title,
-    }, renderIcon(page.icon), el('span', { class: 'nav-text' }, page.title));
-    button.addEventListener('click', () => {
-      dom.layout.classList.remove('nav-open');
-      navigate(page.id);
+    const link = document.createElement('a');
+    link.className = 'app-nav-item';
+    link.href = '#/' + page.id;
+    link.dataset.page = page.id;
+    link.title = page.title;
+    const icon = document.createElement('span');
+    icon.className = 'nav-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.appendChild(renderIcon(page.icon));
+    const text = document.createElement('span');
+    text.className = 'nav-text';
+    text.textContent = page.title;
+    link.appendChild(icon);
+    link.appendChild(text);
+    link.addEventListener('click', () => {
+      closeDrawer();
+      if (location.hash === link.getAttribute('href')) route().catch(() => {});
     });
-    dom.nav.appendChild(button);
+    nav.appendChild(link);
+  }
+  return nav;
+}
+
+function markActiveNav() {
+  if (!dom.nav) return;
+  for (const link of Array.from(dom.nav.querySelectorAll('.app-nav-item'))) {
+    if (link.dataset.page === state.pageId) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
   }
 }
 
-function applyInfoToShell() {
-  const version = state.info && state.info.version ? state.info.version : '—';
-  for (const node of Array.from(document.querySelectorAll('[data-version]'))) {
-    node.textContent = version === '—' ? '—' : 'v' + version;
-    node.title = state.info && state.info.commit ? '提交 ' + state.info.commit : '版本信息';
-  }
+function syncNavPlacement() {
+  const narrow = !!(narrowMedia && narrowMedia.matches);
+  const target = narrow ? dom.drawerNavSlot : dom.navSlot;
+  if (dom.nav && target && dom.nav.parentElement !== target) target.appendChild(dom.nav);
+  if (!narrow) closeDrawer();
+}
+
+function openDrawer() {
+  if (!dom.drawer) return;
+  state.navOpen = true;
+  try { dom.drawer.show(); } catch (err) { /* 忽略 */ }
+}
+
+function closeDrawer() {
+  if (!dom.drawer) return;
+  state.navOpen = false;
+  try { dom.drawer.hide(); } catch (err) { /* 忽略 */ }
+}
+
+async function renderShell() {
+  dom.app = document.getElementById('app');
+  clearNode(dom.app);
+  const shell = document.createElement('nunt-shell');
+  shell.pageTitle = PAGE_MAP.has(state.pageId) ? PAGE_MAP.get(state.pageId).title : '控制台';
+  shell.username = state.username;
+  shell.theme = state.theme;
+  shell.sse = state.sse === 'idle' ? 'connecting' : state.sse;
+  applyInfoToShell(shell);
+  dom.app.appendChild(shell);
+  dom.shell = shell;
+  await shell.updateComplete;
+  dom.navSlot = shell.querySelector('#navSlot');
+  dom.drawerNavSlot = shell.querySelector('#drawerNavSlot');
+  dom.drawer = shell.querySelector('#navDrawer');
+  dom.content = shell.querySelector('#content');
+  if (!dom.nav) dom.nav = buildNav();
+  syncNavPlacement();
+  markActiveNav();
+}
+
+function applyInfoToShell(shell) {
+  const node = shell || dom.shell;
+  if (!node) return;
+  const info = state.info || {};
+  node.version = infoVersionText(info);
+  node.versionTitle = info.commit ? '提交 ' + String(info.commit) : '版本信息';
 }
 
 async function loadInfo(force) {
   if (state.info && !force) {
-    // 页面可能已经填好了信息，这里只负责把它同步到外壳。
     if (state.ready) applyInfoToShell();
     return state.info;
   }
@@ -497,6 +568,34 @@ async function loadInfo(force) {
   }
   if (state.ready) applyInfoToShell();
   return state.info;
+}
+
+function toggleTheme() {
+  applyTheme(state.theme === 'dark' ? 'light' : 'dark', true);
+  toast(state.theme === 'dark' ? '已切换到深色主题' : '已切换到浅色主题');
+}
+
+function setSSE(status) {
+  state.sse = status;
+  if (dom.shell) dom.shell.sse = status;
+}
+
+async function confirmLogout() {
+  if (await confirmDialog('确定要退出登录吗？', { danger: true, okLabel: '退出登录' })) await logout();
+}
+
+async function logout() {
+  try {
+    await api.post('/api/v1/auth/logout', {});
+  } catch (err) { /* 即使失败也要回到登录页 */ }
+  setCsrf('');
+  setSessionHint(false);
+  state.username = '';
+  state.admin = false;
+  state.info = null;
+  stopSSE();
+  if (location.hash) location.hash = '';
+  showLogin();
 }
 
 /* ------------------------------------------------------------------ 路由 */
@@ -537,6 +636,14 @@ function navigate(id, params) {
   route().catch(() => {});
 }
 
+function actionButton(label, onClick) {
+  const button = document.createElement('sl-button');
+  button.setAttribute('size', 'small');
+  button.textContent = label;
+  button.addEventListener('click', onClick);
+  return button;
+}
+
 async function route() {
   if (!state.ready) return;
   const { id, params } = parseHash();
@@ -548,17 +655,13 @@ async function route() {
     try { cleanupCurrent(); } catch (err) { /* 页面清理失败不应阻塞切换 */ }
     cleanupCurrent = null;
   }
-  clear(dom.content);
-  const loading = el('div', { class: 'loading' }, el('span', { class: 'spinner' }), el('span', null, '正在加载…'));
-  dom.content.appendChild(loading);
+  if (!dom.content) return;
+  clearNode(dom.content);
+  dom.content.appendChild(loadingState('正在加载…'));
 
   state.pageId = pageId;
-  if (dom.topTitle) dom.topTitle.textContent = meta.title;
-  if (dom.nav) {
-    for (const item of Array.from(dom.nav.querySelectorAll('.nav-item'))) {
-      item.classList.toggle('active', item.dataset.page === pageId);
-    }
-  }
+  if (dom.shell) dom.shell.pageTitle = meta.title;
+  markActiveNav();
   document.title = meta.title + ' · nunt';
 
   let module = null;
@@ -571,20 +674,20 @@ async function route() {
 
   const page = module && module.default ? module.default : null;
   if (!page) {
-    clear(dom.content);
-    dom.content.appendChild(el('div', { class: 'empty' },
-      renderIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v5"/><circle cx="12" cy="17.5" r=".6" fill="currentColor"/><path d="M10.3 3.9L2.6 17a2 2 0 001.7 3h15.4a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>'),
-      el('div', { class: 'empty-title' }, '页面“' + meta.title + '”暂时不可用'),
-      el('div', { class: 'muted' }, '该页面的前端模块还未提供（内部错误：无法加载 pages/' + pageId + '.js）。'),
-      el('button', { class: 'btn btn-sm', type: 'button', on: { click: () => route() } }, '重试'),
-    ));
+    clearNode(dom.content);
+    dom.content.appendChild(emptyState('页面“' + meta.title + '”暂时不可用', {
+      icon: 'exclamation-triangle',
+      hint: '该页面的前端模块还未提供（内部错误：无法加载 pages/' + pageId + '.js）。',
+      action: actionButton('重试', () => route()),
+    }));
     return;
   }
 
-  if (page.title && dom.topTitle) dom.topTitle.textContent = page.title;
+  if (page.title && dom.shell) dom.shell.pageTitle = page.title;
 
-  const root = el('div', { class: 'page page-' + pageId });
-  clear(dom.content);
+  const root = document.createElement('div');
+  root.className = 'page page-' + pageId;
+  clearNode(dom.content);
   dom.content.appendChild(root);
 
   try {
@@ -598,12 +701,12 @@ async function route() {
     cleanupCurrent = typeof cleanup === 'function' ? cleanup : null;
   } catch (err) {
     if (token !== navToken) return;
-    clear(root);
-    root.appendChild(el('div', { class: 'empty' },
-      el('div', { class: 'empty-title' }, '页面渲染失败'),
-      el('div', { class: 'muted' }, err && err.message ? err.message : String(err)),
-      el('button', { class: 'btn btn-sm', type: 'button', on: { click: () => route() } }, '重新加载'),
-    ));
+    clearNode(root);
+    root.appendChild(errorCard(err, {
+      title: '页面渲染失败',
+      retryLabel: '重新加载',
+      onRetry: () => route(),
+    }));
   }
 }
 
@@ -611,7 +714,7 @@ async function route() {
 
 function startSSE() {
   if (typeof window.EventSource !== 'function') {
-    setStatus(dom.sseStatus, '不支持实时推送', 'warn');
+    setSSE('unsupported');
     return;
   }
   if (!sseSource) connectSSE();
@@ -619,7 +722,7 @@ function startSSE() {
 
 function connectSSE() {
   if (sseSource || !state.ready) return;
-  setStatus(dom.sseStatus, sseRetry > 0 ? '正在重连…' : '连接中…', 'warn');
+  setSSE(sseRetry > 0 ? 'retry' : 'connecting');
   let source;
   try {
     source = new EventSource('/api/v1/events', { withCredentials: true });
@@ -628,13 +731,11 @@ function connectSSE() {
     return;
   }
   sseSource = source;
-  state.sse = 'connecting';
 
   source.addEventListener('open', () => {
     if (source !== sseSource) return;
     sseRetry = 0;
-    state.sse = 'open';
-    setStatus(dom.sseStatus, '实时推送已连接', 'ok');
+    setSSE('open');
   });
 
   source.addEventListener('message', (event) => {
@@ -652,8 +753,7 @@ function connectSSE() {
     if (source !== sseSource) return;
     try { source.close(); } catch (err) { /* 忽略 */ }
     sseSource = null;
-    state.sse = 'closed';
-    setStatus(dom.sseStatus, '实时推送已断开', 'err');
+    setSSE('closed');
     scheduleReconnect();
   });
 }
@@ -666,7 +766,7 @@ function scheduleReconnect() {
     sseTimer = null;
     connectSSE();
   }, delay);
-  if (sseRetry === 1 || sseRetry % 5 === 0) setStatus(dom.sseStatus, '实时推送已断开，正在重连…', 'err');
+  if (sseRetry === 1 || sseRetry % 5 === 0) setSSE('retry');
 }
 
 function stopSSE() {
@@ -679,7 +779,7 @@ function stopSSE() {
     sseSource = null;
   }
   sseRetry = 0;
-  state.sse = 'idle';
+  setSSE('idle');
 }
 
 function dispatchSSE(payload) {
@@ -702,52 +802,117 @@ function dispatchSSE(payload) {
 
 /* ------------------------------------------------------------------ 修改密码 */
 
+function passwordFields() {
+  return formGrid([
+    { name: 'current', label: '当前密码', type: 'password', autocomplete: 'current-password' },
+    { name: 'next', label: '新密码（至少 8 位）', type: 'password', autocomplete: 'new-password' },
+    { name: 'again', label: '确认新密码', type: 'password', autocomplete: 'new-password' },
+  ]);
+}
+
 function openChangePassword() {
-  const current = el('input', { class: 'input', type: 'password', autocomplete: 'current-password' });
-  const next = el('input', { class: 'input', type: 'password', autocomplete: 'new-password' });
-  const again = el('input', { class: 'input', type: 'password', autocomplete: 'new-password' });
-  const error = el('div', { class: 'field error hidden' });
-  const modal = openModal({
+  const form = passwordFields();
+  openDialog({
     title: '修改密码',
-    body: el('div', null,
-      el('div', { class: 'field' }, el('label', null, '当前密码'), current),
-      el('div', { class: 'field' }, el('label', null, '新密码（至少 8 位）'), next),
-      el('div', { class: 'field' }, el('label', null, '确认新密码'), again),
-      error,
-    ),
+    body: form.node,
+    width: '460px',
     actions: [
       { label: '取消' },
       {
         label: '保存',
         kind: 'primary',
         close: false,
-        onClick: async () => {
-          error.classList.add('hidden');
-          if (next.value.length < 8) {
-            error.textContent = '新密码至少需要 8 位';
-            error.classList.remove('hidden');
+        onClick: async (dlg, button) => {
+          form.clearErrors();
+          const values = form.read();
+          if (!values.next || String(values.next).length < 8) {
+            form.fieldError('next', '新密码至少需要 8 位');
             return;
           }
-          if (next.value !== again.value) {
-            error.textContent = '两次输入的新密码不一致';
-            error.classList.remove('hidden');
+          if (values.next !== values.again) {
+            form.fieldError('again', '两次输入的新密码不一致');
             return;
           }
-          modal.setBusy(true);
+          dlg.setBusy(true, button);
           try {
-            await api.post('/api/v1/auth/password', { current: current.value, new: next.value });
+            await api.post('/api/v1/auth/password', { current: values.current, new: values.next });
             toast('密码已更新，请重新登录', 'ok');
-            modal.close();
+            dlg.close();
             await logout();
           } catch (err) {
-            error.textContent = err && err.message ? err.message : '修改失败';
-            error.classList.remove('hidden');
+            form.error(errorMessage(err, '修改失败'));
           } finally {
-            modal.setBusy(false);
+            dlg.setBusy(false, button);
           }
         },
       },
     ],
+  });
+}
+
+function forceChangePassword() {
+  return new Promise((resolve) => {
+    const form = passwordFields();
+    const notice = document.createElement('div');
+    notice.className = 'notice';
+    notice.textContent = '当前账号要求修改初始密码后才能继续使用控制台。';
+    const body = document.createElement('div');
+    body.appendChild(notice);
+    body.appendChild(form.node);
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      resolve();
+    };
+    openDialog({
+      title: '修改密码',
+      body,
+      width: '460px',
+      closeOnEscape: false,
+      onClose: finish,
+      actions: [
+        {
+          label: '退出登录',
+          kind: 'ghost',
+          close: false,
+          onClick: async () => {
+            await logout();
+            finish();
+          },
+        },
+        {
+          label: '保存',
+          kind: 'primary',
+          close: false,
+          onClick: async (dlg, button) => {
+            form.clearErrors();
+            const values = form.read();
+            if (!values.next || String(values.next).length < 8) {
+              form.fieldError('next', '新密码至少需要 8 位');
+              return;
+            }
+            if (values.next !== values.again) {
+              form.fieldError('again', '两次输入的新密码不一致');
+              return;
+            }
+            dlg.setBusy(true, button);
+            try {
+              await api.post('/api/v1/auth/password', { current: values.current, new: values.next });
+              state.mustChangePassword = false;
+              toast('密码已更新，请使用新密码重新登录', 'ok');
+              dlg.close();
+              await logout();
+              finish();
+            } catch (err) {
+              form.error(errorMessage(err, '修改失败'));
+            } finally {
+              dlg.setBusy(false, button);
+            }
+          },
+        },
+      ],
+    });
   });
 }
 
@@ -758,10 +923,7 @@ export { api, ctx, state, onSSE, navigate };
 boot().catch((err) => {
   const app = document.getElementById('app');
   if (app) {
-    clear(app);
-    app.appendChild(el('div', { class: 'empty' },
-      el('div', { class: 'empty-title' }, '控制台初始化失败'),
-      el('div', { class: 'muted' }, err && err.message ? err.message : String(err)),
-    ));
+    clearNode(app);
+    app.appendChild(errorCard(err, { title: '控制台初始化失败' }));
   }
 });

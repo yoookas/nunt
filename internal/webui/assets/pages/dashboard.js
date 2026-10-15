@@ -2,6 +2,9 @@
 import {
   el, toast, confirmDialog, renderTable, fmtBytes, fmtTime, fmtDuration, clear,
 } from '../lib/ui.js';
+// 版本号来自 lib/kit.js 的归一化函数：/api/v1/system/info 的 version 是对象，
+// 直接拼进文本会显示成 [object Object]（概览卡片的 P0）。
+import { infoVersionText } from '../lib/kit.js';
 
 const REFRESH_MS = 5000;
 const LOG_LIMIT = 10;
@@ -189,7 +192,7 @@ export default {
       metricsHost.appendChild(metricCard('运行时长', fmtDuration(s.uptimeSec),
         info && info.startedAt ? '启动于 ' + fmtTime(info.startedAt) : ''));
 
-      const version = info && info.version ? info.version : '—';
+      const version = infoVersionText(info);
       metricsHost.appendChild(metricCard('版本', version,
         [info && info.commit ? '提交 ' + String(info.commit).slice(0, 10) : '', s.hostname || '', s.os && s.arch ? s.os + '/' + s.arch : '']
           .filter(Boolean).join('  ·  ')));

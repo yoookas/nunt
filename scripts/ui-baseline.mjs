@@ -50,6 +50,7 @@ function parseArgs(argv) {
     settle: 800,
     webPort: 18080,
     forwardPort: 12222,
+    label: '迁移前',
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -62,6 +63,7 @@ function parseArgs(argv) {
       case '--settle': opts.settle = Number(next()); break;
       case '--web-port': opts.webPort = Number(next()); break;
       case '--forward-port': opts.forwardPort = Number(next()); break;
+      case '--label': opts.label = next(); break;
       case '--keep-data': opts.keepData = true; break;
       case '--headed': opts.headed = true; break;
       case '--help': case '-h': opts.help = true; break;
@@ -435,7 +437,14 @@ async function seedDemoData(client, opts, www) {
 /* ------------------------------------------------------------------ 浏览器采集 */
 
 function newBucket() {
-  return { console: [], pageErrors: [], failedRequests: [], httpErrors: [] };
+  // external 记录任何离开本服务的请求（CSP 只允许 self，零外部请求是硬指标）。
+  return { console: [], pageErrors: [], failedRequests: [], httpErrors: [], external: [] };
+}
+
+function isLocalRequest(url, base) {
+  const value = String(url || '');
+  if (value.startsWith('data:') || value.startsWith('blob:') || value.startsWith('about:')) return true;
+  return value.startsWith(base);
 }
 
 function isSSE(url) { return /\/api\/v1\/events/.test(url || ''); }
@@ -447,6 +456,7 @@ function snapshotBucket(bucket) {
     failedRequests: bucket.failedRequests.filter((e) => !isSSE(e.url)),
     abortedRequests: bucket.failedRequests.filter((e) => isSSE(e.url)),
     httpErrors: bucket.httpErrors.filter((e) => !isSSE(e.url)),
+    external: bucket.external.slice(),
   };
 }
 
@@ -455,6 +465,7 @@ function clearBucket(bucket) {
   bucket.pageErrors.length = 0;
   bucket.failedRequests.length = 0;
   bucket.httpErrors.length = 0;
+  bucket.external.length = 0;
 }
 
 // runAxe 把本地安装的 axe-core 注入页面并跑一次扫描。
@@ -590,6 +601,11 @@ async function runBrowser(opts, loginPassword) {
   page.on('response', (res) => {
     if (res.status() >= 400) bucket.httpErrors.push({ page: current, url: res.url(), status: res.status(), method: res.request().method() });
   });
+  page.on('request', (req) => {
+    if (!isLocalRequest(req.url(), opts.base)) {
+      bucket.external.push({ page: current, url: req.url(), method: req.method() });
+    }
+  });
 
   // 真实浏览器登录：走登录表单，而不是把 cookie 直接塞进去。
   await page.goto(opts.base + '/', { waitUntil: 'domcontentloaded' });
@@ -644,7 +660,7 @@ function fmtList(items, render, emptyText) {
 function buildReport(data) {
   const lines = [];
   const push = (...xs) => { for (const x of xs) lines.push(x); };
-  push('# 前端基线报告（迁移前）', '');
+  push('# 前端基线报告（' + (data.label || '迁移前') + '）', '');
   push('> 由 ' + B + 'scripts/ui-baseline.mjs' + B + ' 生成，配合 ' + B + 'docs/PLAN-frontend-webcomponents.md' + B + ' 阶段 0 使用。');
   push('> 重新运行脚本会覆盖本文件的机器部分，但会保留 ' + B + 'VISUAL-REVIEW.md' + B + ' 中的人工视觉复核内容。', '');
   push('- 生成时间：' + data.generatedAt);
@@ -663,6 +679,7 @@ function buildReport(data) {
   push('| 未捕获异常（pageerror） | ' + data.pages.reduce((n, p) => n + p.pageErrors.length, 0) + ' |');
   push('| 失败请求 | ' + data.pages.reduce((n, p) => n + p.failedRequests.length, 0) + ' |');
   push('| HTTP 4xx/5xx 响应 | ' + data.pages.reduce((n, p) => n + p.httpErrors.length, 0) + ' |');
+  push('| 外部请求（离开本服务） | ' + data.pages.reduce((n, p) => n + (p.external ? p.external.length : 0), 0) + ' |');
   push('| axe 严重 critical | ' + data.a11yTotals.critical + ' |');
   push('| axe 重要 serious | ' + data.a11yTotals.serious + ' |');
   push('| axe 中等 moderate | ' + data.a11yTotals.moderate + ' |');
@@ -685,6 +702,8 @@ function buildReport(data) {
   if (login.console.length) push('', FENCE + 'text', fmtList(login.console, (c) => '[' + c.type + '] ' + c.text, ''), FENCE);
   push('- 失败请求：' + (login.failedRequests.length ? '' : '（无）'));
   if (login.failedRequests.length) push('', FENCE + 'text', fmtList(login.failedRequests, (f) => f.method + ' ' + f.url + '  ' + f.failure, ''), FENCE);
+  push('- 外部请求：' + ((login.external && login.external.length) ? '' : '（无）'));
+  if (login.external && login.external.length) push('', FENCE + 'text', fmtList(login.external, (f) => f.method + ' ' + f.url, ''), FENCE);
   if (login.a11y) push('- axe：严重 ' + login.a11y.counts.critical + ' / 重要 ' + login.a11y.counts.serious + ' / 中等 ' + login.a11y.counts.moderate + ' / 轻微 ' + login.a11y.counts.minor + '（通过项 ' + login.a11y.passCount + '）');
   push('');
   for (const p of data.pages) {
@@ -702,6 +721,7 @@ function buildReport(data) {
     push('', '**未捕获异常**', '', FENCE + 'text', fmtList(p.pageErrors, (e) => e.message, '（无）'), FENCE);
     push('', '**失败请求**', '', FENCE + 'text', fmtList(p.failedRequests, (f) => f.method + ' ' + f.url + '  ' + f.failure, '（无）'), FENCE);
     push('', '**HTTP 4xx/5xx**', '', FENCE + 'text', fmtList(p.httpErrors, (h) => h.status + ' ' + h.method + ' ' + h.url, '（无）'), FENCE);
+    push('', '**外部请求**', '', FENCE + 'text', fmtList(p.external, (f) => f.method + ' ' + f.url, '（无）'), FENCE);
     push('', '**axe 违规明细**', '');
     if (!p.a11y.violations.length) {
       push('（无）');
@@ -808,6 +828,7 @@ async function main() {
     const visualReview = await fsp.readFile(path.join(opts.out, 'VISUAL-REVIEW.md'), 'utf8').catch(() => '');
     const report = {
       generatedAt,
+      label: opts.label,
       exe: opts.exe,
       exeBytes: exeStat.size,
       dataDir,
@@ -853,7 +874,9 @@ async function main() {
 
     const totalConsole = shot.pages.reduce((n, p) => n + p.console.length, 0);
     const totalFailed = shot.pages.reduce((n, p) => n + p.failedRequests.length, 0);
-    log('汇总：console ' + totalConsole + '，失败请求 ' + totalFailed + '，axe 严重 ' + a11yTotals.critical + '，重要 ' + a11yTotals.serious);
+    const totalExternal = shot.pages.reduce((n, p) => n + (p.external ? p.external.length : 0), 0);
+    log('汇总：console ' + totalConsole + '，失败请求 ' + totalFailed + '，外部请求 ' + totalExternal +
+      '，axe 严重 ' + a11yTotals.critical + '，重要 ' + a11yTotals.serious);
   } catch (err) {
     exitCode = 1;
     process.stderr.write('[baseline] 失败：' + ((err && err.stack) || err) + '\n');

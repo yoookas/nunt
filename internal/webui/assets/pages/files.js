@@ -236,7 +236,7 @@ function emptyBox(msg) {
 }
 
 function errorCard(err, onRetry) {
-  const msg = (err && err.message) ? err.message : TXT(err || '未知错误');
+  const msg = friendlyApiErr(err, '未知错误');
   const notice = el('div', { class: 'notice' },
     el('div', { style: { fontWeight: '600' }, text: '接口调用失败' }),
     el('div', { text: msg }),
@@ -605,6 +605,18 @@ function makePoller(fn, ms) {
 function apiErr(e) { return (e && e.message) ? e.message : TXT(e || '未知错误'); }
 function notFoundHint(e) { return !!(e && (e.notFound === true || e.status === 404)); }
 
+// friendlyApiErr 把协议层的错误翻译成人话：后端未实现/未注册的路由会返回 Go 默认的
+// "404 page not found" 响应体，那种原文不应该出现在界面上。
+function friendlyApiErr(e, fallback) {
+  const status = Number(e && (e.status || e.statusCode)) || 0;
+  if (status === 404) return '接口不存在或对应模块未启用（HTTP 404）';
+  if (status === 403) return '没有权限访问该资源（HTTP 403）';
+  if (status >= 500) return '服务器内部错误（HTTP ' + status + '）';
+  const msg = apiErr(e);
+  if (/^\s*404\s+page\s+not\s+found\s*$/i.test(msg)) return '接口不存在或对应模块未启用（HTTP 404）';
+  return msg || fallback || '未知错误';
+}
+
 function pageStyle(root, css) {
   if (!css) return () => {};
   const tag = document.createElement('style');
@@ -737,7 +749,7 @@ export default {
   async mount(root, ctx) {
     const api = wrapAPI(ctx && ctx.api);
     const offStyle = pageStyle(root, PAGE_CSS);
-    const state = { mounts: [], mountId: '', path: '/', entries: [], shares: null, shareErr: null, q: '' };
+    const state = { mounts: [], mountId: '', path: '/', entries: [], shares: null, shareErr: null, shareUnavailable: false, q: '' };
     const listBox = el('div', {});
     const crumbBox = el('div', {});
     const shareBox = el('div', {});
@@ -834,9 +846,31 @@ export default {
       browse('/');
     }
 
+    // filebrowserAvailable 先问一次模块列表：分享链接接口由文件管理模块（filebrowser）
+    // 注册，模块没注册时后端根本没有这条路由，直接请求会拿到 404（Go 默认响应体），
+    // 浏览器还会把它记成一条 console 错误。拿不到模块清单时按「可用」处理，保持旧行为。
+    async function filebrowserAvailable() {
+      try {
+        const data = await api.get('/modules');
+        const list = Array.isArray(data) ? data : unwrap(data, ['modules', 'items']);
+        if (!Array.isArray(list) || !list.length) return true;
+        return list.some((m) => m && String(m.name || '').toLowerCase() === 'filebrowser');
+      } catch (e) {
+        return true;
+      }
+    }
+
     async function loadShares() {
       clear(shareBox);
       shareBox.appendChild(spinner('正在加载分享链接…'));
+      state.shareUnavailable = false;
+      if (!(await filebrowserAvailable())) {
+        state.shares = null;
+        state.shareErr = null;
+        state.shareUnavailable = true;
+        paintShares();
+        return;
+      }
       try {
         const data = await api.get('/files/shares');
         state.shares = unwrap(data, ['shares', 'items']);
@@ -856,10 +890,19 @@ export default {
 
     function paintShares() {
       clear(shareBox);
+      if (state.shareUnavailable) {
+        shareBox.appendChild(emptyBox('分享链接暂不可用'));
+        shareBox.appendChild(el('div', { class: 'muted', style: { fontSize: '12px', textAlign: 'center', marginTop: '6px' } },
+          '分享链接由文件管理模块（filebrowser）提供，当前后端没有注册该模块。启用后点「重新检测」，' +
+          '或者改用 Web 服务里的“文件管理”规则分享文件。'));
+        shareBox.appendChild(el('div', { style: { textAlign: 'center', marginTop: '12px' } },
+          el('button', { class: 'btn btn-sm', type: 'button', text: '重新检测', onclick: () => loadShares() })));
+        return;
+      }
       if (state.shareErr) {
         shareBox.appendChild(el('div', { class: 'error' },
           el('div', { style: 'font-weight:600;margin-bottom:5px', text: '分享链接接口不可用' }),
-          el('div', { text: apiErr(state.shareErr) }),
+          el('div', { text: friendlyApiErr(state.shareErr) }),
           el('div', { class: 'muted', style: 'margin-top:5px;font-size:12px', text: '分享链接由文件管理模块（filebrowser）提供；如果该模块未启用，可以改用 Web 服务里的“文件管理”规则生成分享链接。' }),
           el('div', { style: 'margin-top:9px' }, el('button', { class: 'btn', type: 'button', text: '重试', onclick: () => loadShares() })),
         ));

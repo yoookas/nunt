@@ -1,0 +1,35 @@
+{
+  "at": "2026-10-15T14:30:51.992Z",
+  "notifyRows": 1,
+  "light": {
+    "htmlClass": "sl-theme-light",
+    "neutral0": "hsl(0, 0%, 100%)",
+    "bg": "hsl(240 4.8% 95.9%)",
+    "bodyBg": "rgb(244, 244, 245)",
+    "navActiveColor": "rgb(24, 24, 27)"
+  },
+  "toggledClassAfterClick": "sl-theme-dark",
+  "lightA11y": {
+    "counts": {
+      "critical": 0,
+      "serious": 0,
+      "moderate": 0,
+      "minor": 0
+    },
+    "violations": []
+  },
+  "narrow": {
+    "sidebarDisplay": "none",
+    "drawer": {
+      "exists": true,
+      "open": true,
+      "navInside": true
+    }
+  },
+  "consoleErrors": [],
+  "externalRequests": [],
+  "screenshots": [
+    "light-notify.png",
+    "narrow-drawer.png"
+  ]
+}

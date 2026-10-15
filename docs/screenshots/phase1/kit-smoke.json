@@ -1,0 +1,46 @@
+{
+  "at": "2026-10-15T14:30:22.403Z",
+  "steps": [
+    {
+      "step": "打开通知页",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "step": "对话框打开",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "step": "空名称校验",
+      "ok": true,
+      "detail": "请填写名称"
+    },
+    {
+      "step": "保存后表格出现 1 行",
+      "ok": true,
+      "detail": "rows=1"
+    },
+    {
+      "step": "保存后有 toast",
+      "ok": true,
+      "detail": "toasts=1"
+    },
+    {
+      "step": "确认框文案",
+      "ok": true,
+      "detail": "确定要删除 Webhook「冒烟测试通知」吗？"
+    },
+    {
+      "step": "删除后没有数据行",
+      "ok": true,
+      "detail": "rows=0"
+    }
+  ],
+  "consoleErrors": [],
+  "externalRequests": [],
+  "screenshots": [
+    "notify-dialog.png",
+    "notify-saved.png"
+  ]
+}

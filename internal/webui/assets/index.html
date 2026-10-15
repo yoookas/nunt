@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="sl-theme-dark" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -7,13 +7,17 @@
     <meta name="robots" content="noindex, nofollow" />
     <title>nunt 控制台</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='8'%20fill='%234f7cff'/%3E%3Cpath%20d='M10%2022V10l12%2012V10'%20fill='none'%20stroke='%23fff'%20stroke-width='3'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <!-- Shoelace 设计 token（本地 vendor，零外部请求）：浅色在 :root，深色在 .sl-theme-dark。
+         两个文件都要加载：主题切换只改 <html> 上的类名，不再重写 CSS 变量。 -->
+    <link rel="stylesheet" href="/vendor/shoelace/themes/light.css" />
+    <link rel="stylesheet" href="/vendor/shoelace/themes/dark.css" />
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
     <div id="app">
       <div class="boot">
-        <div class="spinner" role="status" aria-label="正在加载"></div>
-        <p class="muted">正在加载控制台…</p>
+        <sl-spinner style="font-size: 2rem" aria-hidden="true"></sl-spinner>
+        <p class="muted" role="status">正在加载控制台…</p>
       </div>
     </div>
     <script type="module" src="/app.js"></script>
