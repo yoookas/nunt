@@ -79,7 +79,9 @@ jobs:
           name: image-${{ matrix.arch }}
           path: dist/*.tar.gz
           if-no-files-found: error
-          retention-days: 7
+          # Container archives are consumed by the release job a minute later;
+          # keeping them for a week only burns the account artifact quota.
+          retention-days: 1
 
   # -------------------------------------------------------------------------
   # One multi architecture OCI archive for users who prefer a single file.
@@ -132,7 +134,9 @@ jobs:
           name: image-oci
           path: dist/*.tar.gz
           if-no-files-found: error
-          retention-days: 7
+          # Container archives are consumed by the release job a minute later;
+          # keeping them for a week only burns the account artifact quota.
+          retention-days: 1
 
   # -------------------------------------------------------------------------
   # Attach every archive to the GitHub release. No registry is used.
