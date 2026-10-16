@@ -356,13 +356,19 @@ a:hover { text-decoration: underline; }
 .card-body.tight { padding: 0; }
 .card-body.scroll { max-height: 60vh; overflow: auto; }
 
-/* 提示条：页面内的说明 / 告警（不是 toast，toast 用 kit 的 toast()） */
+/* 提示条：页面内的说明 / 告警（不是 toast，toast 用 kit 的 toast()）
+ *
+ * 文字色用 warning-800，不是 --warn（= warning-600）：提示条的背景是 14% 的 --warn-soft
+ * 叠在卡片上（浅色主题实测 #faecdc），warning-600 在这块背景上只有 3.0:1，
+ * warning-700 是 4.32:1（axe 要求 4.5:1，WAF 页的 enforce 提醒卡就是这么被扫出来的
+ * color-contrast/serious），warning-800（#92400e）是 5.9:1。边框仍用 --warn，
+ * 保持「这是警示」的观感。 */
 .notice {
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   background: var(--warn-soft);
   border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
-  color: var(--warn);
+  color: var(--sl-color-warning-800);
   font-size: 13px;
   margin-bottom: 12px;
 }

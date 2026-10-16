@@ -6,6 +6,8 @@
 //
 // Windows 上后端不采集主机指标（internal/sysinfo/host_other.go 返回 nil），迁移前那三张卡
 // 永远显示「—」。现在改成明确的「该平台不支持」空态 + 页脚说明，不再留一排破折号。
+// 组件按需加载：只引本页用到的入口（kit 不再注册任何 sl-* 组件，见 lib/components/core.js）。
+import '../lib/components/feedback.js';
 import {
   NuntElement, html, nothing, define, confirmDialog, toast, errorMessage,
   fmtBytes, fmtTime, fmtDuration, infoVersionText,

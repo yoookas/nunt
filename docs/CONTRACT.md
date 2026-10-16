@@ -127,11 +127,11 @@ Lucky v1.10.8 源码（Go module 缓存里已下载好）：
 - `index.html`：外壳，只引 3 个样式（`vendor/shoelace/themes/light.css`、`dark.css`、`style.css`）与 `/app.js`；
 - `app.js`：hash 路由、页面清单、动态 import、登录页、外壳（侧边栏/顶栏/窄屏 sl-drawer）、SSE、主题；
 - `lib/api.js`：API 客户端（自动带 `X-CSRF-Token`）——**不要改**；
-- `lib/kit.js`：共享组件层（表格/表单/反馈/对话框/状态块/容器类约定），页面一律用它；
-- `lib/ui.js`：**只剩 `app.js` 还需要的四个纯函数**（`renderIcon/fmtBytes/fmtTime/escapeHtml`），
-  手写构件（`el/modal/tableEl/formGrid/toast`…）已经没有调用方；kit 的 `fmtBytes/fmtTime/fmtDuration/escapeHtml`
-  是它的再导出。阶段 3 起**不要**再从页面 import 它（写新页面只用 kit）；
-- `pages/<id>.js`：页面模块。
+- `lib/kit.js`：共享组件层（表格/表单/反馈/对话框/状态块/容器类约定），页面一律用它。
+  **它不注册任何 `sl-*` 组件**，也**不再**导出 `lib/ui.js` 的转发（原 `lib/ui.js` 已删除，
+  `renderIcon/fmtBytes/fmtTime/fmtDuration/escapeHtml` 全部搬进 kit）；
+- `lib/components/*.js`：**组件入口**（按需加载的落点，见 7.4 之后的一节）；
+- `pages/<id>.js`：页面模块（顶部 import 自己需要的组件入口）。
 
 ### 7.3 页面模块契约（不变）
 
@@ -202,6 +202,35 @@ GET    /api/v1/events                    (SSE，消息格式 {"type":"log|status
 1. **light DOM 没有 `<slot>`**：组件的「插槽」用属性传 —— 表格操作列用 `columns[].render`，
    状态块的附加内容用 `action`，对话框内容用 `openDialog({body})`；
 2. **不要拼 `innerHTML`**：数据一律走 Lit 的文本绑定或 DOM 节点（后端字符串不会变成 HTML）。
+
+### 7.4.1 组件按需加载（lib/components/*）
+
+背景：`vendor/shoelace/nunt-shoelace.js`（由 `scripts/sync-vendor.ps1` 生成）把 42 个组件一次性注册，
+于是**登录页首屏也要为整套组件付 217 个请求 / 361 KB**。vendor 不能改（会被同步脚本覆盖），
+所以在我们自己的 assets 下按域拆成入口模块 —— **谁用到谁 import**：
+
+| 入口 | 内容 | 谁引 |
+| --- | --- | --- |
+| `lib/components/core.js` | sl-icon / sl-icon-button / sl-badge / sl-button / sl-spinner / sl-alert，并按本地路径 `setBasePath`（零外部请求） | 所有入口都引它 |
+| `lib/components/shell.js` | core + sl-input / sl-card / sl-drawer / sl-dropdown / sl-menu / sl-menu-item | `app.js`（登录页与外壳） |
+| `lib/components/feedback.js` | core + sl-dialog | toast / confirmDialog / promptDialog / openDialog 的调用方 |
+| `lib/components/form.js` | core + sl-input / select / option / checkbox / radio / radio-group / switch / textarea / tag | 用到 `formGrid`、`nunt-form`、`nunt-tags`、`nunt-kv` 的页面 |
+| `lib/components/tabs.js` | core + sl-tab / tab-group / tab-panel / divider | settings、web |
+| `lib/components/progress.js` | core + sl-progress-bar | acme |
+| `lib/components/table.js` | core + sl-skeleton | 表格密集的页面（可选，NuntTable 本身只用 core） |
+| `lib/components/disclosure.js` | core + sl-details | 用折叠面板的页面 |
+| `lib/components/datetime.js` | core + sl-format-bytes / format-date / format-number / relative-time | 目前无人使用（nunt 用自带 `fmtBytes/fmtTime`），保留给以后 |
+
+规矩：
+
+1. 组件必须在**创建元素之前**注册 —— 入口写成同步 `import`，放在页面文件顶部，Lit 首次渲染时元素已升级；
+2. Shoelace 的 vendor 包是自包含的：每个组件文件会自己带上依赖的 chunk（例如 sl-tag 会把
+   sl-icon-button 拉进来），**不需要**替它补依赖；
+3. `sl-tooltip` / `sl-popup` **不在 core 里**：nunt 的模板没有 `<sl-tooltip>`，它们只是 Shoelace
+   自己的 tooltip 指令的可选依赖，一并注册要多花约 7.5 KB br（实测）。要用时 import core 之外自行补；
+4. 漏引入口的症状是「页面上出现一个没升级的空 `<sl-xxx>`」，浏览器会在控制台报
+   `… has not been registered` 之类 —— `ui-smoke` 与 `ui-baseline` 每页都有一条检查点守着它
+   （见 7.6），CI 会红。
 
 ### 7.5 页面模板（新页面照抄这一份）
 
@@ -300,6 +329,9 @@ export default {
 约定：
 
 - 页面模块契约与 `ctx` 语义**不变**（见 7.3）；页面内部怎么渲染随意，但请用 kit；
+- **页面顶部要 import 自己需要的组件入口**（见 7.4.1），例如表单页写
+  `import '../lib/components/form.js';`、`import '../lib/components/feedback.js';` ——
+  页面是动态 import 的，所以这些组件只在真正打开这一页时才加载；
 - 页面骨架固定用容器类：`<section class="card">` + `<div class="card-header">`（`<h2>` 标题 +
   `<span class="sub">` + `<span class="spacer">` + 右侧按钮）+ `<div class="card-body">`
   （放表格时用 `class="card-body tight"` 去掉内边距），页内提示条用 `<div class="notice">`。
@@ -316,11 +348,21 @@ export default {
 | 脚本 | 覆盖 | 产物 / 退出码 |
 | --- | --- | --- |
 | `node scripts/vendor-smoke.mjs` | vendor 树完整性：组件注册、图标本地可取、零 404、零外部请求 | `docs/screenshots/vendor/`；失败非零退出 |
-| `node scripts/ui-smoke.mjs [--out dir] [--exe nunt.exe]` | **浅色主题**：登录 → 12 页挂载 + axe 四档 + 每页关键交互 + console/未捕获异常/失败请求/4xx·5xx/外部请求统计（66 个检查点） | `<out>/ui-smoke.json`、`ui-smoke.md`、`<out>/*.png`；任一检查失败或 axe 非 0 时非零退出 |
-| `node scripts/ui-baseline.mjs --out docs/screenshots/phaseX --label '...'` | **深色主题**：12 页整页截图 + 逐页 axe + console/请求统计 + 演示数据播种（含一条真实 TCP 转发连接，让「转发日志」对话框有真实数据） | `REPORT.md` / `a11y.json` / `baseline.json` + 13 张截图 |
+| `node scripts/ui-smoke.mjs [--out dir] [--exe nunt.exe]` | **浅色主题**：登录 → 12 页挂载 + axe 四档 + 每页关键交互 + **每页「没有未注册组件」断言** + WAF 请求测试的**必然命中**断言 + console/未捕获异常/失败请求/4xx·5xx/外部请求统计（84 个检查点） | `<out>/ui-smoke.json`、`ui-smoke.md`、`<out>/*.png`；任一检查失败或 axe 非 0 时非零退出 |
+| `node scripts/ui-baseline.mjs --out docs/screenshots/phaseX --label '...'` | **深色主题**：12 页整页截图 + 逐页 axe + console/请求统计 + **每页「没有未注册组件」断言** + 演示数据播种（含一条真实 TCP 转发连接，让「转发日志」对话框有真实数据） | `REPORT.md` / `a11y.json` / `baseline.json` + 13 张截图 |
+| `node scripts/firstload.mjs [--out dir] [--label before\|after]` | **首屏传输实测**：全新 context 冷缓存下量登录页首屏 / 登录+外壳 / 单页增量的请求数与字节（`Request.sizes()` 的 body + 响应头，服务端 br 协商），按「自有代码 / vendor 组件 / vendor 图标 / 主题 CSS / API」分桶 | `<out>/firstload.json` + 控制台汇总表 |
 | `node scripts/theme-check.mjs` | 浅色主题与窄屏外壳（420x900 侧栏收进 sl-drawer） | `docs/screenshots/phase1/` |
 
-另有 `node scripts/kit-smoke.mjs`（notify 页的 kit 全链路：新建 → 校验 → 保存 → 删除）。
+另有 `node scripts/kit-smoke.mjs`（notify 页的 kit 全链路：新建 → 校验 → 保存 → 删除）、
+`node scripts/theme-check.mjs`（浅色 + 窄屏抽屉）与 `node scripts/vendor-smoke.mjs`（vendor 树完整性）。
+
+两个 Playwright 脚本与 `firstload.mjs` 共用 `scripts/lib/devserver.mjs`（临时实例、端口探测、回显服务、
+管理 API 客户端、演示数据），因此「演示数据」只有一份实现：里面**包含 WAF 配置**（引擎 + CRS + block +
+`enforcementMode=enforce`），否则「请求测试」永远返回「未拦截」，测不出拦截路径。
+
+**每页的「未注册组件」断言**：页面挂载 + axe 之后，控制台里不允许出现
+`… has not been registered` / `has already been defined` / `Failed to upgrade` 这类报错。
+这是「组件按需加载」这个改动的回归防线：漏引 `lib/components/*` 时页面会静默失效。
 
 前置：`go build -o nunt.exe ./cmd/nunt`（脚本默认用仓库根的 `nunt.exe`，可用 `--exe` 指定）。
 两个 Playwright 脚本默认**自己起一个临时实例**（数据目录在 `.gocache/` 下，结束即删），
@@ -354,9 +396,9 @@ node scripts/ui-baseline.mjs --exe ./nunt --out artifacts/ui-baseline --label ci
    12 页的页面级扫描不受影响（都是 0）。给控件传 `label`（而不是 `aria-label`）才是真正的修法。
 3. **`nunt-tags` 必须传 `label`**（见 7.4），否则内层 `sl-input` 同样命中 `label-title-only`。
    位置固定：标签输入框在上、已添加的标签在下面（label 由 `sl-input` 渲染，`nunt-form` 不再重复渲染外层标签）。
-4. **`lib/ui.js` 仍在仓库里**：只剩 `app.js` 需要的四个纯函数（`renderIcon/fmtBytes/fmtTime/escapeHtml`），
-   手写构件（`el/modal/tableEl/formGrid/toast`…）已经没有任何调用方，kit 只是再导出其中四个格式化函数。
-   彻底删除需要先把 `renderIcon` 搬进 kit（属独立改动，见 `docs/FRONTEND-REPORT.md` 的未完成项）。
+4. ~~`lib/ui.js` 仍在仓库里~~ —— **已删除**（发版前收尾）：`renderIcon/fmtBytes/fmtTime/fmtDuration/escapeHtml`
+   五个还有调用方的纯函数搬进了 `lib/kit.js`，手写构件（`el/modal/tableEl/formGrid/toast`…）本来就没有调用方，
+   随文件一起删掉；全仓库不再有 `lib/ui.js` 的 import。以后写页面只用 kit。
 
 ---
 

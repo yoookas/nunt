@@ -2,6 +2,10 @@
 //
 // 阶段 2 迁移：标签页换成 sl-tab-group，表单/表格/对话框/提示/状态块全部走 lib/kit.js。
 // 数据流与迁移前一致：同一批接口、同一批字段名、同样的校验文案与提示语义。
+// 组件按需加载：只引本页用到的入口（kit 不再注册任何 sl-* 组件，见 lib/components/core.js）。
+import '../lib/components/feedback.js';
+import '../lib/components/form.js';
+import '../lib/components/tabs.js';
 import {
   NuntElement, html, nothing, define, formGrid, openDialog, confirmDialog, toast,
   errorMessage, fmtTime,
@@ -30,7 +34,7 @@ const PAGE_CSS = [
   '.psettings-note{margin:0 0 12px;font-size:13px}',
   '.psettings-actions{margin-top:14px}',
   '.psettings-json{margin:0;white-space:pre-wrap;word-break:break-all;max-height:60vh;overflow:auto}',
-  '.psettings-notice{padding:10px 12px;border-radius:var(--radius-sm);background:var(--warn-soft);border:1px solid color-mix(in srgb, var(--warn) 35%, transparent);color:var(--warn);font-size:13px;margin-bottom:12px}',
+  '.psettings-notice{padding:10px 12px;border-radius:var(--radius-sm);background:var(--warn-soft);border:1px solid color-mix(in srgb, var(--warn) 35%, transparent);color:var(--sl-color-warning-800);font-size:13px;margin-bottom:12px}',  // warning-800：warning-600/700 在 --warn-soft 上分别只有 3.0/4.3:1（同 style.css 的 .notice）
   '.psettings-token{display:block;padding:12px;border-radius:var(--radius-sm);background:var(--bg-soft);border:1px dashed var(--line-strong);font-family:var(--sl-font-mono);font-size:13px;word-break:break-all;user-select:all}',
 ].join(String.fromCharCode(10));
 

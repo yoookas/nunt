@@ -8,7 +8,9 @@
  *   3. 12 个页面逐个挂载 + 截图 + axe 四档扫描（wcag2a/2aa/21a/21aa/best-practice）；
  *   4. 每页至少一条关键交互（新建对话框、真实转发日志、未启用规则提示、
  *      密钥类型取值、nunt-tags 字段、请求测试…）；
- *   5. console / 未捕获异常 / 失败请求 / 4xx·5xx / 外部请求 全量统计。
+ *   5. console / 未捕获异常 / 失败请求 / 4xx·5xx / 外部请求 全量统计；
+ *   6. 每个页面挂载后断言「没有未注册组件的控制台报错」——组件按需加载（lib/components/*）的回归防线；
+ *   7. WAF 页的「请求测试」用**必然被 CRS 命中**的 payload（路径穿越），断言 blocked / 规则 ID / 403。
  *
  * 输出：<out>/ui-smoke.json（机器数据）+ <out>/*.png（关键步骤截图）；
  * 任何检查失败或 axe 非 0 时以非零码退出，方便 CI 直接当门禁用。
@@ -23,18 +25,19 @@
  *
  * 依赖只用于开发期（playwright + axe-core），Go 构建与 Docker 镜像不需要 Node。
  */
-import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import fsp from 'node:fs/promises';
-import net from 'node:net';
 import path from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+// 临时实例、端口探测、回显服务、管理 API 客户端与演示数据都在 scripts/lib/devserver.mjs
+// （与 ui-baseline / firstload 共用一份，避免三份实现漂移）。
+import {
+  REPO, sleep, waitFree, startEchoServer, makeClient, startServer, stopServer,
+  prepareSampleSite, seedDemoData,
+} from './lib/devserver.mjs';
 
 const require = createRequire(import.meta.url);
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REPO = path.resolve(HERE, '..');
 const AXE_SOURCE = await fsp.readFile(require.resolve('axe-core/axe.min.js'), 'utf8');
 const AXE_VERSION = require('axe-core/package.json').version;
 const PLAYWRIGHT_VERSION = require('playwright/package.json').version;
@@ -98,314 +101,22 @@ function parseArgs(argv) {
 
 /* ------------------------------------------------------------------ 小工具 */
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-function log(msg) { process.stdout.write('[smoke] ' + msg + '\n'); }
-
-function portFree(port) {
-  return new Promise((resolve) => {
-    const socket = net.connect({ port, host: '127.0.0.1' });
-    let done = false;
-    const finish = (free) => { if (!done) { done = true; socket.destroy(); resolve(free); } };
-    socket.setTimeout(800);
-    socket.on('connect', () => finish(false));
-    socket.on('timeout', () => finish(true));
-    socket.on('error', () => finish(true));
-  });
-}
-
-async function waitFree(port, seconds) {
-  const deadline = Date.now() + seconds * 1000;
-  for (;;) {
-    if (await portFree(port)) return true;
-    if (Date.now() >= deadline) return false;
-    await sleep(1000);
-  }
-}
-
-// spawnServer：Windows 上刚被杀掉的 exe 偶尔会 EBUSY（文件还被映射），重试几次。
-async function spawnServer(exe, args, options) {
-  for (let i = 0; i < 12; i += 1) {
-    try { return spawn(exe, args, options); }
-    catch (err) {
-      if (err && err.code === 'EBUSY') { await sleep(2500); continue; }
-      throw err;
-    }
-  }
-  throw new Error('spawn ' + exe + ' 一直 EBUSY');
-}
-
-/* ------------------------------------------------------------------ 管理 API 客户端（播种用） */
-
-function makeClient(base) {
-  let cookie = '';
-  let csrf = '';
-  async function call(method, apiPath, body) {
-    const headers = { Accept: 'application/json' };
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
-    if (cookie) headers.Cookie = cookie;
-    if (method !== 'GET' && csrf) headers['X-CSRF-Token'] = csrf;
-    const res = await fetch(base + apiPath, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-    const setCookie = res.headers.getSetCookie ? res.headers.getSetCookie() : [];
-    if (setCookie.length) cookie = setCookie[0].split(';')[0];
-    const text = await res.text();
-    let data = null;
-    if (text) { try { data = JSON.parse(text); } catch (err) { data = text; } }
-    return { status: res.status, ok: res.ok, data };
-  }
-  return {
-    get: (p) => call('GET', p),
-    post: (p, b) => call('POST', p, b === undefined ? {} : b),
-    put: (p, b) => call('PUT', p, b === undefined ? {} : b),
-    del: (p) => call('DELETE', p),
-    setCsrf: (v) => { csrf = v; },
-  };
-}
-
-/* ------------------------------------------------------------------ 转发目标（本机 TCP 回显服务） */
-
-function startEchoServer(port) {
-  return new Promise((resolve, reject) => {
-    const sockets = new Set();
-    const server = net.createServer((socket) => {
-      sockets.add(socket);
-      socket.on('error', () => {});
-      socket.on('close', () => sockets.delete(socket));
-      socket.setEncoding('utf8');
-      socket.write('nunt-forward-demo' + String.fromCharCode(10));
-      socket.on('data', (chunk) => { socket.write(chunk); });
-    });
-    server.on('error', reject);
-    server.listen(port, '127.0.0.1', () => resolve({
-      port,
-      close: () => new Promise((done) => {
-        for (const socket of sockets) socket.destroy();
-        server.close(() => done());
-      }),
-    }));
-  });
-}
-
-function runForwardProbe(addr, timeoutMs) {
-  const parts = String(addr).split(':');
-  const host = parts[0] || '127.0.0.1';
-  const port = Number(parts[1]);
-  return new Promise((resolve) => {
-    let received = '';
-    let settled = false;
-    let quiet = null;
-    const finish = (result) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (quiet) clearTimeout(quiet);
-      try { socket.destroy(); } catch (err) { /* 忽略 */ }
-      resolve(result);
-    };
-    const socket = net.connect({ host, port });
-    const timer = setTimeout(() => finish(received.length
-      ? { ok: true, received }
-      : { ok: false, error: '连接或回显超时（' + timeoutMs + 'ms）' }), timeoutMs);
-    socket.setEncoding('utf8');
-    socket.on('connect', () => { socket.write('nunt-forward-probe' + String.fromCharCode(10)); });
-    // 转发链路不会主动关闭连接（中转是双向长连接），所以收到回显后等一小段静默就判定成功。
-    socket.on('data', (chunk) => {
-      received += chunk;
-      if (quiet) clearTimeout(quiet);
-      quiet = setTimeout(() => finish({ ok: true, received }), 300);
-    });
-    socket.on('error', (err) => finish({ ok: false, error: String((err && err.message) || err) }));
-    socket.on('close', () => finish(received.length ? { ok: true, received } : { ok: false, error: '连接被关闭但没有回显' }));
-  });
-}
-
-/* ------------------------------------------------------------------ 服务器进程 */
-
-async function startServer(opts, dataDir) {
-  const tmpDir = path.join(REPO, '.gocache', 'tmp');
-  await fsp.mkdir(tmpDir, { recursive: true });
-  const child = await spawnServer(opts.exe, ['-d', dataDir], {
-    cwd: REPO,
-    windowsHide: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: Object.assign({}, process.env, { TMP: tmpDir, TEMP: tmpDir, TMPDIR: tmpDir }),
-  });
-  const out = { stdout: '', stderr: '' };
-  let password = '';
-  let exited = null;
-  child.stdout.setEncoding('utf8');
-  child.stderr.setEncoding('utf8');
-  child.stdout.on('data', (chunk) => {
-    out.stdout += chunk;
-    if (!password) {
-      const m = /Administrator pass\s*:\s*(\S+)/.exec(out.stdout);
-      if (m) password = m[1];
-    }
-  });
-  child.stderr.on('data', (chunk) => { out.stderr += chunk; });
-  child.on('exit', (code) => { exited = code; });
-
-  const base = 'http://127.0.0.1:' + opts.port;
-  const deadline = Date.now() + 30000;
-  let healthy = false;
-  while (Date.now() < deadline) {
-    if (exited !== null) throw new Error('nunt 提前退出，exit code = ' + exited + String.fromCharCode(10) + out.stderr + out.stdout);
-    if (password) {
-      try { const res = await fetch(base + '/healthz'); if (res.ok) { healthy = true; break; } } catch (err) { /* 还没起来 */ }
-    }
-    await sleep(200);
-  }
-  if (!password) throw new Error('30 秒内没有从 stdout 抓到初始管理员密码');
-  if (!healthy) throw new Error('服务没有在 30 秒内通过 /healthz 健康检查');
-  return { child, base, password, out };
-}
-
-function stopServer(server) {
-  return new Promise((resolve) => {
-    if (!server || !server.child || server.child.exitCode !== null) { resolve(); return; }
-    const timer = setTimeout(() => {
-      try { server.child.kill('SIGKILL'); } catch (e) { /* 忽略 */ }
-      resolve();
-    }, 5000);
-    server.child.once('exit', () => { clearTimeout(timer); resolve(); });
-    try { server.child.kill(); } catch (e) { clearTimeout(timer); resolve(); }
-  });
-}
-
-/* ------------------------------------------------------------------ 演示数据 */
-
-const SAMPLE_INDEX = [
-  '<!doctype html>',
-  '<html lang="zh-CN"><head><meta charset="utf-8"><title>nunt 冒烟演示站点</title></head>',
-  '<body><h1>nunt 冒烟演示站点</h1><ul><li><a href="about.html">关于</a></li></ul></body></html>',
-  '',
-].join(String.fromCharCode(10));
-
-const SAMPLE_ABOUT = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>关于</title></head><body><h1>关于</h1></body></html>' + String.fromCharCode(10);
-
-async function prepareSampleSite(dataDir) {
-  const www = path.join(dataDir, 'www');
-  await fsp.mkdir(path.join(www, 'assets'), { recursive: true });
-  await fsp.writeFile(path.join(www, 'index.html'), SAMPLE_INDEX, 'utf8');
-  await fsp.writeFile(path.join(www, 'about.html'), SAMPLE_ABOUT, 'utf8');
-  return www;
-}
-
-async function seedDemoData(client, opts, www) {
-  const steps = [];
-  async function step(name, method, apiPath, body) {
-    let result;
-    try { result = await client[method](apiPath, body); }
-    catch (err) { result = { status: 0, ok: false, data: null }; }
-    steps.push({
-      name,
-      method: method.toUpperCase(),
-      path: apiPath,
-      status: result.status,
-      ok: !!result.ok,
-      error: result.ok ? '' : (result.data && result.data.error ? result.data.error.message : 'HTTP ' + result.status),
-      id: result.data && result.data.id ? result.data.id : '',
-    });
-    return result;
-  }
-
-  await step('存储挂载（本地目录）', 'post', '/api/v1/storage/mounts', {
-    name: '冒烟演示目录', enable: true, type: 'local', root: www, readOnly: false, remark: '冒烟演示数据',
-  });
-  await step('Web 规则：静态托管', 'post', '/api/v1/web/rules', {
-    name: '冒烟静态站点', enable: true, type: 'static', listen: ['127.0.0.1:' + opts.webPort],
-    domains: ['smoke.demo.local'], path: '/', priority: 20, tls: { mode: 'off', hsts: false },
-    waf: true, access: { mode: 'off' },
-    static: { root: www, index: ['index.html'], listing: true, spa: false, cacheSeconds: 0 },
-    remark: '冒烟演示数据',
-  });
-  await step('Web 规则：反向代理', 'post', '/api/v1/web/rules', {
-    name: '冒烟反向代理', enable: false, type: 'proxy', listen: ['127.0.0.1:' + (opts.webPort + 1)],
-    domains: ['app.smoke.demo.local'], path: '/', priority: 30, tls: { mode: 'off', hsts: false },
-    waf: false, access: { mode: 'off' },
-    proxy: { targets: ['http://127.0.0.1:18099'], balance: 'roundrobin', timeoutSec: 30 },
-    remark: '冒烟演示数据',
-  });
-
-  const forward = await step('端口转发规则', 'post', '/api/v1/forward/rules', {
-    name: '冒烟 TCP 转发', enable: true, protocol: 'tcp',
-    srcAddr: '127.0.0.1:' + opts.forwardPort, dstAddr: '127.0.0.1:' + opts.echoPort,
-    access: { mode: 'off' }, timeoutSec: 300, maxConns: 200, maxConnsPerIP: 50, remark: '冒烟演示数据',
-  });
-
-  const ddnsOn = await step('DDNS 规则（启用）', 'post', '/api/v1/ddns/rules', {
-    name: '冒烟动态域名', enable: true, provider: 'cloudflare',
-    creds: { apiToken: 'smoke-not-a-real-credential' },
-    domain: 'example.com', subDomains: ['home'], recordType: 'A', ttl: 600,
-    ipv4: { enable: true, mode: 'static', value: '203.0.113.10' },
-    ipv6: { enable: false, mode: 'static', value: '' }, intervalSec: 3600, remark: '冒烟演示数据',
-  });
-  await step('DDNS 规则（停用）', 'post', '/api/v1/ddns/rules', {
-    name: '冒烟停用规则', enable: false, provider: 'cloudflare',
-    creds: { apiToken: 'smoke-not-a-real-credential' },
-    domain: 'example.com', subDomains: ['off'], recordType: 'A', ttl: 600,
-    ipv4: { enable: true, mode: 'static', value: '203.0.113.11' },
-    ipv6: { enable: false, mode: 'static', value: '' }, intervalSec: 3600, remark: '冒烟演示数据（停用）',
-  });
-
-  await step('证书任务（未启用）', 'post', '/api/v1/acme/jobs', {
-    name: '冒烟证书任务', enable: false, domains: ['demo.example.com'], keyType: 'ec256',
-    challenge: 'http', renewDays: 30, remark: '冒烟演示数据（未启用）',
-  });
-  await step('通知 Webhook', 'put', '/api/v1/notify/webhooks', [{
-    id: '', name: '冒烟运维通知', enable: true, url: 'https://example.com/hooks/nunt-smoke',
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, events: ['system.alert', 'ddns.error'],
-  }]);
-  await step('计划任务', 'post', '/api/v1/task/items', {
-    name: '冒烟每日巡检', enable: true, cron: '0 4 * * *',
-    actions: [
-      { type: 'module.toggle', target: 'web', value: 'restart' },
-      { type: 'notify.webhook', value: '冒烟巡检完成' },
-    ],
-    remark: '冒烟演示数据',
-  });
-  await step('API Token', 'post', '/api/v1/auth/tokens', { name: '冒烟只读 Token', scopes: ['read'] });
-  // 系统设置：给「设置」页的 nunt-tags 字段（管理端 IP 白名单）真实数据。
-  await step('系统设置（管理端 IP 白名单）', 'put', '/api/v1/system/settings', {
-    adminListen: ':' + opts.port,
-    adminAllowIps: ['127.0.0.1', '10.0.0.0/8'],
-    trustProxy: false,
-    logLevel: 'info',
-    sessionTtlHours: 24,
-    loginMaxFail: 5,
-    loginLockMinutes: 15,
-    theme: 'dark',
-    checkUpdate: false,
-    baseUrl: '',
-  });
-
-  // 真的走一条 TCP 连接，让转发日志对话框有数据。
-  const forwardId = forward && forward.data ? forward.data.id : '';
-  let traffic = { ok: false, error: '规则未创建成功' };
-  if (forwardId) {
-    for (let attempt = 0; attempt < 12; attempt += 1) {
-      traffic = await runForwardProbe('127.0.0.1:' + opts.forwardPort, 3000);
-      if (traffic.ok) break;
-      await sleep(500);
-    }
-    steps.push({
-      name: '端口转发：真实 TCP 连接', method: 'TCP', path: '127.0.0.1:' + opts.forwardPort,
-      status: traffic.ok ? 200 : 0, ok: !!traffic.ok, error: traffic.ok ? '' : (traffic.error || '没有回显'),
-      id: forwardId,
-    });
-  }
-
-  return {
-    steps,
-    forwardRuleId: forwardId,
-    ddnsRuleId: ddnsOn && ddnsOn.data ? ddnsOn.data.id : '',
-    www,
-  };
-}
+function log(msg) { process.stdout.write('[smoke] ' + msg + String.fromCharCode(10)); }
 
 /* ------------------------------------------------------------------ 浏览器检查 */
 
 function newBucket() {
-  return { console: [], pageErrors: [], failedRequests: [], httpErrors: [], external: [] };
+  return { console: [], pageErrors: [], failedRequests: [], httpErrors: [], external: [], missingComponents: [] };
+}
+
+// MISSING_COMPONENT_RE：浏览器对「页面上出现了没有注册的自定义元素」的三种报法。
+// 组件按需加载之后（lib/components/*），漏引入口的症状就是这个 —— 页面上留一个没升级的
+// 空 <sl-xxx>，功能静默失效。所以每个页面挂载后都要断言这个桶是空的。
+const MISSING_COMPONENT_RE = /not been registered|has already been defined|Failed to upgrade|is not a valid custom element name/i;
+
+/** missingComponentText：从一条 console/pageerror 文本里判断是不是「组件没注册」类报错。 */
+function isMissingComponentText(text) {
+  return MISSING_COMPONENT_RE.test(String(text || ''));
 }
 
 function isLocalRequest(url, base) {
@@ -419,6 +130,7 @@ function isSSE(url) { return /\/api\/v1\/events/.test(url || ''); }
 function snapshotBucket(bucket) {
   return {
     console: bucket.console.slice(),
+    missingComponents: bucket.missingComponents.slice(),
     pageErrors: bucket.pageErrors.slice(),
     failedRequests: bucket.failedRequests.filter((e) => !isSSE(e.url)),
     abortedRequests: bucket.failedRequests.filter((e) => isSSE(e.url)),
@@ -429,6 +141,7 @@ function snapshotBucket(bucket) {
 
 function clearBucket(bucket) {
   bucket.console.length = 0;
+  bucket.missingComponents.length = 0;
   bucket.pageErrors.length = 0;
   bucket.failedRequests.length = 0;
   bucket.httpErrors.length = 0;
@@ -722,16 +435,53 @@ const INTERACTIONS = {
     const wanted = ['WAF 配置', '请求体检查策略', '规则文件 / 规则组', '请求测试', '拦截日志'];
     const missing = wanted.filter((t) => heads.indexOf(t) < 0);
     ctx.check('waf', '五张卡片标题齐全', missing.length === 0, missing.length ? '缺少 ' + missing.join(' / ') : heads.join(' / '));
-    await setField(page, 'url', 'http://127.0.0.1:' + ctx.opts.webPort + '/?id=1%20union%20select%201');
+
+    // 必然命中的 payload：CRS 的路径穿越规则（930120 等）对 ../../ 一定触发，
+    // 而旧的 ?id=1 union select 1 在 PL1 + block 模式下并不命中（见 FRONTEND-REPORT 未完成项 4）。
+    // 断言三条：blocked=true、命中规则 ID 非空（且是 CRS 的 9xxxxx）、状态码 403（enforce）。
+    const payload = 'http://127.0.0.1:' + ctx.opts.webPort + '/?test=../../../../etc/passwd';
+    await setField(page, 'url', payload);
+
+    // 抓页面自己发出去的那次 POST /api/v1/waf/test 的响应体 —— 比在页面里再 fetch 一次更真实：
+    // 它同时验证了「页面确实带上了 CSRF 头」（不带就是 403 csrf），以及后端判定与界面渲染一致。
+    const verdictPromise = page.waitForResponse(
+      (res) => res.url().indexOf('/api/v1/waf/test') >= 0 && res.request().method() === 'POST',
+      { timeout: 15000 },
+    ).catch(() => null);
     await clickButton(page, '测试');
+    const response = await verdictPromise;
     await page.waitForTimeout(2500);
+    const verdict = await (async () => {
+      if (!response) return { httpStatus: 0, data: null, bodyText: '（15 秒内没有看到 POST /api/v1/waf/test）' };
+      const text = await response.text().catch(() => '');
+      let data = null;
+      try { data = JSON.parse(text); } catch (err) { data = null; }
+      return { httpStatus: response.status(), data, bodyText: String(text).slice(0, 300) };
+    })();
+    // 只看「请求测试」卡片里的结果面板（data-host="testResult"）：页面上还有别处写着
+    // 「规则 ID」（规则文件的 ID 区间说明），不能拿全页文本去匹配。
     const result = await page.evaluate(() => {
-      const text = document.querySelector('#content').textContent || '';
-      if (text.indexOf('已被拦截') >= 0) return '已被拦截';
-      if (text.indexOf('未拦截') >= 0) return '未拦截';
-      return '';
+      const host = document.querySelector('#content [data-host="testResult"]');
+      const text = host ? (host.textContent || '') : '';
+      const verdict = text.indexOf('已被拦截') >= 0 ? '已被拦截' : (text.indexOf('未拦截') >= 0 ? '未拦截' : '');
+      const ids = Array.from(host ? host.querySelectorAll('.nunt-table tbody tr') : []).map((tr) => (tr.textContent || '').replace(/\s+/g, ' ').trim()).filter((t) => t.indexOf('规则 ID') === 0);
+      return { verdict, ruleIdText: ids.length ? ids[0] : '' };
     });
-    ctx.check('waf', '请求测试返回结果（拦截判定渲染出来）', result.length > 0, result ? ('判定：' + result) : '没有结果');
+
+    const data = (verdict && verdict.data) || {};
+    const matched = Array.isArray(data.matched) ? data.matched : [];
+    const ids = matched.map((m) => Number(m && m.id)).filter((n) => Number.isFinite(n) && n > 0);
+    const ruleId = Number(data.ruleId) || (ids.length ? ids[0] : 0);
+    const blocked = data.blocked === true && data.enforced === true;
+
+    ctx.check('waf', '请求测试用必然命中的 payload（路径穿越）', true, payload);
+    ctx.check('waf', 'POST /api/v1/waf/test 返回 200 且判定 blocked=true（enforce）', verdict.httpStatus === 200 && blocked,
+      'HTTP ' + verdict.httpStatus + '，blocked=' + data.blocked + '，enforced=' + data.enforced + '，action=' + (data.action || '-') + '，score=' + (data.score === undefined ? '-' : data.score) + '，body=' + (verdict.bodyText || ''));
+    ctx.check('waf', '命中规则 ID 非空且是 CRS 规则（9xxxxx）', ruleId >= 900000 && ruleId <= 999999,
+      'ruleId=' + (ruleId || '（空）') + '，matched=' + JSON.stringify(matched.slice(0, 3)) );
+    ctx.check('waf', 'enforce 下判定状态码是 403 Forbidden', Number(data.status) === 403, 'status=' + data.status);
+    ctx.check('waf', '页面渲染「已被拦截」并显示命中规则 ID', result.verdict === '已被拦截' && result.ruleIdText.indexOf(String(ruleId)) >= 0,
+      '判定：' + (result.verdict || '（没有结果）') + '；结果面板「' + result.ruleIdText.slice(0, 100) + '」');
     await page.screenshot({ path: path.join(ctx.out, 'light-waf-test.png'), fullPage: true });
   },
 
@@ -898,10 +648,18 @@ async function main() {
     page.on('console', (msg) => {
       const type = msg.type();
       if (type !== 'error' && type !== 'warning') return;
+      const text = String(msg.text());
       const loc = msg.location();
-      bucket.console.push({ page: current, type, text: String(msg.text()).slice(0, 400), location: loc ? (loc.url || '') + ':' + (loc.lineNumber || 0) : '' });
+      const entry = { page: current, type, text: text.slice(0, 400), location: loc ? (loc.url || '') + ':' + (loc.lineNumber || 0) : '' };
+      bucket.console.push(entry);
+      if (isMissingComponentText(text)) bucket.missingComponents.push(entry);
     });
-    page.on('pageerror', (err) => { bucket.pageErrors.push({ page: current, message: String((err && err.message) || err).slice(0, 600) }); });
+    page.on('pageerror', (err) => {
+      const message = String((err && err.message) || err).slice(0, 600);
+      const entry = { page: current, message };
+      bucket.pageErrors.push(entry);
+      if (isMissingComponentText(message)) bucket.missingComponents.push(entry);
+    });
     page.on('requestfailed', (req) => {
       const failure = req.failure();
       bucket.failedRequests.push({ page: current, url: req.url(), method: req.method(), failure: failure ? failure.errorText : '' });
@@ -933,6 +691,8 @@ async function main() {
     check('shell', '浏览器表单登录成功（外壳顶栏出现）', true, '');
     const navCount = await page.locator('.app-nav-item').count();
     check('shell', '侧边栏 12 个导航项', navCount === 12, '导航项 ' + navCount);
+    check('shell', '登录 + 外壳渲染没有「未注册组件」类报错', bucket.missingComponents.length === 0,
+      bucket.missingComponents.length ? bucket.missingComponents.map((e) => e.text).join(' | ').slice(0, 300) : '0 条');
     clearBucket(bucket);
 
     // 2) 主题切换（浅 → 深 → 浅）
@@ -971,6 +731,12 @@ async function main() {
         a11y.error ? ('扫描失败：' + a11y.error) : ('critical ' + counts.critical + ' / serious ' + counts.serious + ' / moderate ' + counts.moderate + ' / minor ' + counts.minor));
       a11yPages.push({ id: info.id, url: base + '/#/' + info.id, screenshot: shot, metrics, a11y, bucket: snapshotBucket(bucket) });
 
+      // 组件按需加载的守卫：页面挂载 + axe 之后，控制台不允许出现「未注册组件」类报错。
+      // 这一条就是「每个页面只加载自己那组组件」这个改动的回归防线：漏引 lib/components/* 时，
+      // 页面上会留下没有升级的空 <sl-xxx>，浏览器这时会打这两行报错之一。
+      check(info.id, '挂载后没有「未注册组件」类控制台报错', bucket.missingComponents.length === 0,
+        bucket.missingComponents.length ? bucket.missingComponents.map((e) => e.text).join(' | ').slice(0, 300) : '0 条');
+
       const run = INTERACTIONS[info.id];
       if (run) {
         try { await run(page, ctx); }
@@ -986,6 +752,9 @@ async function main() {
     const httpErrors = a11yPages.reduce((n, p) => n + p.bucket.httpErrors.length, 0);
     const external = a11yPages.reduce((n, p) => n + p.bucket.external.length, 0);
     const aborted = a11yPages.reduce((n, p) => n + p.bucket.abortedRequests.length, 0);
+    const missingComponents = a11yPages.reduce((n, p) => n + (p.bucket.missingComponents || []).length, 0);
+    check('global', '「未注册组件」类控制台报错 0（组件按需加载的守卫）', missingComponents === 0,
+      '未注册组件报错 ' + missingComponents + ' 条' + (missingComponents ? '：' + a11yPages.flatMap((p) => (p.bucket.missingComponents || []).map((e) => p.id + ': ' + e.text)).join(' | ').slice(0, 300) : ''));
     check('global', 'console 报错+警告 0', consoleAll === 0, 'console ' + consoleAll);
     check('global', '未捕获异常 0', pageErrors === 0, 'pageerror ' + pageErrors);
     check('global', '失败请求 0', failed === 0, '失败请求 ' + failed + '（SSE 中断 ' + aborted + ' 条不计）');
@@ -1028,10 +797,12 @@ async function main() {
         byArea,
         axe: axeTotals,
         pages: a11yPages.length,
+        missingComponents,
       },
       a11y: { tags: TAGS, pages: a11yPages.map((p) => ({ id: p.id, url: p.url, counts: p.a11y.counts, violations: p.a11y.violations, incomplete: p.a11y.incomplete })) },
       buckets: {
         console: a11yPages.reduce((a, p) => a.concat(p.bucket.console), []),
+        missingComponents: a11yPages.reduce((a, p) => a.concat(p.bucket.missingComponents || []), []),
         pageErrors: a11yPages.reduce((a, p) => a.concat(p.bucket.pageErrors), []),
         failedRequests: a11yPages.reduce((a, p) => a.concat(p.bucket.failedRequests), []),
         httpErrors: a11yPages.reduce((a, p) => a.concat(p.bucket.httpErrors), []),
@@ -1044,6 +815,7 @@ async function main() {
     await fsp.writeFile(path.join(opts.out, 'ui-smoke.md'), buildMarkdown(report), 'utf8');
 
     log('检查点 ' + report.summary.total + ' 个：通过 ' + report.summary.passed + '，失败 ' + report.summary.failed);
+    log('未注册组件类报错：' + missingComponents + ' 条');
     log('浅色主题 axe：critical ' + axeTotals.critical + ' / serious ' + axeTotals.serious + ' / moderate ' + axeTotals.moderate + ' / minor ' + axeTotals.minor);
     log('机器数据与截图：' + opts.out);
     if (report.summary.failed > 0 || axeTotals.critical || axeTotals.serious || axeTotals.moderate || axeTotals.minor) exitCode = 1;
@@ -1075,7 +847,8 @@ function buildMarkdown(report) {
   push('| 失败 | ' + report.summary.failed + ' |');
   push('| 页面数 | ' + report.summary.pages + ' |');
   push('| axe critical / serious / moderate / minor | ' + report.summary.axe.critical + ' / ' + report.summary.axe.serious + ' / ' + report.summary.axe.moderate + ' / ' + report.summary.axe.minor + ' |');
-  push('| console / 未捕获异常 / 失败请求 / 4xx·5xx / 外部请求 | ' + report.buckets.console.length + ' / ' + report.buckets.pageErrors.length + ' / ' + report.buckets.failedRequests.length + ' / ' + report.buckets.httpErrors.length + ' / ' + report.buckets.external.length + ' |', '');
+  push('| console / 未捕获异常 / 失败请求 / 4xx·5xx / 外部请求 | ' + report.buckets.console.length + ' / ' + report.buckets.pageErrors.length + ' / ' + report.buckets.failedRequests.length + ' / ' + report.buckets.httpErrors.length + ' / ' + report.buckets.external.length + ' |');
+  push('| 「未注册组件」类报错（组件按需加载的守卫） | ' + (report.summary.missingComponents || 0) + ' |', '');
   push('## 2. 检查点明细', '');
   push('| 区域 | 检查点 | 结果 | 说明 |', '| --- | --- | --- | --- |');
   for (const c of report.checks) push('| ' + c.area + ' | ' + c.name + ' | ' + (c.ok ? 'PASS' : '**FAIL**') + ' | ' + String(c.detail).replace(/\|/g, '/') + ' |');

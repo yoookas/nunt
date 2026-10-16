@@ -17,7 +17,7 @@
 | 交互冒烟 | 66 个检查点全部通过（浅色主题，每页至少一条真实交互） |
 | 整棵资源树（相对阶段 2 结束） | 原始 **−5,562 字节**、gzip +1,039、br(q6) +707（阶段 3 净减） |
 | 整棵资源树（相对真正的迁移前 17 文件） | 原始 +668,670（+122.9%）、gzip +205,773、br(q6) +183,901 —— 增量几乎全是 vendor 组件层（+682,330 原始 / +186,060 br），**自有代码净减 13,660 原始 / 2,159 br** |
-| 首屏传输（服务端 br 协商实测） | 登录页首屏 361,729 字节（217 个请求，含响应头），登录 + 外壳 +29 KB，再切一个页面 +21 KB |
+| 首屏传输（服务端 br 协商实测） | 登录页首屏 **209,830 字节 / 104 个请求**（改前 361,729 / 217，见第 5 节与第 10 节）；登录 + 外壳 +39.6 KB，再切一个页面 +102 KB（页面改为按需加载自己那组组件，见第 10 节） |
 | 构建链 | 仍然无 npm：`go:embed` 单二进制，CSP 未改，零外部请求 |
 | 页面契约 | `export default { id, title, icon, mount(root, ctx) }` 与 `ctx` 语义未变，`lib/api.js` 未改 |
 
@@ -30,7 +30,8 @@
 | --- | --- | --- |
 | 组件库 | Shoelace（vendor 在 `internal/webui/assets/vendor/shoelace/`） | 2.20.1（MIT），42 个组件、285 个文件、655,202 字节 |
 | 组件编写层 | Lit（`vendor/lit/`） | 3.3.3（MIT），11 个文件、20,795 字节 |
-| 自研共享层 | `assets/lib/kit.js`：表格 / 表单 / 标签输入 / 键值编辑 / 对话框 / 提示 / 状态块 / 卡片容器约定 | 52,428 字节原始、14,190 字节 br |
+| 自研共享层 | `assets/lib/kit.js`：表格 / 表单 / 标签输入 / 键值编辑 / 对话框 / 提示 / 状态块 / 卡片容器约定 + `renderIcon` 等纯函数（原 `lib/ui.js` 的存活部分） | 59,372 字节原始、16,474 字节 br |
+| 组件入口 | `assets/lib/components/*.js`（core / shell / form / feedback / tabs / table / progress / disclosure / datetime） | 9 个文件、5,857 字节原始、3,022 字节 br（**按需加载的落点**，见第 10 节） |
 | 外壳 | `assets/app.js`：hash 路由、页面清单、动态 import、登录页、侧栏/顶栏/窄屏抽屉、SSE、主题 | 33,358 字节原始、9,101 字节 br |
 | 样式 | `assets/style.css`：1 主题 token 映射、2 基础排版、3 外壳、4 kit + 容器类、5 登录页 | **519 行 / 18,469 字节**（阶段 0：712 行 / 24,099 字节；阶段 2 结束：748 行 / 30,904 字节） |
 | 页面 | `assets/pages/*.js`（12 个），一律 NuntElement 子类 + Lit 模板 + kit | 388,924 字节原始合计 |
@@ -55,11 +56,13 @@ vendor 同步与校验：`pwsh -File scripts/sync-vendor.ps1 [-VerifyOnly]`、`p
 | 阶段 2C（d6fef66） | 316 | 1,246,291 | 375,954 | 342,010 | 316,834 |
 | 阶段 2D = 阶段 2 结束（aa7a186） | 316 | 1,218,505 | 367,715 | 333,908 | 309,269 |
 | **阶段 3（工作区）** | 316 | **1,212,943** | **368,754** | **334,615** | 310,049 |
+| **发版前收尾（按需加载，工作区）** | **324** | **1,200,273** | **367,799** | **333,281** | — |
 
 两个对照口径（避免歧义，都列出来）：
 
 | 对照 | Δ 文件 | Δ 原始 | Δ gzip | Δ br q6 |
 | --- | --- | --- | --- | --- |
+| 发版前收尾 − 阶段 3（本批净变化；9 个新入口文件、−1 个 lib/ui.js） | +8 | **−12,670**（−1.0%） | −955（−0.3%） | −1,334（−0.4%） |
 | 阶段 3 − 阶段 2 结束（本批净变化） | 0 | **−5,562**（−0.5%） | +1,039（+0.3%） | +707 |
 | 阶段 3 − 阶段 0 记录值（303 文件口径，历史批次一直引用） | +13 | +8,998（+0.7%） | +11,027（+3.1%） | +5,619（+1.7%） |
 | 阶段 3 − 真正的迁移前（17 文件，无 vendor） | +299 | +668,670（+122.9%） | +205,773（+126.3%） | +183,901（+122.0%） |
@@ -73,6 +76,7 @@ vendor 同步与校验：`pwsh -File scripts/sync-vendor.ps1 [-VerifyOnly]`、`p
 | vendor 主题 CSS（light/dark） | 2 | 38,968 | 7,521 | index.html 直接引入 |
 | **vendor 小计** | **298** | **682,330** | **186,060** | |
 | 自有代码（index.html/style.css/app.js/lib/*） | 6 | 141,689 | 39,556 | 含新增 kit.js |
+| 自有代码（收尾后：lib/ui.js 删除、9 个组件入口、kit 吸收 5 个纯函数） | 14 | 126,420 | 37,232 | 见第 10 节 |
 | 自有代码（pages/*.js） | 12 | 388,924 | 108,999 | 12 个页面 |
 | **自有代码小计** | **18** | **530,613** | **148,555** | 阶段 0 是 544,273 / 150,714 → **−13,660 / −2,159** |
 
@@ -142,6 +146,9 @@ vendor 同步与校验：`pwsh -File scripts/sync-vendor.ps1 [-VerifyOnly]`、`p
 | #/settings | 6/9/4/0 | 5/0/0/0 | 0/0/0/0 | 0/0/0/0 | 0/0/0/0 | 0/0/0/0 | **0/0/0/0** |
 | **合计（critical/serious/moderate/minor）** | **26/110/188/7** | 14/0/7/7 | 8/0/6/6 | 8/0/4/4 | 8/0/2/2 | 0/0/0/0 | **0/0/0/0** |
 
+发版前收尾（组件按需加载）之后又跑了一次深色 12 页（`docs/screenshots/polish`，`--label 'pre-release polish'`）：
+**12 页四档仍全 0**，每页还额外断言了「没有未注册组件类报错」（详见第 10 节）。
+
 除了深色主题的 12 页，阶段 3 还补了两类扫描：
 
 - **浅色主题**：`scripts/ui-smoke.mjs` 对 12 页各扫一次，四档全 0（66 个检查点里的 13 条）；
@@ -154,39 +161,54 @@ vendor 同步与校验：`pwsh -File scripts/sync-vendor.ps1 [-VerifyOnly]`、`p
 方法：真实二进制 + 无头 Chromium 冷缓存，记录每个响应的 `Request.sizes()`（**编码后 body + 响应头**），
 再用 `fetch` 对同一批 URL 分别按 `Accept-Encoding: br / identity` 取 `Content-Length` 交叉核对。
 
+阶段 3 收尾（阶段 3 的数字）：
+
 | 场景 | 请求数 | 传输字节 | 其中 body |
 | --- | --- | --- | --- |
 | A 登录页首屏（未登录：HTML + 主题 CSS + 外壳 JS + vendor 依赖） | 217 | 361,729 | 199,207 |
-| B 登录动作 + 进入外壳（增量） | 17 | 28,976 | — |
-| C 外壳内切到 #/web（只算新增的模块与接口） | 6 | 21,118 | 16,858 |
-| **合计（登录 → 外壳 → 打开一个页面）** | 240 | **411,823** | — |
+| B 登录动作 + 进入外壳（增量） | 21 | 39,553 | 25,753 |
+| C 外壳内切到 #/web（只算新增的模块与接口） | 6 | 21,653 | 17,392 |
+| **合计（登录 → 外壳 → 打开一个页面）** | 244 | **422,935** | — |
 
 A 组的构成：自有代码 44,032、vendor 组件层 307,664、vendor 图标 1,026、主题 CSS 9,007
 （登录页会一次性拉起整套 sl-* 组件，因此 217 个请求里绝大多数是 vendor 的 chunk）。
 
-C 组的 6 个请求：`/pages/web.js`（15,355）、`/api/v1/web/rules`（516）、
-4 个行内图标（plus-lg / journal-text / pencil-square / trash，共 987）。
+**发版前收尾（按需加载）之后 —— 同一套方法重测：**
+
+| 场景 | 请求数 | 传输字节 | 其中 body | 请求 Δ | 字节 Δ |
+| --- | --- | --- | --- | --- | --- |
+| A 登录页首屏 | **104** | **209,830** | 131,957 | **−113（−52.1%）** | **−151,899（−42.0%）** |
+| B 登录动作 + 进入外壳（增量） | 21 | 39,613 | 25,813 | 0 | +60 |
+| C 外壳内切到 #/web（增量） | 62 | 102,048 | 55,835 | +56 | +80,395 |
+| **合计（登录 → 外壳 → 打开一个页面）** | **187** | **351,491** | — | **−57（−23.4%）** | **−71,444（−16.9%）** |
+
+A 组的新构成：自有代码 41,786（8 个请求，含 shell/feedback 两个入口）、vendor 组件层 158,011（93 个）、
+vendor 图标 1,026（1 个）、主题 CSS 9,007（2 个）。C 组的 62 个请求变成
+`/pages/web.js` + `/api/v1/web/rules` + **web 页自己的那组组件**（form/tabs 入口，54 个 vendor 请求）——
+这正是「每个页面按需加载自己那组组件」的直接体现：以前这 54 个模块是登录页替它付的。
+明细见第 10 节。
 
 主要静态资源的 br 字节（服务端实测）：
 
 | 资源 | br 字节 |
 | --- | --- |
+| /lib/kit.js（含原 lib/ui.js 的纯函数） | 16,474 |
+| /vendor/shoelace/chunks/chunk.NDC2Y3JV.js（最大的 vendor chunk） | 12,906 |
+| /app.js | 9,354 |
+| /style.css | 5,372 |
+| /lib/api.js | 2,297 |
+| /lib/components/core.js | 1,008 |
 | /vendor/shoelace/themes/light.css | 3,791 |
 | /vendor/shoelace/themes/dark.css | 3,730 |
-| /style.css | 5,140 |
-| /app.js | 9,101 |
-| /lib/ui.js | 8,115 |
-| /lib/kit.js | 14,190 |
-| /lib/api.js | 2,297 |
-| /pages/web.js | 15,355 |
-| vendor chunk 里最大的一个（chunk.NDC2Y3JV.js） | 12,906 |
+| /pages/web.js | 15,443 |
 
-交叉核对：同一批 231 个静态 URL，`identity` 合计 854,686 字节，`br` 合计 223,978 字节，**省 73.8%**
+交叉核对（阶段 3 口径）：同一批 231 个静态 URL，`identity` 合计 854,686 字节，`br` 合计 223,978 字节，**省 73.8%**
 （Content-Encoding 分布：231 个 br、9 个 identity，identity 全是 API 的 JSON）。
 
 > 阶段 0 对照：迁移前的首屏只有 `index.html + style.css + app.js + lib/*.js`（br 合计约 25 KB），
-> 没有任何 vendor。现在的 361 KB 里 88% 是组件层 —— 这正是 PLAN 第 1 节第 5 条接受的那个取舍：
-> 「更大但更可靠」。压缩、ETag/304 与内存缓存让这份成本只付一次（同一进程内不重复压缩）。
+> 没有任何 vendor。按需加载之后登录页是 210 KB，其中 75% 仍是组件层 —— 这正是 PLAN 第 1 节第 5 条
+> 接受的那个取舍：「更大但更可靠」。压缩、ETag/304 与内存缓存让这份成本只付一次
+> （同一进程内不重复压缩）。
 
 ## 6. 迁移期间修掉的真实缺陷
 
@@ -241,6 +263,7 @@ C 组的 6 个请求：`/pages/web.js`（15,355）、`/api/v1/web/rules`（516�
 | [phase2d/](screenshots/phase2d/) | web / waf：+ `light-{web,waf}.png`、`light-web-dialog.png`、`PHASE2D-NOTES.md` |
 | [phase3/](screenshots/phase3/) | 阶段 3 终验：`login.png` + 12 页深色截图、`REPORT.md`、`a11y.json`、`baseline.json`（演示数据 13/13 成功，含真实 TCP 转发连接） |
 | [phase3/ui-smoke/](screenshots/phase3/ui-smoke/) | 浅色主题冒烟：`light-<page>.png` ×12 + `light-login.png` + 8 张交互截图（`light-web-proxy-hardening.png`、`light-forward-log.png`、`light-ddns-skip.png`、`light-acme-keytype.png`、`light-files-root.png`、`light-waf-test.png`、`light-settings-tags.png`、`light-settings-token.png`）、`ui-smoke.json`、`ui-smoke.md` |
+| [polish/](screenshots/polish/) | 发版前收尾终验：`REPORT.md` + 深色 12 页截图 + `login.png` + `a11y.json` / `baseline.json`（`--label 'pre-release polish'`），以及 `polish/ui-smoke/`（浅色 84 个检查点、21 张截图、`ui-smoke.json`） |
 | [vendor/](screenshots/vendor/) | vendor 树冒烟（组件注册 + 图标本地可取 + 零 404） |
 
 ### 复现命令
@@ -251,8 +274,11 @@ C 组的 6 个请求：`/pages/web.js`（15,355）、`/api/v1/web/rules`（516�
     # 深色主题 12 页基线：截图 + axe + console/请求统计（13/13 演示数据，含真实 TCP 转发）
     node scripts/ui-baseline.mjs --out docs/screenshots/phase3 --label 'phase3 final'
 
-    # 浅色主题 66 个检查点（登录 + 12 页挂载 + axe + 每页关键交互 + 全局统计）
+    # 浅色主题 84 个检查点（登录 + 12 页挂载 + axe + 每页关键交互 + 未注册组件断言 + 全局统计）
     node scripts/ui-smoke.mjs --out docs/screenshots/phase3/ui-smoke
+
+    # 首屏传输实测（登录页 / 外壳 / 单页增量；before/after 用同一条命令）
+    node scripts/firstload.mjs --out .gocache/firstload-after --label after
 
     # 主题 / 窄屏外壳、kit 全链路、vendor 树
     node scripts/theme-check.mjs
@@ -286,21 +312,19 @@ CI 里由 `.github/workflows/ci.yml` 的 `frontend` job 跑同一组命令（独
    升级 Shoelace 后必须复验补丁仍然命中；
 2. axe 的 `label-title-only` 对「滚出对话框视口的控件」是误判（Shoelace 控件的阴影 `<input>` 永远带
    `aria-describedby="help-text"`）；只影响对话框内部长表单，12 页页面级扫描是 0；
-3. `lib/ui.js` 仍在仓库里（只剩 `app.js` 需要的四个纯函数），手写构件已无调用方。
+3. ~~`lib/ui.js` 仍在仓库里~~ —— **已删除**（发版前收尾，见第 10.2 节）：5 个还有调用方的纯函数搬进 `lib/kit.js`。
 
 ## 9. 未完成项与需要决策的点
 
-1. **首屏 361 KB / 217 个请求**：登录页就会拉起整套 sl-* 组件（kit.js 静态导入全部组件）。
-   如果在意首屏，可以把 `nunt-shoelace.js` 的导入改成按需（例如登录页只用 sl-input/sl-button/sl-card/sl-alert），
-   代价是每个页面要自己保证组件已注册。**需要决策**：保持现状还是做按需加载。
-2. **`lib/ui.js` 的删除**：只剩 `renderIcon/fmtBytes/fmtTime/escapeHtml` 被 `app.js` 使用
-   （kit 只是再导出其中几个）。它不在本次允许改动的文件清单里，因此没有删；删它需要先把 `renderIcon`
-   搬进 kit（约 40 行），**需要决策**。
+1. ~~**首屏 361 KB / 217 个请求**：登录页就会拉起整套 sl-* 组件（kit.js 静态导入全部组件）~~
+   —— **已做**（发版前收尾，见第 10.1 节）：104 个请求 / 209,830 字节（−52.1% / −42.0%），
+   组件注册下沉到 `lib/components/*`，页面各引自己的入口。
+2. ~~**`lib/ui.js` 的删除**~~ —— **已做**（见第 10.2 节）：`renderIcon` 等 5 个纯函数搬进 kit，文件已删。
 3. **阶段 2C 的两个遗留口径**没有改：证书任务「挑战」列对后端短名（`http/dns/tls-alpn`）仍原样显示；
    ddns 规则表没有补回「上次更新 / 成功失败」两列（那两列现在在运行状态表与状态对话框里）。**需要决策**。
-4. **冒烟里的 WAF 请求测试返回「未拦截」**：用的 payload 是 `?id=1 union select 1`，
-   PL1 + block 模式下没命中规则。检查点只断言「结果渲染出来了」，如果希望断言「一定被拦截」，
-   需要换一条必然命中的 payload（例如 `<script>alert(1)</script>` + 相应 Content-Type）。**需要决策**。
+4. ~~**冒烟里的 WAF 请求测试返回「未拦截」**~~ —— **已做**（见第 10.3 节）：演示数据显式打开
+   WAF（引擎 + CRS + block + enforce），payload 换成 `/?test=../../../../etc/passwd`，
+   断言 `blocked=true` / 命中 CRS 规则 ID / `status=403` / 界面渲染一致。
 5. **CI 前端 job 还没有在真实 GitHub runner 上跑过**：本地等价命令全部通过（Windows + 无头 Chromium），
    Linux runner 上的差异点只有：二进制名（`--exe ./nunt`）、Chromium 依赖（`--with-deps`）。
    首次推送到 GitHub 后需要确认该 job 绿。
@@ -309,5 +333,78 @@ CI 里由 `.github/workflows/ci.yml` 的 `frontend` job 跑同一组命令（独
    可以再建一条规则专供日志（**需要决策**）。
 7. **`ui-smoke.mjs` 的 `--port`**：nunt 的管理端口来自配置（默认 `16601`），脚本不写配置文件，
    因此 `--port` 只在实例确实监听该地址时才有意义（与 `ui-baseline.mjs` 相同）。
-8. **体积仍有优化空间**：kit.js 52 KB 原始（14 KB br）里含大量中文注释与字段说明文案；
-   如果哪天要压首屏，先从这里和 vendor 的按需加载入手。
+8. **体积仍有优化空间**：kit.js 59 KB 原始（16.5 KB br）里含大量中文注释与字段说明文案；
+   登录页首屏 210 KB 里自有代码只占 42 KB，剩下全是按需加载留下的组件层，**已经压到底了**——
+   再往下要么把 sl-drawer（窄屏导航）/ sl-dropdown（账户菜单）从登录页去掉，要么把 kit 按
+   table/form/dialog 拆成两个模块，都是产品/架构取舍，不是这次收尾的范围。
+
+---
+
+## 10. 发版前收尾（三条尾巴）
+
+这一批只做三件事，全部落在允许改动的范围内（`internal/webui/assets/**`、`scripts/**`、本文与
+[CONTRACT.md](CONTRACT.md)）：**① 组件按需加载；② 删除 `lib/ui.js`；③ WAF 冒烟换成必然命中的 payload**。
+`internal/**` 的 Go 代码、`vendor/**`、`lib/api.js` 的对外语义都没动。
+
+### 10.1 组件按需加载
+
+改法（vendor 不能改，它由 `scripts/sync-vendor.ps1` 生成并会被覆盖）：
+
+| 文件 | 改动 |
+| --- | --- |
+| `lib/components/*.js`（9 个新文件） | 按域拆分的组件入口：`core`（icon/icon-button/badge/button/spinner/alert + `setBasePath`）、`shell`、`form`、`feedback`、`tabs`、`table`、`progress`、`disclosure`、`datetime` |
+| `lib/kit.js` | **删掉** `import '../vendor/shoelace/nunt-shoelace.js'`（那一行就是「登录页拉起 42 个组件」的根因），kit 变成纯构件层；组件注册下沉到各入口 |
+| `app.js` | 只引 `lib/components/shell.js` + `lib/components/feedback.js`（外壳自己的 toast/确认框/改密框要用 dialog） |
+| `pages/*.js`（12 个） | 每个页面顶部引自己需要的入口（表单页 `form`+`feedback`，settings/web 再加 `tabs`，acme 再加 `progress`）；页面本来就是动态 import，所以这些组件只在打开该页时才加载 |
+
+行为不变的证据：`ui-smoke`（84 个检查点，含每页交互与 axe 四档）与 `ui-baseline`（12 页深色、
+每页 axe 四档）都全绿；主题切换、窄屏抽屉、账户下拉、对话框、表格排序/分页、表单校验、
+标签输入、进度条、标签页全在检查点里。
+
+顺手收掉的两个东西：
+
+- `sl-tooltip` / `sl-popup` 不放进 `core`：nunt 模板里没有 `<sl-tooltip>`，它们只是 Shoelace
+  自己的 tooltip 指令的可选依赖；实测一并注册要多花 7.5 KB br（104 → 104 个请求不变，字节 209,830 vs 217,081）。
+- `.notice` 的文字色 `--warn`（warning-600）在 `--warn-soft` 背景上只有 3.0:1 ——
+  WAF 页在 enforce 模式下多出来的那张提醒卡把这条 axe `color-contrast/serious` 暴露了出来
+  （warning-700 是 4.32:1，仍不够 4.5:1），最终改成 `--sl-color-warning-800`（5.9:1）；
+  settings 页同款 `.psettings-notice` 一起改。这是**真实缺陷**，不是为了让测试变绿而放宽断言。
+
+### 10.2 `lib/ui.js` 删除
+
+- 还有调用方的 5 个纯函数（`renderIcon/fmtBytes/fmtTime/fmtDuration/escapeHtml`）搬进 `lib/kit.js`
+  （`renderIcon` 的解析 + 标签/属性白名单逻辑逐行保留，输入输出不变）；
+- `lib/ui.js`（29,051 字节 / 751 行）删除，占位手写构件 `el/modal/tableEl/formGrid/toast…` 本来就没有调用方；
+- 全仓库（assets + scripts + Go + docs）不再有 `lib/ui.js` 的 import，只剩历史叙述里的文字提及。
+
+### 10.3 WAF 冒烟的必然命中 payload
+
+旧检查点用 `?id=1 union select 1`，在默认配置（WAF 关闭）下永远返回「未拦截」，只断言了「结果渲染出来」。
+现在：
+
+- 演示数据里显式打开 WAF（引擎 + CRS + block + `enforcementMode=enforce`）——**这是前提**，
+  不打开的话任何 payload 都不会被拦；
+- payload 换成 `/?test=../../../../etc/passwd`（CRS 930120/930110/930100 + 949110 必然命中）；
+- 断言改成 4 条：**blocked=true 且 enforced=true（HTTP 200 的判定响应）**、**命中规则 ID 非空且落在 CRS 的
+  9xxxxx 区间**、**enforce 下 status=403**、**页面结果面板渲染「已被拦截」并带上同一个规则 ID**。
+
+实测输出（ui-smoke 的 4 条检查点）：`ruleId=949110`、`matched=[920350,930100,930110,930120]`、
+`status=403`、界面「已被拦截 / 规则 ID 949110 920350 930100 930110 930120」。
+
+### 10.4 这一批的复验输出
+
+| 检查 | 结果 |
+| --- | --- |
+| `go build ./...` / `go vet ./...` / `go test ./... -count=1 -p 1` | 退出码 0 / 0 / 0（28 个包，含 `internal/webui` 0.536s） |
+| `node scripts/ui-smoke.mjs --out .gocache/ui-smoke-polish` | **84/84 检查点通过**，浅色 axe 0/0/0/0，未注册组件报错 0，`UI-SMOKE: PASS` |
+| `node scripts/ui-baseline.mjs --out docs/screenshots/polish --label 'pre-release polish'` | 演示数据 13/13；12 页 axe 全 0；console 0 / pageerror 0 / 失败请求 0 / 4xx·5xx 0 / 外部请求 0 / 横向溢出 0 / 未注册组件报错 0 |
+| `node scripts/firstload.mjs`（登录页首屏） | 217 → **104** 个请求、361,729 → **209,830** 字节（−52.1% / −42.0%） |
+| `pwsh -File scripts/sync-vendor.ps1 -VerifyOnly` | `[ok]`（285 文件 / 655,202 字节与 VERSION.md 一致 —— vendor 没动） |
+| `pwsh -File scripts/sync-lit.ps1 -VerifyOnly` | `[ok]`（11 文件 / 20,795 字节一致） |
+
+新增的回归防线（防止以后又漏引组件入口）：
+
+- `ui-smoke`：每页挂载 + axe 之后断言控制台没有 `… has not been registered` 类报错（12 页各 1 条 +
+  登录/外壳 1 条 + 全局合计 1 条），并写进 `ui-smoke.json` 的 `buckets.missingComponents`；
+- `ui-baseline`：同样每页统计，非 0 直接非零退出；
+- 两个脚本与 `firstload.mjs` 共用 `scripts/lib/devserver.mjs`（临时实例、播种、WAF 配置只有一份实现）。

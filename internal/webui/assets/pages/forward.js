@@ -9,6 +9,9 @@
 // POST /api/v1/forward/rules/{id}/toggle（失败退回 PUT 全量更新）、
 // GET /api/v1/forward/logs?rule=&limit=，以及提交体里那组字段名
 // （name/enable/protocol/srcAddr/dstAddr/timeoutSec/remark/access{mode,ips,uaMode,uas}）。
+// 组件按需加载：只引本页用到的入口（kit 不再注册任何 sl-* 组件，见 lib/components/core.js）。
+import '../lib/components/feedback.js';
+import '../lib/components/form.js';
 import {
   NuntElement, html, nothing, define, renderInto, formGrid, openDialog, confirmDialog, toast,
   errorMessage, fmtBytes, fmtTime,

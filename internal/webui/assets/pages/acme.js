@@ -20,6 +20,10 @@
 //   GET  /api/v1/ddns/providers（DNS 凭据表单的元数据来源）
 // 任务提交体：name/enable/domains/keyType/challenge/dnsProvider/dnsCreds/dnsResolvers/
 //             renewDays/remark；上传提交体：name/domains/cert/certificate/key/privateKey/chain。
+// 组件按需加载：只引本页用到的入口（kit 不再注册任何 sl-* 组件，见 lib/components/core.js）。
+import '../lib/components/feedback.js';
+import '../lib/components/form.js';
+import '../lib/components/progress.js';
 import {
   NuntElement, html, nothing, define, renderInto, formGrid, openDialog, confirmDialog, toast,
   errorMessage, fmtTime,

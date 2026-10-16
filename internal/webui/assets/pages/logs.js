@@ -9,6 +9,9 @@
 // 迁移前是 flex 三列（时间戳 | 级别 | 消息），消息换行后第二行会顶到最左边、和上面的
 // 时间戳挤在一起；现在用页面样式把表格改成固定三列的 grid，消息列加悬挂缩进 ——
 // 换行后的行首缩进到首行文字下方，不再回退到时间戳那一列。
+// 组件按需加载：只引本页用到的入口（kit 不再注册任何 sl-* 组件，见 lib/components/core.js）。
+import '../lib/components/feedback.js';
+import '../lib/components/form.js';
 import {
   NuntElement, html, nothing, define, toast, errorMessage, fmtTime,
 } from '../lib/kit.js';

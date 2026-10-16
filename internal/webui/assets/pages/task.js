@@ -9,6 +9,9 @@
 // 数据流与迁移前一致：GET/POST/PUT/DELETE /api/v1/task/items[/{id}]、
 // POST /api/v1/task/items/{id}/toggle（后端没有这条路由时退回 PUT 全量更新），
 // 提交体字段名不变：name/enable/cron/remark/actions[]。
+// 组件按需加载：只引本页用到的入口（kit 不再注册任何 sl-* 组件，见 lib/components/core.js）。
+import '../lib/components/feedback.js';
+import '../lib/components/form.js';
 import {
   NuntElement, html, nothing, define, formGrid, openDialog, confirmDialog, toast,
   errorMessage, fmtTime,

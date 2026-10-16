@@ -8,6 +8,9 @@
 // 这条路由，直接请求会拿到 Go 默认的 404 响应体（浏览器还会记一条 console 错误）。所以这里
 // 先读一次 GET /api/v1/modules，没有 filebrowser 就渲染友好空态 + 「重新检测」，不发注定
 // 404 的请求；同时也不再有迁移前那种「失败后重试一次」的第二条请求。
+// 组件按需加载：只引本页用到的入口（kit 不再注册任何 sl-* 组件，见 lib/components/core.js）。
+import '../lib/components/feedback.js';
+import '../lib/components/form.js';
 import {
   NuntElement, html, nothing, define, confirmDialog, toast, errorMessage,
   fmtBytes, fmtTime,

@@ -3,6 +3,9 @@
 // 这是阶段 1 的「模板页」：页面 = 一个 light DOM 的 Lit 元素（NuntElement 子类），
 // 表格/表单/对话框/提示全部来自 lib/kit.js，数据流（ctx.api 的接口与字段）与迁移前一致。
 // 复制这一页改 render() 就能得到下一页，见 docs/CONTRACT.md 第 7 节。
+// 组件按需加载：只引本页用到的入口（kit 不再注册任何 sl-* 组件，见 lib/components/core.js）。
+import '../lib/components/feedback.js';
+import '../lib/components/form.js';
 import {
   NuntElement, html, nothing, define, formGrid, openDialog, confirmDialog, toast,
   errorMessage,

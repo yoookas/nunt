@@ -10,6 +10,10 @@
 // POST /api/v1/web/rules/{id}/toggle（失败退回 PUT 全量更新）、
 // GET /api/v1/web/logs?rule=&limit=200，以及提交体里那组字段名。
 // #/web?rule=<id> 深链（WAF 页跳转过来）：自动过滤 + 高亮目标行 + 顶部提示条。
+// 组件按需加载：只引本页用到的入口（kit 不再注册任何 sl-* 组件，见 lib/components/core.js）。
+import '../lib/components/feedback.js';
+import '../lib/components/form.js';
+import '../lib/components/tabs.js';
 import {
   NuntElement, html, nothing, define, renderInto, formGrid, openDialog, confirmDialog, toast,
   errorMessage, fmtTime,

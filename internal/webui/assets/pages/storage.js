@@ -7,6 +7,9 @@
 // POST /api/v1/storage/mounts/test、GET /api/v1/storage/mounts/{id}/list?path=）与字段名、
 // 同样的类型显隐（local 只显示本地路径，webdav 显示地址/用户名/密码/跳过证书校验）、
 // 同样的密码掩码回填（列表返回的 ******** 原样提交，后端按「不修改」处理）。
+// 组件按需加载：只引本页用到的入口（kit 不再注册任何 sl-* 组件，见 lib/components/core.js）。
+import '../lib/components/feedback.js';
+import '../lib/components/form.js';
 import {
   NuntElement, html, nothing, define, formGrid, openDialog, confirmDialog, toast,
   errorMessage, fmtBytes, fmtTime,

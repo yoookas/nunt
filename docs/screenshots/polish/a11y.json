@@ -1,0 +1,194 @@
+{
+  "generatedAt": "2026-10-16T16:21:48.617Z",
+  "tool": {
+    "axe": "4.14.0",
+    "playwright": "1.64.1",
+    "chromium": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.4 Safari/537.36",
+    "viewport": "1440x900",
+    "colorScheme": "dark"
+  },
+  "tags": [
+    "wcag2a",
+    "wcag2aa",
+    "wcag21a",
+    "wcag21aa",
+    "best-practice"
+  ],
+  "summary": {
+    "pages": 12,
+    "critical": 0,
+    "serious": 0,
+    "moderate": 0,
+    "minor": 0
+  },
+  "pages": [
+    {
+      "id": "dashboard",
+      "url": "http://127.0.0.1:16601/#/dashboard",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 0,
+        "minor": 0
+      },
+      "violations": [],
+      "passCount": 34,
+      "incomplete": 1,
+      "error": ""
+    },
+    {
+      "id": "web",
+      "url": "http://127.0.0.1:16601/#/web",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 0,
+        "minor": 0
+      },
+      "violations": [],
+      "passCount": 47,
+      "incomplete": 1,
+      "error": ""
+    },
+    {
+      "id": "forward",
+      "url": "http://127.0.0.1:16601/#/forward",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 0,
+        "minor": 0
+      },
+      "violations": [],
+      "passCount": 44,
+      "incomplete": 2,
+      "error": ""
+    },
+    {
+      "id": "ddns",
+      "url": "http://127.0.0.1:16601/#/ddns",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 0,
+        "minor": 0
+      },
+      "violations": [],
+      "passCount": 44,
+      "incomplete": 1,
+      "error": ""
+    },
+    {
+      "id": "acme",
+      "url": "http://127.0.0.1:16601/#/acme",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 0,
+        "minor": 0
+      },
+      "violations": [],
+      "passCount": 44,
+      "incomplete": 1,
+      "error": ""
+    },
+    {
+      "id": "storage",
+      "url": "http://127.0.0.1:16601/#/storage",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 0,
+        "minor": 0
+      },
+      "violations": [],
+      "passCount": 40,
+      "incomplete": 1,
+      "error": ""
+    },
+    {
+      "id": "files",
+      "url": "http://127.0.0.1:16601/#/files",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 0,
+        "minor": 0
+      },
+      "violations": [],
+      "passCount": 43,
+      "incomplete": 2,
+      "error": ""
+    },
+    {
+      "id": "waf",
+      "url": "http://127.0.0.1:16601/#/waf",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 0,
+        "minor": 0
+      },
+      "violations": [],
+      "passCount": 45,
+      "incomplete": 2,
+      "error": ""
+    },
+    {
+      "id": "task",
+      "url": "http://127.0.0.1:16601/#/task",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 0,
+        "minor": 0
+      },
+      "violations": [],
+      "passCount": 44,
+      "incomplete": 1,
+      "error": ""
+    },
+    {
+      "id": "notify",
+      "url": "http://127.0.0.1:16601/#/notify",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 0,
+        "minor": 0
+      },
+      "violations": [],
+      "passCount": 40,
+      "incomplete": 1,
+      "error": ""
+    },
+    {
+      "id": "logs",
+      "url": "http://127.0.0.1:16601/#/logs",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 0,
+        "minor": 0
+      },
+      "violations": [],
+      "passCount": 42,
+      "incomplete": 2,
+      "error": ""
+    },
+    {
+      "id": "settings",
+      "url": "http://127.0.0.1:16601/#/settings",
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 0,
+        "minor": 0
+      },
+      "violations": [],
+      "passCount": 41,
+      "incomplete": 2,
+      "error": ""
+    }
+  ]
+}

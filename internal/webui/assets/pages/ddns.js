@@ -17,6 +17,9 @@
 // 提交体：name/enable/provider/creds/domain/subDomains/recordType/ttl/intervalSec/cron/
 //         ipv4{enable,mode,value,iface,regex}/ipv6{同左}/callback{enable,url,method,headers,
 //         body,basicUser,basicPass,contentType,successCode}/remark。
+// 组件按需加载：只引本页用到的入口（kit 不再注册任何 sl-* 组件，见 lib/components/core.js）。
+import '../lib/components/feedback.js';
+import '../lib/components/form.js';
 import {
   NuntElement, html, nothing, define, renderInto, formGrid, openDialog, confirmDialog, toast,
   errorMessage, fmtTime,

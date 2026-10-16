@@ -4,12 +4,18 @@
 // sl-badge / sl-icon-button / sl-input / sl-button / sl-alert / sl-card），自研部分用 Lit 写成
 // light DOM（NuntElement.createRenderRoot() 返回 this），外观全部来自 style.css 的 token 映射。
 // 路由、页面清单、动态 import、ctx 契约与 lib/api.js 与迁移前保持一致。
+// 组件按需加载：外壳与登录页只引 shell 入口（core + input/card/drawer/dropdown/menu/menu-item），
+// 不再 import vendor 的总入口（那会把 42 个组件一次性拉进首屏，见 lib/components/core.js）。
+import './lib/components/shell.js';
+// 反馈类组件（sl-alert 的 toast、sl-dialog 的确认框/修改密码框）外壳自己也要用 ——
+// 主题切换的 toast、退出登录的确认框、会话失效提示，都发生在还没有加载任何页面的时候。
+import './lib/components/feedback.js';
 import { api, setCsrf, onUnauthorized } from './lib/api.js';
 import {
   NuntElement, html, nothing, define, toast, confirmDialog, openDialog, promptDialog, formGrid,
   emptyState, loadingState, errorCard, infoVersionText, errorMessage,
+  renderIcon, fmtBytes, fmtTime, escapeHtml,
 } from './lib/kit.js';
-import { renderIcon, fmtBytes, fmtTime, escapeHtml } from './lib/ui.js';
 
 /* ------------------------------------------------------------------ 页面清单（保持不变） */
 

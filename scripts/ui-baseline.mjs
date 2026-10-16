@@ -556,7 +556,16 @@ async function seedDemoData(client, opts, www) {
 
 function newBucket() {
   // external 记录任何离开本服务的请求（CSP 只允许 self，零外部请求是硬指标）。
-  return { console: [], pageErrors: [], failedRequests: [], httpErrors: [], external: [] };
+  // missingComponents 记录「页面上出现了没有注册的自定义元素」类报错 —— 组件改成按需加载
+  // （assets/lib/components/*）之后，漏引入口的症状就是这个，功能会静默失效。
+  return { console: [], pageErrors: [], failedRequests: [], httpErrors: [], external: [], missingComponents: [] };
+}
+
+// MISSING_COMPONENT_RE：浏览器对「未注册自定义元素」的三种报法。
+const MISSING_COMPONENT_RE = /not been registered|has already been defined|Failed to upgrade|is not a valid custom element name/i;
+
+function isMissingComponentText(text) {
+  return MISSING_COMPONENT_RE.test(String(text || ''));
 }
 
 function isLocalRequest(url, base) {
@@ -570,6 +579,7 @@ function isSSE(url) { return /\/api\/v1\/events/.test(url || ''); }
 function snapshotBucket(bucket) {
   return {
     console: bucket.console.slice(),
+    missingComponents: bucket.missingComponents.slice(),
     pageErrors: bucket.pageErrors.slice(),
     failedRequests: bucket.failedRequests.filter((e) => !isSSE(e.url)),
     abortedRequests: bucket.failedRequests.filter((e) => isSSE(e.url)),
@@ -580,6 +590,7 @@ function snapshotBucket(bucket) {
 
 function clearBucket(bucket) {
   bucket.console.length = 0;
+  bucket.missingComponents.length = 0;
   bucket.pageErrors.length = 0;
   bucket.failedRequests.length = 0;
   bucket.httpErrors.length = 0;
@@ -702,15 +713,20 @@ async function runBrowser(opts, loginPassword) {
     const type = msg.type();
     if (type !== 'error' && type !== 'warning') return;
     const loc = msg.location();
-    bucket.console.push({
+    const entry = {
       page: current,
       type,
       text: truncate(msg.text(), 400),
       location: loc ? (loc.url || '') + ':' + (loc.lineNumber || 0) : '',
-    });
+    };
+    bucket.console.push(entry);
+    if (isMissingComponentText(entry.text)) bucket.missingComponents.push(entry);
   });
   page.on('pageerror', (err) => {
-    bucket.pageErrors.push({ page: current, message: truncate((err && err.message) || String(err), 600) });
+    const message = truncate((err && err.message) || String(err), 600);
+    const entry = { page: current, message };
+    bucket.pageErrors.push(entry);
+    if (isMissingComponentText(message)) bucket.missingComponents.push(entry);
   });
   page.on('requestfailed', (req) => {
     const failure = req.failure();
@@ -798,6 +814,7 @@ function buildReport(data) {
   push('| 失败请求 | ' + data.pages.reduce((n, p) => n + p.failedRequests.length, 0) + ' |');
   push('| HTTP 4xx/5xx 响应 | ' + data.pages.reduce((n, p) => n + p.httpErrors.length, 0) + ' |');
   push('| 外部请求（离开本服务） | ' + data.pages.reduce((n, p) => n + (p.external ? p.external.length : 0), 0) + ' |');
+  push('| 「未注册组件」类报错（组件按需加载的守卫） | ' + data.pages.reduce((n, p) => n + (p.missingComponents ? p.missingComponents.length : 0), 0) + ' |');
   push('| axe 严重 critical | ' + data.a11yTotals.critical + ' |');
   push('| axe 重要 serious | ' + data.a11yTotals.serious + ' |');
   push('| axe 中等 moderate | ' + data.a11yTotals.moderate + ' |');
@@ -998,8 +1015,21 @@ async function main() {
     const totalConsole = shot.pages.reduce((n, p) => n + p.console.length, 0);
     const totalFailed = shot.pages.reduce((n, p) => n + p.failedRequests.length, 0);
     const totalExternal = shot.pages.reduce((n, p) => n + (p.external ? p.external.length : 0), 0);
+    const totalMissing = shot.pages.reduce((n, p) => n + (p.missingComponents || []).length, 0);
     log('汇总：console ' + totalConsole + '，失败请求 ' + totalFailed + '，外部请求 ' + totalExternal +
-      '，axe 严重 ' + a11yTotals.critical + '，重要 ' + a11yTotals.serious);
+      '，axe 严重 ' + a11yTotals.critical + '，重要 ' + a11yTotals.serious +
+      '，未注册组件报错 ' + totalMissing);
+    // 组件按需加载的守卫：任何一页出现「未注册组件」类报错就是真回归（页面会静默失效），
+    // 直接非零退出，CI 的 frontend job 会红。
+    if (totalMissing > 0) {
+      exitCode = 1;
+      for (const p of shot.pages) {
+        for (const e of (p.missingComponents || [])) {
+          process.stderr.write('[baseline] 未注册组件 #/' + p.id + '：' + (e.text || e.message) + String.fromCharCode(10));
+        }
+      }
+    }
+    if (a11yTotals.critical || a11yTotals.serious || a11yTotals.moderate || a11yTotals.minor) exitCode = 1;
   } catch (err) {
     exitCode = 1;
     process.stderr.write('[baseline] 失败：' + ((err && err.stack) || err) + '\n');

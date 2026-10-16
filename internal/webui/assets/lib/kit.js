@@ -12,16 +12,180 @@
 //     状态块用 action 属性，对话框内容用 openDialog({ body })。
 //
 // 页面模板（最小示例）见 docs/CONTRACT.md 第 7 节。
+//
+// 组件注册（重要）：本文件**不注册任何 sl-* 组件**，也不再 import vendor 的总入口
+// （nunt-shoelace.js 会把 42 个组件一次性拉进登录页首屏）。组件注册下沉到 lib/components/*：
+// 外壳与登录页引 lib/components/shell.js，每个页面在文件顶部引自己需要的入口，
+// kit 只负责「用」已经注册好的组件。漏引入口时的表现很直接：页面上出现一个未升级的
+// <sl-xxx> 空元素，浏览器控制台报 "… has not been registered"，scripts/ui-smoke.mjs 与
+// scripts/ui-baseline.mjs 各有一条「未注册组件」检查点守着它（见 docs/CONTRACT.md 第 7.6 节）。
 import { LitElement, html, nothing, render } from '../vendor/lit/lit-element.js';
 import { repeat } from '../vendor/lit/directives/repeat.js';
 import { ifDefined } from '../vendor/lit/directives/if-defined.js';
 import { classMap } from '../vendor/lit/directives/class-map.js';
-// 注册全部 sl-* 组件，并把图标基准路径指向本地 vendor（零外部请求，符合 CSP）。
-import '../vendor/shoelace/nunt-shoelace.js';
-// 纯格式化函数继续与 lib/ui.js 共用一份实现；阶段 3 会把它们整体搬进本文件。
-export { fmtBytes, fmtTime, fmtDuration, escapeHtml } from './ui.js';
 
 export { html, nothing, repeat, ifDefined, classMap };
+
+/* ------------------------------------------------------------------ 纯函数
+ *
+ * 这一节是从已经删除的 lib/ui.js 搬进来的（阶段 3 的收尾改动）：
+ * 只有这五个函数还有调用方，手写构件（el/modal/tableEl/formGrid/toast…）已全部没有调用方，
+ * 随 lib/ui.js 一起删除。搬进来之后 kit 成为唯一的共享层，页面与外壳只依赖 kit。
+ */
+
+/** escapeHtml 转义 HTML 特殊字符。 */
+export function escapeHtml(value) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** fmtBytes 人类可读的字节数。 */
+export function fmtBytes(n) {
+  if (n === null || n === undefined || n === '') return '—';
+  const num = Number(n);
+  if (!isFinite(num)) return '—';
+  const neg = num < 0;
+  let value = Math.abs(num);
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i += 1;
+  }
+  let text;
+  if (i === 0) text = String(Math.round(value));
+  else text = value >= 100 ? value.toFixed(0) : value.toFixed(value >= 10 ? 1 : 2);
+  return (neg ? '-' : '') + text + ' ' + units[i];
+}
+
+function pad2(n) {
+  return n < 10 ? '0' + n : String(n);
+}
+
+/** fmtTime 本地时间文本；数字按秒或毫秒自动识别。 */
+export function fmtTime(t) {
+  if (t === null || t === undefined || t === '') return '—';
+  let date;
+  if (t instanceof Date) {
+    date = t;
+  } else if (typeof t === 'number') {
+    date = new Date(t < 1e12 ? t * 1000 : t);
+  } else {
+    const text = String(t);
+    date = new Date(text);
+    if (isNaN(date.getTime())) {
+      const num = Number(text);
+      if (!isNaN(num) && text.trim() !== '') date = new Date(num < 1e12 ? num * 1000 : num);
+    }
+  }
+  if (!date || isNaN(date.getTime())) return String(t);
+  return (
+    date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate()) +
+    ' ' + pad2(date.getHours()) + ':' + pad2(date.getMinutes()) + ':' + pad2(date.getSeconds())
+  );
+}
+
+/** fmtDuration 秒数 → “3 天 4 小时 5 分”。 */
+export function fmtDuration(seconds) {
+  const total = Number(seconds);
+  if (!isFinite(total) || total < 0) return '—';
+  const s = Math.floor(total);
+  const days = Math.floor(s / 86400);
+  const hours = Math.floor((s % 86400) / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = s % 60;
+  if (days > 0) return days + ' 天 ' + hours + ' 小时';
+  if (hours > 0) return hours + ' 小时 ' + mins + ' 分';
+  if (mins > 0) return mins + ' 分 ' + secs + ' 秒';
+  return secs + ' 秒';
+}
+
+/* ------------------------------------------------------------------ 图标 */
+
+// 白名单：页面模块提供的 SVG 字符串只允许这些标签与属性（renderIcon 的输入来自 PAGES 清单，
+// 但保持解析 + 白名单的写法，避免以后有人把后端字符串塞进来）。
+const ICON_TAGS = new Set(['svg', 'g', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'ellipse']);
+const ICON_ATTRS = new Set([
+  'viewbox', 'width', 'height', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
+  'stroke-dasharray', 'd', 'cx', 'cy', 'r', 'rx', 'ry', 'x', 'y', 'x1', 'y1', 'x2', 'y2',
+  'points', 'fill-rule', 'clip-rule', 'opacity', 'class', 'transform',
+]);
+
+/**
+ * renderIcon 把页面模块提供的 SVG 字符串转成安全元素；非法输入返回占位方块。
+ * 外壳的侧栏导航用它在 <span> 里放 24x24 的页面图标。
+ */
+export function renderIcon(svg) {
+  const fallback = iconNode('svg', { viewBox: '0 0 24 24', width: 18, height: 18, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.8, 'aria-hidden': 'true' },
+    iconNode('rect', { x: 4, y: 4, width: 16, height: 16, rx: 3 }),
+  );
+  if (typeof svg !== 'string' || svg.indexOf('<') < 0) return fallback;
+  let doc;
+  try {
+    doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  } catch (err) {
+    return fallback;
+  }
+  if (!doc || doc.getElementsByTagName('parsererror').length > 0) return fallback;
+  const root = doc.documentElement;
+  if (!root || String(root.nodeName).toLowerCase() !== 'svg') return fallback;
+  const out = iconNode('svg', { viewBox: '0 0 24 24', width: 18, height: 18, 'aria-hidden': 'true' });
+  for (const attr of Array.from(root.attributes)) {
+    const name = attr.name.toLowerCase();
+    if (ICON_ATTRS.has(name)) out.setAttribute(name, attr.value);
+  }
+  let count = 0;
+  for (const child of Array.from(root.children)) {
+    if (count > 64) break;
+    const node = cloneIconNode(child);
+    if (node) {
+      out.appendChild(node);
+      count += 1;
+    }
+  }
+  if (count === 0) return fallback;
+  return out;
+}
+
+function cloneIconNode(src) {
+  const tag = String(src.nodeName).toLowerCase();
+  if (!ICON_TAGS.has(tag) || tag === 'svg') return null;
+  const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const attr of Array.from(src.attributes)) {
+    const name = attr.name.toLowerCase();
+    if (!ICON_ATTRS.has(name)) continue;
+    if (name === 'class') continue;
+    node.setAttribute(name, attr.value);
+  }
+  for (const child of Array.from(src.children)) {
+    const nested = cloneIconNode(child);
+    if (nested) node.appendChild(nested);
+  }
+  return node;
+}
+
+// iconNode：renderIcon 内部的最小元素构造（属性先设、子节点后插，与删除前的 lib/ui.js 行为一致）。
+function iconNode(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  if (attrs) {
+    for (const key of Object.keys(attrs)) {
+      const value = attrs[key];
+      if (value === null || value === undefined || value === false) continue;
+      node.setAttribute(key, value === true ? '' : String(value));
+    }
+  }
+  for (const child of children) {
+    if (child === null || child === undefined || child === false || child === true) continue;
+    if (child instanceof Node) node.appendChild(child);
+    else node.appendChild(document.createTextNode(String(child)));
+  }
+  return node;
+}
 
 /* ------------------------------------------------------------------ data: URL 垫片 */
 
@@ -1252,9 +1416,15 @@ define('nunt-form', NuntForm);
       },
     };
 
+组件注册：kit 不自带任何 sl-* 组件。用它之前，外壳/页面必须 import 对应的入口（lib/components/*）：
+  外壳、登录页        import '../lib/components/shell.js'
+  表格页              import '../lib/components/table.js'
+  表单 / 对话框       import '../lib/components/form.js'、'../lib/components/feedback.js'
+  （完整清单与理由见 lib/components/core.js 顶部注释。）
+
 导出清单：
   工具      versionText / infoVersionText / errorMessage / friendlyMessage / toneVariant / toneIcon
-            badge / iconEl / fmtBytes / fmtTime / fmtDuration / escapeHtml
+            badge / iconEl / renderIcon / fmtBytes / fmtTime / fmtDuration / escapeHtml
   Lit       html / nothing / repeat / ifDefined / classMap / NuntElement / define / renderInto
   表格      NuntTable（nunt-table）/ table(config) / applyTableConfig(node, config)
   表单      NuntForm（nunt-form）/ formGrid(fields) / NuntTags（nunt-tags）/ NuntKV（nunt-kv）

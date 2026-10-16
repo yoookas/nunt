@@ -10,6 +10,9 @@
 // GET /api/v1/waf/rules、GET /api/v1/waf/logs?limit=200（每 10 秒自动刷新）、
 // POST /api/v1/waf/test（{method,url,body,path}）、GET /api/v1/web/rules（未声明
 // bodyPolicy 路由的兜底来源）。本页没有 SSE 订阅；两个轮询定时器在 cleanup 里全部停掉。
+// 组件按需加载：只引本页用到的入口（kit 不再注册任何 sl-* 组件，见 lib/components/core.js）。
+import '../lib/components/feedback.js';
+import '../lib/components/form.js';
 import {
   NuntElement, html, nothing, define, renderInto, formGrid, openDialog, confirmDialog, toast,
   errorMessage, fmtBytes, fmtTime,
