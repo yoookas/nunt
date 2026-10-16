@@ -444,7 +444,6 @@ function showLogin(message) {
     cleanupCurrent = null;
   }
   clearNode(dom.app);
-  document.body.classList.remove('modal-open');
   const login = document.createElement('nunt-login');
   if (message) login.notice = String(message);
   dom.app.appendChild(login);

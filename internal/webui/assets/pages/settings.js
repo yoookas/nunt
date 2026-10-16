@@ -43,10 +43,12 @@ function pageStyle(root, css) {
 }
 
 /**
- * splitList 把「逗号/分号/空白分隔」的文本拆成数组。
- * 迁移前 ui.js formGrid 的 tags 字段就是普通文本框 + 同一个拆分正则，这里保持一致；
- * kit 的 nunt-tags 用 placeholder 当可见标签，会被 axe 判 label-title-only/serious，
- * 而 kit.js 不允许改，所以这两个字段继续用文本框（语义与迁移前完全相同）。
+ * splitList 把「逗号/分号/空白分隔」的文本拆成数组（提交体形状与迁移前完全一致）。
+ *
+ * 阶段 2 时这两个字段用的是普通文本框：当时 kit 的 nunt-tags 内层 sl-input 没有可访问名称，
+ * 会被 axe 判 label-title-only/serious，而 kit.js 在那一批不允许改。
+ * 阶段 3 给 nunt-tags 补上了 label（转交给内部 sl-input），两个字段因此换回 nunt-tags ——
+ * 回车/逗号/分号/换行都能加标签，值仍然是同一个字符串数组。
  */
 function splitList(value) {
   if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean);
@@ -166,7 +168,15 @@ class SettingsPage extends NuntElement {
       { name: 'trustProxy', label: '信任反向代理', type: 'switch', value: !!data.trustProxy, text: '使用 X-Forwarded-For 识别客户端 IP' },
       { name: 'checkUpdate', label: '检查更新', type: 'switch', value: data.checkUpdate !== false, text: '启动时检查新版本' },
       { name: 'theme', label: '默认主题', type: 'select', value: data.theme || 'dark', options: THEMES, hint: '仅作为新设备的默认值，本机选择保存在浏览器中' },
-      { name: 'adminAllowIps', label: '管理端 IP 白名单', value: Array.isArray(data.adminAllowIps) ? data.adminAllowIps.join(', ') : String(data.adminAllowIps || ''), wide: true, placeholder: '留空表示不限制，多个用逗号分隔', hint: '多个地址用逗号、分号或换行分隔' },
+      {
+        name: 'adminAllowIps',
+        label: '管理端 IP 白名单',
+        type: 'tags',
+        value: splitList(data.adminAllowIps),
+        wide: true,
+        placeholder: '输入 IP 或 CIDR 后按回车添加',
+        hint: '留空表示不限制；支持单个地址与 CIDR，回车 / 逗号 / 分号都能添加',
+      },
     ]);
   }
 
@@ -461,7 +471,14 @@ class SettingsPage extends NuntElement {
   openTokenEditor() {
     const form = formGrid([
       { name: 'name', label: '名称', value: '', placeholder: '例如：监控脚本' },
-      { name: 'scopes', label: '权限范围', value: '', placeholder: '留空表示默认权限，多个用逗号分隔', hint: '多个范围用逗号、分号或换行分隔' },
+      {
+        name: 'scopes',
+        label: '权限范围',
+        type: 'tags',
+        value: [],
+        placeholder: '输入范围后按回车添加',
+        hint: '留空表示默认权限；例如 read、write，回车 / 逗号都能添加',
+      },
     ]);
     this.openPageDialog({
       title: '新建 API Token',

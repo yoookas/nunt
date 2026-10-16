@@ -116,16 +116,21 @@ Lucky v1.10.8 源码（Go module 缓存里已下载好）：
   持久化在 `localStorage['nunt.theme']`，跨标签页用 `storage` 事件同步。
   nunt 的语义变量（`--bg/--bg-elev/--text/--brand/--ok/--warn/--err/...`）在 `style.css` 第 1 节里
   全部是 Shoelace token 的别名，浅色一套、深色一套 —— 页面里不要再写死颜色。
-- `style.css` 分层：1 主题 token 映射、2 基础排版、3 外壳布局、4 kit 组件样式、5 登录页、
-  6 **迁移期遗留层**（只服务还没迁到 kit 的老页面；阶段 2 每迁一页删一段，阶段 3 整节删除）。
+- `style.css` 分层：1 主题 token 映射、2 基础排版与工具类、3 外壳布局、4 kit 组件样式
+  （含 12 个页面共用的容器类 `.card/.card-header/.card-body/.sub/.notice`）、5 登录页。
+  阶段 3 已把原第 6 节「迁移期遗留层」（`.btn/.table/.field/.modal/.toast/...` 约 270 行、只服务老页面）
+  **整节删除**；现在页面只用第 2 节的工具类（`.mono/.muted/.row/.spacer/.hidden` 等）
+  与第 4 节的容器类，**不允许**再往 style.css 里加页面私有样式（写进页面、随 `mount` 的清理函数移除）。
 
 ### 7.2 目录
 
 - `index.html`：外壳，只引 3 个样式（`vendor/shoelace/themes/light.css`、`dark.css`、`style.css`）与 `/app.js`；
 - `app.js`：hash 路由、页面清单、动态 import、登录页、外壳（侧边栏/顶栏/窄屏 sl-drawer）、SSE、主题；
 - `lib/api.js`：API 客户端（自动带 `X-CSRF-Token`）——**不要改**；
-- `lib/kit.js`：共享组件层（表格/表单/反馈/对话框/状态块），页面一律用它；
-- `lib/ui.js`：迁移期遗留的手写构件，只服务老页面，阶段 3 删除；
+- `lib/kit.js`：共享组件层（表格/表单/反馈/对话框/状态块/容器类约定），页面一律用它；
+- `lib/ui.js`：**只剩 `app.js` 还需要的四个纯函数**（`renderIcon/fmtBytes/fmtTime/escapeHtml`），
+  手写构件（`el/modal/tableEl/formGrid/toast`…）已经没有调用方；kit 的 `fmtBytes/fmtTime/fmtDuration/escapeHtml`
+  是它的再导出。阶段 3 起**不要**再从页面 import 它（写新页面只用 kit）；
 - `pages/<id>.js`：页面模块。
 
 ### 7.3 页面模块契约（不变）
@@ -185,7 +190,7 @@ GET    /api/v1/events                    (SSE，消息格式 {"type":"log|status
 | --- | --- | --- |
 | 数据表格 | `nunt-table` 元素 / `table(config)` / `applyTableConfig(node, config)` | 原生 table + 设计 token。列定义 `{key,title,width,align,sortable,sort(row),render(row,i),actions}`；内置排序（点表头）、空状态、加载态、错误卡＋重试、分页（给了 `onPage` 就出现）；`title` 省略时按「操作」渲染，避免 axe 的 `empty-table-header`；`actions: true` 的列右对齐、不换行、统一包在 `.nunt-actions` 里（不会再被裁切） |
 | 表单 | `nunt-form` / `formGrid(fields)` | 字段定义与老的 `formGrid` 一致（text/password/number/url/email/textarea/select/switch/checkbox/tags/kv/custom，`wide` 跨列）；`read()/get()/set()/error(msg)/fieldError(name,msg)/toggle(name,show)`。标签交给 `sl-input/sl-select` 的 `label`，控件与标签天然关联（axe 的 `label`/`select-name` 不再报） |
-| 多行标签输入 | `nunt-tags` | 值是字符串数组；回车/逗号/换行都能加标签，可单独删除 |
+| 多行标签输入 | `nunt-tags` | 值是字符串数组；回车/逗号/分号/换行都能加标签，可单独删除。**`label` 必须传**（formGrid 的 `type:'tags'` 会自动把字段 label 转交进来）：内层 `sl-input` 的 `<input>` 在阴影里，没有可见标签时 axe 会判 `label-title-only/serious`。用 formGrid 时不要再自己渲染外层标签（`ownsLabel` 已包含 tags） |
 | 键值对编辑 | `nunt-kv` | 值是对象，用于自定义请求头之类 |
 | 反馈 | `toast(msg, tone)` / `confirmDialog(msg, opts)` / `promptDialog(msg, def)` / `badge(text, tone)` | `tone` 取 `ok/warn/err/info/neutral`；toast 用 `<sl-alert toast>` 进 Shoelace 右上角堆栈，`confirmDialog` 用 `sl-dialog` |
 | 空 / 加载 / 错误 | `emptyState()` / `loadingState()` / `errorCard(err, {onRetry})`（或 `nunt-empty` 等元素） | 错误文案走 `friendlyMessage()`：404 显示成人话，不把后端的 `404 page not found` 摊在界面上 |
@@ -295,10 +300,63 @@ export default {
 约定：
 
 - 页面模块契约与 `ctx` 语义**不变**（见 7.3）；页面内部怎么渲染随意，但请用 kit；
+- 页面骨架固定用容器类：`<section class="card">` + `<div class="card-header">`（`<h2>` 标题 +
+  `<span class="sub">` + `<span class="spacer">` + 右侧按钮）+ `<div class="card-body">`
+  （放表格时用 `class="card-body tight"` 去掉内边距），页内提示条用 `<div class="notice">`。
+  这些类定义在 `style.css` 第 4 节，页面不要再自带这几条样式；
 - 卡片标题用 `<h2>`：`<h1>` 是外壳顶栏的当前页标题，从 h3 起会被 axe 判 `heading-order`；
 - 每个 `ctx.api` 调用都要有 loading / error 分支，错误用 `errorCard` 或 `toast` 呈现；
 - 页面卸载时把 `disposed` 打开，异步回调不要再写已经卸载的节点；
 - 页面自己的样式（很少需要）写在页面里并随 `mount` 的清理函数移除，不要往 `style.css` 加。
+
+### 7.6 UI 测试怎么跑（阶段 3 固化）
+
+四层，全部是「真实二进制 + 无头 Chromium」，都不需要 npm 参与构建（Playwright / axe-core 只在 devDependencies）：
+
+| 脚本 | 覆盖 | 产物 / 退出码 |
+| --- | --- | --- |
+| `node scripts/vendor-smoke.mjs` | vendor 树完整性：组件注册、图标本地可取、零 404、零外部请求 | `docs/screenshots/vendor/`；失败非零退出 |
+| `node scripts/ui-smoke.mjs [--out dir] [--exe nunt.exe]` | **浅色主题**：登录 → 12 页挂载 + axe 四档 + 每页关键交互 + console/未捕获异常/失败请求/4xx·5xx/外部请求统计（66 个检查点） | `<out>/ui-smoke.json`、`ui-smoke.md`、`<out>/*.png`；任一检查失败或 axe 非 0 时非零退出 |
+| `node scripts/ui-baseline.mjs --out docs/screenshots/phaseX --label '...'` | **深色主题**：12 页整页截图 + 逐页 axe + console/请求统计 + 演示数据播种（含一条真实 TCP 转发连接，让「转发日志」对话框有真实数据） | `REPORT.md` / `a11y.json` / `baseline.json` + 13 张截图 |
+| `node scripts/theme-check.mjs` | 浅色主题与窄屏外壳（420x900 侧栏收进 sl-drawer） | `docs/screenshots/phase1/` |
+
+另有 `node scripts/kit-smoke.mjs`（notify 页的 kit 全链路：新建 → 校验 → 保存 → 删除）。
+
+前置：`go build -o nunt.exe ./cmd/nunt`（脚本默认用仓库根的 `nunt.exe`，可用 `--exe` 指定）。
+两个 Playwright 脚本默认**自己起一个临时实例**（数据目录在 `.gocache/` 下，结束即删），
+也可以 `--base http://127.0.0.1:16601 --password <管理员密码>` 连一个已在运行的实例；
+它们都只用默认管理端口 16601（`nunt` 的默认监听地址，脚本不写配置文件）。
+
+CI：`.github/workflows/ci.yml` 的 `frontend` job（**独立 job**，不影响 Go / Docker / govulncheck 的耗时）：
+
+```bash
+pnpm install --frozen-lockfile
+pnpm exec playwright install --with-deps chromium
+go build -o nunt ./cmd/nunt
+node scripts/ui-smoke.mjs --exe ./nunt --out artifacts/ui-smoke
+node scripts/ui-baseline.mjs --exe ./nunt --out artifacts/ui-baseline --label ci
+# 截图与报告作为 artifact 上传（if: always()，失败的那次最需要看）
+```
+
+### 7.7 已知限制（阶段 3 结论，别再重复踩）
+
+1. **sl-dialog 的 landmark 误报（已用运行时补丁消除）**：`sl-dialog` 的阴影 DOM 里有一个 `<header>`，
+   它在 ARIA 里映射成 banner landmark；对话框一打开页面就有两个 banner，axe 报
+   `landmark-no-duplicate-banner` + `landmark-unique`（`.topbar` 是被指向的那个）。
+   kit 的 `openDialog()` 在挂载后把对话框阴影里那个 header 降级为 `role="presentation"`
+   （**运行时补丁，不改 vendor 文件**；拿不到阴影就静默跳过，最坏退化成这条限制）。
+   对话框本身不受影响：面板仍然由 `aria-labelledby="title"` 指向阴影里的 `<h2>`，可访问名称不变。
+   `scripts/ui-smoke.mjs` 里有一条「对话框打开时没有 sl-dialog 的 landmark 误报」的检查点守着它；
+   **升级 Shoelace 之后必须重新确认这条补丁仍然命中**（`kit.js` 的 `demoteDialogHeader`，选择器取自 `<header part="header">`）。
+2. **axe 的 `label-title-only` 对滚出视口的控件误判**：Shoelace 控件的阴影 `<input>` 永远带
+   `aria-describedby="help-text"`；控件被滚出对话框的可视区时 axe 认为它「没有可见标签」，
+   于是报 serious。它与滚动位置相关（同一个控件滚回视口内就消失），只会出现在**对话框内部的长表单**上；
+   12 页的页面级扫描不受影响（都是 0）。给控件传 `label`（而不是 `aria-label`）才是真正的修法。
+3. **`nunt-tags` 必须传 `label`**（见 7.4），否则内层 `sl-input` 同样命中 `label-title-only`。
+   位置固定：标签输入框在上、已添加的标签在下面（label 由 `sl-input` 渲染，`nunt-form` 不再重复渲染外层标签）。
+4. **`lib/ui.js` 仍在仓库里**：只剩 `app.js` 需要的四个纯函数（`renderIcon/fmtBytes/fmtTime/escapeHtml`），
+   手写构件（`el/modal/tableEl/formGrid/toast`…）已经没有任何调用方，kit 只是再导出其中四个格式化函数。
+   彻底删除需要先把 `renderIcon` 搬进 kit（属独立改动，见 `docs/FRONTEND-REPORT.md` 的未完成项）。
 
 ---
 

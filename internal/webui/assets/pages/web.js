@@ -148,6 +148,18 @@ function numVal(v, dflt) {
   return isFinite(n) ? n : (dflt === undefined ? 0 : dflt);
 }
 
+// RULE_READONLY_FIELDS：/api/v1/web/rules 的每一项都是 model.WebRule 加这几个由后端
+// 计算出来的运行态字段（见 internal/modules/web/api.go 的 ruleView）。PUT 走的是
+// rest.Decode + DisallowUnknownFields，原样回传必然 400，所以写回前统一剥掉。
+const RULE_READONLY_FIELDS = ['active', 'upstreams', 'requests', 'configError'];
+
+// writableRule 返回一份只含可写字段的规则副本（浅拷贝 + 删除只读键），可附加覆盖值。
+function writableRule(rule, patch) {
+  const out = Object.assign({}, rule || {});
+  for (const key of RULE_READONLY_FIELDS) delete out[key];
+  return Object.assign(out, patch || {});
+}
+
 function tlsLabel(r) {
   const mode = (r && r.tls && r.tls.mode) || 'off';
   return TLS_LABEL[mode] || '关闭';
@@ -445,7 +457,9 @@ class WebPage extends NuntElement {
         await this.ctx.api.post('/api/v1/web/rules/' + encodeURIComponent(rule.id) + '/toggle');
       } catch (err) {
         // 兼容没有 toggle 路由的旧后端：退回整条规则的更新（与迁移前一致）。
-        await this.ctx.api.put('/api/v1/web/rules/' + encodeURIComponent(rule.id), Object.assign({}, rule, { enable: want }));
+        // 列表返回的对象带着后端计算出来的只读字段（active / upstreams / requests / configError），
+        // 而 PUT 走的是 rest.Decode + DisallowUnknownFields，原样回传必然 400 —— 必须先剥掉。
+        await this.ctx.api.put('/api/v1/web/rules/' + encodeURIComponent(rule.id), writableRule(rule, { enable: want }));
       }
       if (this.disposed) return;
       toast(want ? '已启用' : '已停用', 'ok');
@@ -582,6 +596,26 @@ class WebPage extends NuntElement {
       },
       { name: 'proxyHostHeader', label: 'Host 头', value: proxy.hostHeader || '', placeholder: '留空透传客户端 Host' },
       { name: 'proxyTimeout', label: '超时（秒）', type: 'number', value: Number(proxy.timeoutSec) || 0, min: 0, placeholder: '0 表示默认' },
+      // P0 加固项：后端 model.ProxyTarget 支持按客户端限速与请求体上限，界面必须能配。
+      // 两个字段都是 0 = 不限制（也是后端的默认值），提交时用 omitempty 语义（0 等于不写）。
+      {
+        name: 'proxyRateLimit',
+        label: '限速（请求/秒）',
+        type: 'number',
+        value: Number(proxy.rateLimitPerSec) || 0,
+        min: 0,
+        placeholder: '0 表示不限制',
+        hint: '按客户端地址限速，超出的请求直接返回 429 并带 Retry-After；0 表示不限制',
+      },
+      {
+        name: 'proxyMaxBody',
+        label: '请求体上限（字节）',
+        type: 'number',
+        value: Number(proxy.maxBodyBytes) || 0,
+        min: 0,
+        placeholder: '0 表示不限制',
+        hint: '超过上限的请求直接返回 413，请求体不会被转发；0 表示不限制（1048576 = 1 MiB）',
+      },
       { name: 'proxyInsecure', label: '上游证书', type: 'switch', value: !!proxy.insecureTls, text: '跳过上游证书校验' },
       { name: 'proxyNoCompress', label: '压缩', type: 'switch', value: !!(proxy.disableCompression || proxy.disableCompres), text: '禁用压缩' },
       { name: 'proxyH2C', label: '上游协议', type: 'switch', value: !!proxy.h2c, text: 'h2c（明文 HTTP/2 上游，原生 gRPC 常用）' },
@@ -803,6 +837,9 @@ class WebPage extends NuntElement {
                 // 这里改成后端认识的键名，勾选真正生效；h2c 是本批按验收要求补上的同族开关。
                 disableCompression: !!values.proxyNoCompress,
                 h2c: !!values.proxyH2C,
+                // 后端把 0 当作「不限制」，且两个字段都是 omitempty，所以 0 直接提交也不会改变行为。
+                rateLimitPerSec: numVal(values.proxyRateLimit, 0),
+                maxBodyBytes: numVal(values.proxyMaxBody, 0),
               };
             } else if (kind === 'redirect') {
               payload.redirect = { to: redirectTo, status: numVal(values.redirectStatus, 302), keepPath: !!values.redirectKeep };

@@ -16,6 +16,7 @@
  * 用法：
  *   node scripts/ui-baseline.mjs [--exe nunt.exe] [--port 16601] [--out docs/screenshots/before]
  *                                [--data-dir <dir>] [--keep-data] [--headed] [--settle 800]
+ *                                [--forward-port 12222] [--echo-port 12223]
  */
 
 import { spawn } from 'node:child_process';
@@ -50,6 +51,7 @@ function parseArgs(argv) {
     settle: 800,
     webPort: 18080,
     forwardPort: 12222,
+    echoPort: 12223,
     label: '迁移前',
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -63,6 +65,7 @@ function parseArgs(argv) {
       case '--settle': opts.settle = Number(next()); break;
       case '--web-port': opts.webPort = Number(next()); break;
       case '--forward-port': opts.forwardPort = Number(next()); break;
+      case '--echo-port': opts.echoPort = Number(next()); break;
       case '--label': opts.label = next(); break;
       case '--keep-data': opts.keepData = true; break;
       case '--headed': opts.headed = true; break;
@@ -218,6 +221,67 @@ async function startServer(opts, dataDir) {
   return { child, base, password, out };
 }
 
+/* ------------------------------------------------------------------ 转发目标（本机 TCP 回显服务） */
+
+// startEchoServer 起一个本机 TCP 回显服务，充当端口转发规则的真实目标。
+// 为什么需要：转发规则的访问日志只有在真的有连接经过时才有内容，
+// 「转发日志」对话框否则永远是空态（批次 B 记录的未决项）。
+function startEchoServer(port) {
+  return new Promise((resolve, reject) => {
+    const sockets = new Set();
+    const server = net.createServer((socket) => {
+      sockets.add(socket);
+      socket.on('error', () => {});
+      socket.on('close', () => sockets.delete(socket));
+      socket.setEncoding('utf8');
+      socket.write('nunt-forward-demo\n');
+      socket.on('data', (chunk) => { socket.write(chunk); });
+    });
+    server.on('error', reject);
+    server.listen(port, '127.0.0.1', () => resolve({
+      port,
+      close: () => new Promise((done) => {
+        for (const socket of sockets) socket.destroy();
+        server.close(() => done());
+      }),
+    }));
+  });
+}
+
+// runForwardProbe 通过转发的监听地址真的建一条 TCP 连接：连上后发一行、等回显、再关闭。
+// 走的是完整的「客户端 → forward 监听 → 目标」链路，因此在规则的访问日志里留下一条真实记录。
+function runForwardProbe(addr, timeoutMs) {
+  const [host, portText] = String(addr).split(':');
+  const port = Number(portText);
+  return new Promise((resolve) => {
+    let received = '';
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (quiet) clearTimeout(quiet);
+      try { socket.destroy(); } catch (err) { /* 忽略 */ }
+      resolve(result);
+    };
+    let quiet = null;
+    const socket = net.connect({ host: host || '127.0.0.1', port });
+    const timer = setTimeout(() => finish(received.length
+      ? { ok: true, received }
+      : { ok: false, error: '连接或回显超时（' + timeoutMs + 'ms）' }), timeoutMs);
+    socket.setEncoding('utf8');
+    socket.on('connect', () => { socket.write('nunt-forward-probe\n'); });
+    // 转发链路不会主动关闭连接（中转是双向长连接），收到回显后等一小段静默就判定成功。
+    socket.on('data', (chunk) => {
+      received += chunk;
+      if (quiet) clearTimeout(quiet);
+      quiet = setTimeout(() => finish({ ok: true, received }), 300);
+    });
+    socket.on('error', (err) => finish({ ok: false, error: String((err && err.message) || err) }));
+    socket.on('close', () => finish(received.length ? { ok: true, received } : { ok: false, error: '连接被关闭但没有回显' }));
+  });
+}
+
 function stopServer(server) {
   return new Promise((resolve) => {
     if (!server || !server.child || server.child.exitCode !== null) { resolve(); return; }
@@ -335,19 +399,68 @@ async function seedDemoData(client, opts, www) {
     remark: '基线演示数据',
   });
 
-  /* 4. 端口转发规则 */
-  await step('端口转发规则', 'post', '/api/v1/forward/rules', {
+  /* 4. 端口转发规则：目标指向本机回显服务，这样下面那条真实连接会留下访问日志 */
+  const forwardRule = await step('端口转发规则', 'post', '/api/v1/forward/rules', {
     name: '演示 TCP 转发',
     enable: true,
     protocol: 'tcp',
     srcAddr: '127.0.0.1:' + opts.forwardPort,
-    dstAddr: '127.0.0.1:22',
+    dstAddr: '127.0.0.1:' + opts.echoPort,
     access: { mode: 'off' },
     timeoutSec: 300,
     maxConns: 200,
     maxConnsPerIP: 50,
     remark: '基线演示数据',
   });
+  const forwardRuleId = forwardRule && forwardRule.data ? forwardRule.data.id : '';
+
+  /* 4b. 真的通过转发端口走一条 TCP 连接，让「转发日志」对话框有真实数据 */
+  if (forwardRuleId) {
+    const target = '127.0.0.1:' + opts.forwardPort;
+    let traffic = { ok: false, error: '规则未创建成功' };
+    // 规则创建后转发监听是异步起来的，给它一点时间（最多 6 秒）。
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      traffic = await runForwardProbe(target, 3000);
+      if (traffic.ok) break;
+      await sleep(500);
+    }
+    steps.push({
+      name: '端口转发：真实 TCP 连接',
+      method: 'TCP',
+      path: target,
+      status: traffic.ok ? 200 : 0,
+      ok: !!traffic.ok,
+      error: traffic.ok ? '' : (traffic.error || '没有收到回显'),
+      id: forwardRuleId,
+      note: traffic.ok
+        ? '收到 ' + Buffer.byteLength(traffic.received, 'utf8') + ' 字节回显（' + target + ' → 127.0.0.1:' + opts.echoPort + '）'
+        : '',
+    });
+
+    // 访问日志是连接关闭后异步写入的；轮询一小会儿再断言字段名。
+    let entries = [];
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const logs = await client.get('/api/v1/forward/logs?rule=' + encodeURIComponent(forwardRuleId) + '&limit=5');
+      entries = (logs.data && Array.isArray(logs.data.items)) ? logs.data.items : [];
+      if (entries.length) break;
+      await sleep(300);
+    }
+    const first = entries[0] || {};
+    // forward 页读的字段：time/client/target/bytesIn/bytesOut（见 pages/forward.js 的 logLine）。
+    const missing = ['time', 'client', 'target', 'bytesIn', 'bytesOut'].filter((key) => first[key] === undefined);
+    steps.push({
+      name: '端口转发：访问日志字段（真实后端输出）',
+      method: 'GET',
+      path: '/api/v1/forward/logs?rule=' + forwardRuleId + '&limit=5',
+      status: 200,
+      ok: entries.length > 0 && missing.length === 0,
+      error: entries.length === 0 ? '连接之后日志仍然为空' : (missing.length ? '缺少字段：' + missing.join(', ') : ''),
+      id: forwardRuleId,
+      note: entries.length
+        ? entries.length + ' 条；最新 ' + first.client + ' → ' + first.target + '，上行 ' + first.bytesIn + ' / 下行 ' + first.bytesOut + ' 字节'
+        : '',
+    });
+  }
 
   /* 5. DDNS 规则 */
   await step('DDNS 规则', 'post', '/api/v1/ddns/rules', {
@@ -431,7 +544,12 @@ async function seedDemoData(client, opts, www) {
   await step('API Token', 'post', '/api/v1/auth/tokens', { name: '演示只读 Token', scopes: ['read'] });
   await step('第二个管理员账号', 'post', '/api/v1/auth/users', { username: 'demo-operator', password: 'demo-operator-2024', enabled: true });
 
-  return { steps, mountId: mount && mount.data ? mount.data.id : '', staticRuleId: staticRule && staticRule.data ? staticRule.data.id : '' };
+  return {
+    steps,
+    mountId: mount && mount.data ? mount.data.id : '',
+    staticRuleId: staticRule && staticRule.data ? staticRule.data.id : '',
+    forwardRuleId,
+  };
 }
 
 /* ------------------------------------------------------------------ 浏览器采集 */
@@ -691,7 +809,8 @@ function buildReport(data) {
   push('| 步骤 | 请求 | 状态 | 结果 |', '| --- | --- | --- | --- |');
   for (const s of data.seed.steps) {
     push('| ' + s.name + ' | ' + B + s.method + ' ' + s.path + B + ' | ' + s.status + ' | ' +
-      (s.ok ? 'OK' + (s.id ? '（id=' + s.id + '）' : '') : '**失败**：' + s.error) + ' |');
+      (s.ok ? 'OK' + (s.id ? '（id=' + s.id + '）' : '') : '**失败**：' + s.error) +
+      (s.note ? '；' + s.note : '') + ' |');
   }
   push('', '## 3. 逐页结果', '');
   const login = data.login;
@@ -789,14 +908,18 @@ async function main() {
   await fsp.mkdir(dataDir, { recursive: true });
   log('数据目录 ' + dataDir);
 
-  for (const port of [opts.port, opts.webPort, opts.webPort + 1, opts.forwardPort]) {
+  for (const port of [opts.port, opts.webPort, opts.webPort + 1, opts.forwardPort, opts.echoPort]) {
     if (!(await waitFree(port, 60))) throw new Error('端口 ' + port + ' 被占用超过 60 秒，基线脚本需要干净端口');
   }
 
   const www = await prepareSampleSite(dataDir);
   let server = null;
+  let echo = null;
   let exitCode = 0;
   try {
+    // 转发规则的目标：本机 TCP 回显服务（演示数据里的转发会真的连到它）。
+    echo = await startEchoServer(opts.echoPort);
+    log('转发目标回显服务已监听 127.0.0.1:' + echo.port);
     server = await startServer(opts, dataDir);
     log('服务就绪：' + server.base + '（已从 stdout 抓到初始管理员密码）');
 
@@ -882,6 +1005,7 @@ async function main() {
     process.stderr.write('[baseline] 失败：' + ((err && err.stack) || err) + '\n');
   } finally {
     await stopServer(server);
+    if (echo) await echo.close();
     if (!opts.keepData) {
       await fsp.rm(dataDir, { recursive: true, force: true }).catch(() => {});
     } else {

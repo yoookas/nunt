@@ -317,7 +317,10 @@ class ForwardPage extends NuntElement {
   logLine(item, index) {
     if (typeof item === 'string') return html`<div class="pforward-log-line">${item}</div>`;
     const time = fmtTime(item.time || item.ts || item.at);
-    const src = item.src || item.source || item.clientAddr || item.remoteAddr || '-';
+    // 后端的真实字段是 client（internal/modules/forward/logs.go 的 accessEntry），
+    // 迁移前只读 src/source/clientAddr/remoteAddr，于是来源列永远显示「-」。真实字段提到最前，
+    // 其余别名继续兜底老数据。
+    const src = item.client || item.src || item.source || item.clientAddr || item.remoteAddr || '-';
     const dst = item.dst || item.target || item.dstAddr || '-';
     const bytes = (item.bytesIn !== undefined || item.bytesOut !== undefined)
       ? '  上行 ' + fmtBytes(item.bytesIn || 0) + ' / 下行 ' + fmtBytes(item.bytesOut || 0) : '';

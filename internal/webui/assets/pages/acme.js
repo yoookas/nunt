@@ -30,7 +30,11 @@ const TAB = String.fromCharCode(9);
 const ISSUE_POLL_MS = 5000;
 
 const CHALLENGE_LABEL = { 'http-01': 'HTTP-01', 'dns-01': 'DNS-01', 'tls-alpn-01': 'TLS-ALPN-01' };
-const KEY_LABEL = { ecdsa: 'ECDSA P-256', rsa2048: 'RSA 2048', rsa4096: 'RSA 4096' };
+// 密钥类型必须与后端 acme.normalizeKeyType 的取值一致：ec256 / ec384 / rsa2048 / rsa4096，
+// 空串在后端等同于 ec256。迁移前这里给的是 ecdsa，被后端以 unknown key type 400 拒绝
+// （阶段 2C 记录的未决项，阶段 3 修正）。ecdsa 只是历史别名，仅用于读回旧数据时显示。
+const KEY_LABEL = { ec256: 'ECDSA P-256', ec384: 'ECDSA P-384', rsa2048: 'RSA 2048', rsa4096: 'RSA 4096', ecdsa: 'ECDSA P-256' };
+const KEY_DEFAULT = 'ec256';
 
 const CHALLENGE_OPTIONS = [
   { value: 'http-01', label: 'HTTP-01（需要 80 端口可访问）' },
@@ -39,11 +43,18 @@ const CHALLENGE_OPTIONS = [
 ];
 
 const KEY_OPTIONS = [
-  { value: '', label: '使用全局默认' },
-  { value: 'ecdsa', label: 'ECDSA P-256' },
+  { value: 'ec256', label: 'ECDSA P-256（默认）' },
+  { value: 'ec384', label: 'ECDSA P-384' },
   { value: 'rsa2048', label: 'RSA 2048' },
   { value: 'rsa4096', label: 'RSA 4096' },
 ];
+
+/** keyTypeValue：后端不认识的历史值（ecdsa、空串）统一归一到 ec256，保证下拉一定有选中项。 */
+function keyTypeValue(v) {
+  const raw = String(v === undefined || v === null ? '' : v).trim().toLowerCase();
+  if (!raw || raw === 'ecdsa') return KEY_DEFAULT;
+  return KEY_LABEL[raw] ? raw : KEY_DEFAULT;
+}
 
 /* ------------------------------------------------------------------ 局部样式 */
 
@@ -499,7 +510,7 @@ class AcmePage extends NuntElement {
       { name: 'name', label: '名称', value: base.name || '', placeholder: '例如 主站证书' },
       { name: 'enable', label: '启用', type: 'switch', value: base.enable !== false, text: '启用（参与自动续期）' },
       { name: 'domains', label: '域名', type: 'textarea', rows: 4, wide: true, value: (base.domains || []).join(EOL), placeholder: '每行一个域名：' + EOL + 'example.com' + EOL + '*.example.com', hint: '每行一个；泛域名必须使用 DNS-01' },
-      { name: 'keyType', label: '密钥类型', type: 'select', value: base.keyType || '', options: KEY_OPTIONS },
+      { name: 'keyType', label: '密钥类型', type: 'select', value: keyTypeValue(base.keyType), options: KEY_OPTIONS, hint: '写入证书私钥的算法；所有取值后端都支持' },
       {
         name: 'challenge',
         label: '挑战方式',
@@ -571,7 +582,7 @@ class AcmePage extends NuntElement {
               name,
               enable: !!values.enable,
               domains: list,
-              keyType: String(values.keyType || ''),
+              keyType: keyTypeValue(values.keyType),
               challenge: challenge || 'http-01',
               dnsProvider,
               dnsCreds: outCreds,
@@ -828,7 +839,7 @@ class AcmePage extends NuntElement {
         key: 'keyType',
         title: '密钥',
         width: 130,
-        render: (row) => html`<span>${KEY_LABEL[row.keyType] || row.keyType || '默认'}</span>`,
+        render: (row) => html`<span>${KEY_LABEL[String(row.keyType || '').toLowerCase()] || row.keyType || '—'}</span>`,
       },
       {
         key: 'renewDays',

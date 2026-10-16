@@ -1,5 +1,14 @@
 # 前端迁移计划：全面改用 Web Components 组件库
 
+> **状态：阶段 0–3 已全部完成**（2026-10）。
+> 12 个页面在深/浅两个主题下 axe 四档（critical/serious/moderate/minor）全部为 0；
+> 阶段 3 这一批整棵资源树**净减 5,562 字节原始**（gzip +1,039 / br(q6) +707）；
+> 相对真正的迁移前（17 个文件、无 vendor）：原始 +668,670（+122.9%）、br(q6) +183,901 ——
+> 增量几乎全是 vendor 组件层（+682,330 原始 / +186,060 br），**自有代码净减 13,660 原始 / 2,159 br**；
+> 构建链仍然无 npm（`go:embed` 单二进制），零外部请求，页面契约与 `ctx` 语义未变。
+> 最终对比报告（体积 / axe / 首屏传输 / 截图索引 / 迁移期修掉的真实缺陷清单）见
+> [FRONTEND-REPORT.md](FRONTEND-REPORT.md)；接口与测试口径见 [CONTRACT.md 第 7 节](CONTRACT.md)。
+
 > 决策：放弃手写 DOM 组件层，前端整体改用现成的 Web Components 控件库（Shoelace 2.x，MIT）
 > ＋ Lit 作为自研组件的编写层。路由、页面契约（mount(root, ctx)）、lib/api.js、Go 侧 embed 与 CSP 策略保持不变。
 
@@ -20,12 +29,20 @@
 
 ## 2. 阶段划分
 
-### 阶段 0：基线（先做，1 小时内）
+### 阶段 0：基线（先做，1 小时内）— ✅ 已完成
+
+> 产物：`docs/screenshots/before/`（12 页 + 登录页截图、`a11y.json`、`baseline.json`、`REPORT.md`、`VISUAL-REVIEW.md`）。
+> 基线数字：整棵资源树 303 个文件 1,203,945 字节原始 / 357,727 gzip / 328,996 br(q6)；
+> 12 页 axe 合计 critical 26 / serious 110 / moderate 188 / minor 7。
 - Playwright 无头浏览器：启动真实二进制（临时数据目录）→ 登录 → 通过 API 造演示数据（静态规则、转发规则、DDNS 规则、WAF 配置、通知 webhook、任务）→ 逐页截图 12 张 → 输出到 docs/screenshots/before/；
 - 同时跑一次 axe 无障碍扫描，记录严重问题数量；记录每个页面的控制台报错；
 - 产出：基线截图 + 视觉缺陷清单（这就是用户观察到的「样式有问题」的书面证据，也是迁移后对比的基准）。
 
-### 阶段 1：地基（串行，必须先做）
+### 阶段 1：地基（串行，必须先做）— ✅ 已完成
+
+> 静态资源预压缩（gzip/br，内存缓存 + `Vary: Accept-Encoding`，不落盘、无构建步骤）、
+> vendor Shoelace + Lit、主题 token 映射、外壳与登录页重写、`lib/kit.js` 落地。
+> 记录：`docs/screenshots/phase1/`（含 `light-notify.png`、`narrow-drawer.png`、`kit-smoke.json`）。
 - **静态资源预压缩（必做）**：目前 http.FileServer 直接吐源码，544KB 全是明文传输。改为在响应时压缩并缓存
   （首次请求时 gzip/brotli 压缩一次，之后从内存缓存返回），响应带 Content-Encoding 与 Vary: Accept-Encoding，
   并保持 ETag/条件请求语义。要求：不落盘、不增加构建步骤，纯 Go 实现（约 40 行 + 测试）。
@@ -35,13 +52,31 @@
 - 外壳重写：侧边栏、顶栏、导航、主题切换、SSE 状态、登录页改用组件库；路由与页面装载逻辑保持不变；
 - 验收：CSP 零违规、零外部请求（Playwright 抓请求）、embed 构建通过、登录 → 12 个页面均可打开（内容仍为旧实现）。
 
-### 阶段 2：页面迁移（可并行，2–3 页一组）
+### 阶段 2：页面迁移（可并行，2–3 页一组）— ✅ 已完成（批次 A/B/C/D）
+
+> 12 页全部迁移，批次记录（改动、axe、体积、踩坑）分别在
+> `docs/screenshots/phase2a|2b|2c|2d/PHASE2*-NOTES.md`。
+> 迁移期修掉的真实缺陷（7 页 h3 渲染、版本号 `[object Object]`、files 页 404 原文、
+> 代理规则存不下来、负载均衡取值不认、WAF 测试接口 400、BasicAuth 空密码删用户、
+> 页面方法遮蔽 DOM `remove`、sl-switch 无可见标签、对话框页脚按钮时序）汇总在
+> [FRONTEND-REPORT.md](FRONTEND-REPORT.md) 第 6 节（阶段 3 又补了 8 条，共 18 条）。
 - 顺序建议：notify → logs → dashboard → settings → storage → files → forward → task → ddns → acme → web → waf（先小后大，waf/web 最后，因为字段最多）；
 - 每页替换 lib/ui.js 的手写构件（按钮/输入/下拉/开关/标签页/对话框/表格/提示/徽标）为 sl- 组件；需要局部状态时用 Lit 组件（light DOM，createRenderRoot 返回 this，以复用全局样式）；
 - 保持该页所有既有接口调用与字段行为不变（迁移只换渲染层，不改数据流）；
 - 每页迁移后跑一次 Playwright 流程 + 截图，与 before 对照。
 
-### 阶段 3：收尾与验证
+### 阶段 3：收尾与验证 — ✅ 已完成
+
+> - `style.css` 原第 6 节「迁移期遗留层」整节删除（30,904 → 18,469 字节，748 → 519 行，−12,435 字节），
+>   12 页共用的容器类（.card/.card-header/.card-body/.sub/.notice）搬到第 4 节；
+> - 四处真实缺陷修正（ACME 密钥类型、DDNS 失败计数、未启用规则的手动执行提示、
+>   代理的 rateLimitPerSec/maxBodyBytes + toggle 回退剥只读字段）；
+> - `nunt-tags` 补 `label`（消掉 `label-title-only`），settings 页两个字段换回标签输入；
+>   sl-dialog 的 landmark 误报用运行时补丁消除（不改 vendor）；
+> - UI 测试固化：新增 `scripts/ui-smoke.mjs`（浅色主题 + 逐页交互 + 66 个检查点，失败非零退出），
+>   `ui-baseline.mjs` 补真实 TCP 转发连接；
+> - CI 新增独立的 `frontend` job（Playwright + axe + 截图 artifact）；
+> - 文档：CONTRACT 第 7 节定稿、README 前端小节、本计划状态、`docs/FRONTEND-REPORT.md` 最终对比报告。
 - 删除或大幅精简 lib/ui.js（只保留确实通用的格式化与 api 相关工具）；
 - 测试升级：现在的 DOM-shim 冒烟测试改为 happy-dom 或 Playwright 驱动（否则自定义元素无法在 Node 里跑）；CI 增加前端 Playwright job（无头，截图作为 artifact）；
 - 文档：docs/CONTRACT.md 第 7 节改写（前端栈、vendor 策略与升级方式、主题 token 映射、新增页面模板）；README 前端小节同步；

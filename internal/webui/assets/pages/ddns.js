@@ -94,7 +94,10 @@ function firstNumber(source, keys) {
 }
 
 function successCount(s) { return firstNumber(s, ['success', 'successCount']); }
-function failCount(s) { return firstNumber(s, ['fail', 'failCount', 'failures']); }
+// 后端 /api/v1/ddns/status 的真实字段是 failures；旧页面读的是 fail / failCount，
+// 于是「失败」永远显示 0（阶段 2C 记录的缺陷）。阶段 3 把真实字段提到回退链最前，
+// 旧字段只作为老后端 / 老数据形状的兜底。
+function failCount(s) { return firstNumber(s, ['failures', 'fail', 'failCount']); }
 
 // statusOf：/ddns/status 可能是数组（[{id,...}]）或按 id 的映射表（迁移前同款兼容）。
 function statusOf(map, id) {
@@ -473,7 +476,15 @@ class DdnsPage extends NuntElement {
   }
 
   // runNow：POST /rules/{id}/run，把返回的 IP 或错误用 toast 呈现（迁移前同款回退链）。
+  //
+  // 未启用的规则后端是静默 no-op（runRule 开头 `if rule == nil || !rule.Enable { return }`），
+  // 但 /run 仍然返回 ok:true —— 迁移前后界面都会因此提示「执行成功」，属于假成功。
+  // 这里在点击时就按规则的启用状态给出真实结论，不再发这次无意义的请求。
   async runNow(rule) {
+    if (rule && rule.enable === false) {
+      toast('该规则未启用，已跳过', 'warn');
+      return;
+    }
     this.busyId = String(rule.id || '');
     toast('正在执行「' + (rule.name || rule.id) + '」…', 'info');
     try {

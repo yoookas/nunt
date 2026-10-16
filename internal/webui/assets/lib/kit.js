@@ -550,12 +550,14 @@ export function applyTableConfig(node, config) {
  * NuntTags：多行标签输入（值是一个数组）。
  * 输入框里回车/逗号/分号/换行都会变成一枚标签；粘贴多行文本会一次拆成多个标签；
  * 每枚标签可以单独删除。value 始终是当前标签数组。
+ * label 会转交给内部的 sl-input（阴影里的 <input> 需要可见标签，否则 axe 判 label-title-only）。
  */
 export class NuntTags extends NuntElement {
   static properties = {
     value: { attribute: false },
     placeholder: { type: String },
     disabled: { type: Boolean },
+    label: { type: String },
   };
 
   constructor() {
@@ -564,6 +566,10 @@ export class NuntTags extends NuntElement {
     this.placeholder = '输入后按回车添加';
     this.disabled = false;
     this.input = '';
+    // label 是必须的：内层 sl-input 的真实 <input> 在 shadow DOM 里只带
+    // aria-describedby="help-text"，没有可访问名称时 axe 会判 label-title-only/serious。
+    // 只有把 label 交给 sl-input，阴影里的 <label for="input"> 才会渲染出可见文字。
+    this.label = '';
   }
 
   willUpdate() {
@@ -594,14 +600,11 @@ export class NuntTags extends NuntElement {
 
   render() {
     const items = Array.isArray(this.value) ? this.value : [];
+    // 顺序：先把带可见 label 的输入框放在最上面（label 由 sl-input 渲染，控件与标签天然关联），
+    // 已添加的标签排在下面。这样 nunt-form 里就不需要再渲染一遍外层标签。
     return html`<div class=${classMap({ 'nunt-tags': true, 'is-disabled': !!this.disabled })}>
-      ${items.length
-        ? html`<div class="nunt-tags-list">
-            ${items.map((item, index) => html`<sl-tag size="small" removable ?disabled=${!!this.disabled}
-              @sl-remove=${() => this.remove(index)}>${item}</sl-tag>`)}
-          </div>`
-        : nothing}
-      <sl-input size="small" .value=${this.input} placeholder=${this.placeholder} ?disabled=${!!this.disabled}
+      <sl-input size="small" label=${this.label || nothing} .value=${this.input}
+        placeholder=${this.placeholder} ?disabled=${!!this.disabled}
         @sl-input=${(event) => { this.input = event.target.value; }}
         @keydown=${(event) => {
           if (event.key === 'Enter' || event.key === ',' || event.key === '，') {
@@ -612,6 +615,12 @@ export class NuntTags extends NuntElement {
           }
         }}
         @sl-change=${() => { if (this.input) this.add(this.input); }}></sl-input>
+      ${items.length
+        ? html`<div class="nunt-tags-list">
+            ${items.map((item, index) => html`<sl-tag size="small" removable ?disabled=${!!this.disabled}
+              @sl-remove=${() => this.remove(index)}>${item}</sl-tag>`)}
+          </div>`
+        : nothing}
     </div>`;
   }
 }
@@ -809,7 +818,10 @@ export class NuntForm extends NuntElement {
       </sl-select>`;
     }
     if (type === 'tags') {
+      // 标签交给 nunt-tags 内部的 sl-input（light DOM 没有 slot，所以用属性传），
+      // nunt-form 因此不再重复渲染外层标签（见 renderField 的 ownsLabel）。
       return html`<nunt-tags class=${classMap({ 'nunt-control': true, 'is-invalid': invalid })} data-nunt-field=${name}
+        label=${field.label === false || field.label === undefined ? nothing : String(field.label)}
         .value=${Array.isArray(value) ? value : []} ?disabled=${!!field.disabled}
         placeholder=${field.placeholder || '输入后按回车添加，支持逗号或换行分隔'}
         @nunt-change=${(event) => this.track(field, event.detail.value)}></nunt-tags>`;
@@ -835,9 +847,10 @@ export class NuntForm extends NuntElement {
     if (!field) return nothing;
     const type = field.type || 'text';
     const name = String(field.name || '');
-    // sl-input / sl-select / sl-textarea 自己带 label（控件与标签天然关联），
-    // 只有 switch/checkbox/tags/kv/custom 需要我们自己渲染一行标签。
-    const ownsLabel = type === 'text' || type === 'password' || type === 'number' || type === 'url' || type === 'email' || type === 'textarea' || type === 'select';
+    // sl-input / sl-select / sl-textarea 自己带 label（控件与标签天然关联）；
+    // tags 把 label 转交给 nunt-tags 内部的 sl-input，同样不需要外层标签。
+    // 只有 switch / checkbox / kv / custom 需要我们自己渲染一行标签。
+    const ownsLabel = type === 'text' || type === 'password' || type === 'number' || type === 'url' || type === 'email' || type === 'textarea' || type === 'select' || type === 'tags';
     const ownsHelp = ownsLabel;
     return html`<div class=${classMap({ 'nunt-field': true, 'is-wide': !!field.wide, 'is-invalid': this.fieldErrors.has(name), hidden: this.hiddenFields.has(name) })}
       data-nunt-wrap=${name}>
@@ -975,6 +988,35 @@ export function toast(msg, type) {
 }
 
 /**
+ * demoteDialogHeader 把 sl-dialog 阴影 DOM 里那个 <header> 的角色降级。
+ *
+ * 为什么需要：<header> 在 ARIA 里映射成 banner landmark，对话框一打开，页面就同时有了
+ * 外壳顶栏（.topbar）和对话框标题栏两个 banner，axe 于是报
+ * landmark-no-duplicate-banner + landmark-unique（阶段 2C/2D 记录的现象）。
+ * 对话框内部的标题栏本来就不是页面级 landmark，把它的隐式角色去掉（role="presentation"）
+ * 既消掉误报，也不影响对话框本身：面板仍然由 aria-labelledby="title" 指向阴影里的 h2，
+ * 可访问名称不变。
+ *
+ * 这是运行时补丁，**不改 vendor 文件**；选择器取自 sl-dialog 的公开阴影结构
+ * （<header part="header">），拿不到就静默跳过 —— 最坏情况退化为已知限制
+ * （docs/CONTRACT.md 第 7 节「已知限制」）。
+ */
+function demoteDialogHeader(dialog) {
+  const apply = () => {
+    const root = dialog && dialog.shadowRoot;
+    if (!root) return false;
+    const header = root.querySelector('header');
+    if (!header) return false;
+    if (header.getAttribute('role') !== 'presentation') header.setAttribute('role', 'presentation');
+    return true;
+  };
+  if (apply()) return;
+  if (dialog && dialog.updateComplete && typeof dialog.updateComplete.then === 'function') {
+    dialog.updateComplete.then(apply).catch(() => {});
+  }
+}
+
+/**
  * openDialog：封装 sl-dialog。
  * options: { title, body（Node | Lit 模板 | 字符串）, actions: [{label, kind, onClick(api, button), close}],
  *            wide | width, onClose, onMount(api), closeOnEscape }
@@ -1063,6 +1105,8 @@ export function openDialog(options) {
   });
 
   document.body.appendChild(dialog);
+  demoteDialogHeader(dialog);
+  dialog.addEventListener('sl-after-show', () => demoteDialogHeader(dialog));
   const shown = typeof dialog.show === 'function' ? dialog.show() : Promise.resolve();
   Promise.resolve(shown).then(() => {
     if (typeof opts.onMount === 'function') {

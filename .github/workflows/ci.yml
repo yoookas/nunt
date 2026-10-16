@@ -40,6 +40,74 @@ jobs:
       - name: Build
         run: go build -trimpath -o /tmp/nunt ./cmd/nunt
 
+  # Frontend (Playwright + axe) job.
+  #
+  # It is a separate job so the Go jobs above are neither slowed down nor
+  # affected by it: Node/pnpm/Chromium are development-only tooling, the Go
+  # build and the Docker image still need no Node at all.
+  #
+  # What it proves: the 12 console pages really work in a browser - they mount,
+  # every key interaction still behaves, there are no console errors, no failed
+  # requests and no requests leaving the service, and axe reports zero
+  # critical/serious/moderate/minor findings in both themes
+  # (ui-smoke runs light, ui-baseline runs dark).
+  #
+  # Local equivalent (Linux/macOS; on Windows build nunt.exe instead):
+  #   pnpm install
+  #   pnpm exec playwright install --with-deps chromium
+  #   go build -o nunt ./cmd/nunt
+  #   node scripts/ui-smoke.mjs --exe ./nunt --out artifacts/ui-smoke
+  #   node scripts/ui-baseline.mjs --exe ./nunt --out artifacts/ui-baseline --label ci
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dev dependencies (Playwright + axe-core)
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build the binary
+        run: go build -o nunt ./cmd/nunt
+
+      - name: UI smoke (light theme, per page interactions)
+        run: node scripts/ui-smoke.mjs --exe ./nunt --out artifacts/ui-smoke
+
+      - name: UI baseline (dark theme, 12 pages + axe)
+        run: node scripts/ui-baseline.mjs --exe ./nunt --out artifacts/ui-baseline --label "ci"
+
+      - name: Upload screenshots and reports
+        # Always: a failing run is exactly when the screenshots matter.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-ui
+          path: |
+            artifacts/ui-smoke
+            artifacts/ui-baseline
+          if-no-files-found: warn
+          retention-days: 14
+
   docker:
     runs-on: ubuntu-latest
     steps:
