@@ -96,17 +96,23 @@ jobs:
       - name: UI baseline (dark theme, 12 pages + axe)
         run: node scripts/ui-baseline.mjs --exe ./nunt --out artifacts/ui-baseline --label "ci"
 
-      - name: Upload screenshots and reports
-        # Always: a failing run is exactly when the screenshots matter.
+      - name: Upload the text reports
+        # The checks above have already run; uploading is a convenience, so a
+        # full artifact quota must not turn a green run red. Only the small text
+        # reports are kept: the screenshots are the bulk and live in git under
+        # docs/screenshots anyway.
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: frontend-ui
+          name: frontend-ui-reports
           path: |
-            artifacts/ui-smoke
-            artifacts/ui-baseline
+            artifacts/ui-smoke/**/*.json
+            artifacts/ui-smoke/**/*.md
+            artifacts/ui-baseline/**/*.json
+            artifacts/ui-baseline/**/*.md
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 3
 
   docker:
     runs-on: ubuntu-latest
