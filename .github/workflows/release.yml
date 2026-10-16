@@ -1,5 +1,10 @@
 name: Release
 
+# Builds the container images for every supported platform and attaches them to
+# the GitHub release. Nothing is pushed to a registry, and nothing is moved
+# between jobs as a build artifact: each job uploads its own file straight into
+# the release, so a full artifact quota can never break a release.
+
 on:
   push:
     tags:
@@ -14,13 +19,45 @@ permissions:
   contents: write
 
 jobs:
-  # -------------------------------------------------------------------------
-  # Build one container image per architecture and export it as a loadable
-  # docker archive. Nothing is pushed to a registry: the archives are attached
-  # to the GitHub release instead.
-  # -------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # Create the release up front so the build jobs have somewhere to upload to.
+  # ---------------------------------------------------------------------------
+  prepare:
+    name: prepare release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.vars.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create the release when it does not exist yet
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.vars.outputs.version }}"
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "release $VERSION already exists"
+          else
+            gh release create "$VERSION" --title "nunt $VERSION" --verify-tag \
+              --notes "Container image archives for nunt $VERSION. Load one with `docker load < nunt-$VERSION-amd64.tar.gz` and start it with docker compose. Nothing is published to Docker Hub or GHCR."
+          fi
+
+  # ---------------------------------------------------------------------------
+  # One image per architecture, uploaded straight into the release.
+  # ---------------------------------------------------------------------------
   image:
     name: image ${{ matrix.arch }}
+    needs: [prepare]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -42,52 +79,46 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Resolve version
-        id: vars
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "version=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          fi
-          echo "commit=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-          echo "buildtime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-
-      - name: Build image archive
+      - name: Build the image archive
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: ${{ matrix.platform }}
           build-args: |
-            VERSION=${{ steps.vars.outputs.version }}
-            COMMIT=${{ steps.vars.outputs.commit }}
-            BUILDTIME=${{ steps.vars.outputs.buildtime }}
-          outputs: type=docker,dest=/tmp/nunt-${{ steps.vars.outputs.version }}-${{ matrix.arch }}.tar
+            VERSION=${{ needs.prepare.outputs.version }}
+            COMMIT=${{ github.sha }}
+            BUILDTIME=${{ github.run_started_at }}
+          outputs: type=docker,dest=/tmp/nunt-${{ needs.prepare.outputs.version }}-${{ matrix.arch }}.tar
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
-      - name: Compress archive
+      - name: Compress and upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p dist
-          gzip -9 -c /tmp/nunt-${{ steps.vars.outputs.version }}-${{ matrix.arch }}.tar \
-            > dist/nunt-${{ steps.vars.outputs.version }}-${{ matrix.arch }}.tar.gz
-          ls -lh dist
+          set -euo pipefail
+          VERSION="${{ needs.prepare.outputs.version }}"
+          ARCH="${{ matrix.arch }}"
+          FILE="nunt-${VERSION}-${ARCH}.tar.gz"
+          gzip -9 -c "/tmp/nunt-${VERSION}-${ARCH}.tar" > "/tmp/${FILE}"
+          sha256sum "/tmp/${FILE}" | sed "s#/tmp/##" > "/tmp/${FILE}.sha256"
+          ls -lh "/tmp/${FILE}"
+          gh release upload "$VERSION" "/tmp/${FILE}" --clobber
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: image-${{ matrix.arch }}
-          path: dist/*.tar.gz
-          if-no-files-found: error
-          # Container archives are consumed by the release job a minute later;
-          # keeping them for a week only burns the account artifact quota.
-          retention-days: 1
+      - name: Upload the checksum of this image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          ARCH="${{ matrix.arch }}"
+          gh release upload "$VERSION" "/tmp/nunt-${VERSION}-${ARCH}.tar.gz.sha256" --clobber
 
-  # -------------------------------------------------------------------------
-  # One multi architecture OCI archive for users who prefer a single file.
-  # -------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # A single multi architecture OCI archive for users who prefer one file.
+  # ---------------------------------------------------------------------------
   oci:
     name: multi-arch oci
+    needs: [prepare]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -99,96 +130,67 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Resolve version
-        id: vars
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "version=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          fi
-          echo "commit=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-          echo "buildtime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-
-      - name: Build OCI archive
+      - name: Build the OCI archive
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           build-args: |
-            VERSION=${{ steps.vars.outputs.version }}
-            COMMIT=${{ steps.vars.outputs.commit }}
-            BUILDTIME=${{ steps.vars.outputs.buildtime }}
-          outputs: type=oci,dest=/tmp/nunt-${{ steps.vars.outputs.version }}-oci.tar
+            VERSION=${{ needs.prepare.outputs.version }}
+            COMMIT=${{ github.sha }}
+            BUILDTIME=${{ github.run_started_at }}
+          outputs: type=oci,dest=/tmp/nunt-${{ needs.prepare.outputs.version }}-oci.tar
 
-      - name: Compress archive
-        run: |
-          mkdir -p dist
-          gzip -9 -c /tmp/nunt-${{ steps.vars.outputs.version }}-oci.tar \
-            > dist/nunt-${{ steps.vars.outputs.version }}-oci.tar.gz
-          ls -lh dist
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: image-oci
-          path: dist/*.tar.gz
-          if-no-files-found: error
-          # Container archives are consumed by the release job a minute later;
-          # keeping them for a week only burns the account artifact quota.
-          retention-days: 1
-
-  # -------------------------------------------------------------------------
-  # Attach every archive to the GitHub release. No registry is used.
-  # -------------------------------------------------------------------------
-  release:
-    name: publish release
-    runs-on: ubuntu-latest
-    needs: [image, oci]
-    steps:
-      - name: Download image artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: Generate checksums
-        run: |
-          cd dist
-          sha256sum *.tar.gz > SHA256SUMS
-          cat SHA256SUMS
-
-      - name: Resolve version
-        id: vars
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "version=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Publish release
+      - name: Compress and upload
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${{ steps.vars.outputs.version }}"
-          cat > NOTES.md <<'NOTES'
-          Container images for nunt.
+          set -euo pipefail
+          VERSION="${{ needs.prepare.outputs.version }}"
+          FILE="nunt-${VERSION}-oci.tar.gz"
+          gzip -9 -c "/tmp/nunt-${VERSION}-oci.tar" > "/tmp/${FILE}"
+          ls -lh "/tmp/${FILE}"
+          gh release upload "$VERSION" "/tmp/${FILE}" --clobber
 
-          Load an image with:
+  # ---------------------------------------------------------------------------
+  # Collect every checksum into one SHA256SUMS file and finish the notes.
+  # ---------------------------------------------------------------------------
+  finalize:
+    name: checksums and notes
+    needs: [prepare, image, oci]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the per image checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.prepare.outputs.version }}"
+          mkdir -p dist && cd dist
+          gh release download "$VERSION" --pattern "*.tar.gz.sha256" --clobber
+          cat *.tar.gz.sha256 > SHA256SUMS
+          # The per image files are only an intermediate step now.
+          for f in *.tar.gz.sha256; do
+            gh release delete-asset "$VERSION" "$f" --yes || true
+          done
+          cat SHA256SUMS
 
-          ```sh
-          docker load < nunt-<version>-amd64.tar.gz
+      - name: Upload SHA256SUMS and finish the notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.prepare.outputs.version }}"
+          gh release upload "$VERSION" dist/SHA256SUMS --clobber
+          gh release edit "$VERSION" --notes "Container image archives for nunt $VERSION.
+
+          Load one and start it:
+
+          \`\`\`sh
+          docker load < nunt-$VERSION-amd64.tar.gz
           docker compose up -d
-          ```
+          \`\`\`
 
-          The amd64, arm64 and armv7 files are single architecture docker
-          archives. The -oci archive contains all three platforms. Nothing is
-          published to Docker Hub or GHCR.
-          NOTES
-          if gh release view "$VERSION" >/dev/null 2>&1; then
-            gh release upload "$VERSION" dist/*.tar.gz dist/SHA256SUMS --clobber
-          else
-            gh release create "$VERSION" dist/*.tar.gz dist/SHA256SUMS \
-              --title "nunt $VERSION" --notes-file NOTES.md --verify-tag
-          fi
+          amd64, arm64 and armv7 are single architecture docker archives; the -oci
+          archive contains all three platforms. Verify the download with
+          SHA256SUMS. Nothing is published to Docker Hub or GHCR."
