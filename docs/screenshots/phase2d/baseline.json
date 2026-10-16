@@ -1,0 +1,594 @@
+{
+  "generatedAt": "2026-10-16T05:19:36.782Z",
+  "label": "phase2 batch D",
+  "exe": "D:\\Desktop\\nunt\\nunt.exe",
+  "exeBytes": 31831552,
+  "dataDir": "D:\\Desktop\\nunt\\.gocache\\ui-baseline\\1792127943036",
+  "dataDirKept": false,
+  "base": "http://127.0.0.1:16601",
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.4 Safari/537.36",
+  "axeVersion": "4.14.0",
+  "playwrightVersion": "1.64.1",
+  "nodeVersion": "v24.15.0",
+  "adminPort": 16601,
+  "seed": {
+    "steps": [
+      {
+        "name": "存储挂载（本地目录）",
+        "method": "POST",
+        "path": "/api/v1/storage/mounts",
+        "status": 200,
+        "ok": true,
+        "error": "",
+        "id": "44e963a300eb4162"
+      },
+      {
+        "name": "Web 规则：静态托管",
+        "method": "POST",
+        "path": "/api/v1/web/rules",
+        "status": 200,
+        "ok": true,
+        "error": "",
+        "id": "9e658f6eb29156c8"
+      },
+      {
+        "name": "Web 规则：反向代理",
+        "method": "POST",
+        "path": "/api/v1/web/rules",
+        "status": 200,
+        "ok": true,
+        "error": "",
+        "id": "e39231bde41147b7"
+      },
+      {
+        "name": "端口转发规则",
+        "method": "POST",
+        "path": "/api/v1/forward/rules",
+        "status": 201,
+        "ok": true,
+        "error": "",
+        "id": "1dcde1bb5eaad582"
+      },
+      {
+        "name": "DDNS 规则",
+        "method": "POST",
+        "path": "/api/v1/ddns/rules",
+        "status": 200,
+        "ok": true,
+        "error": "",
+        "id": "3f6c18b7579ba742"
+      },
+      {
+        "name": "WAF 配置",
+        "method": "PUT",
+        "path": "/api/v1/waf/config",
+        "status": 200,
+        "ok": true,
+        "error": "",
+        "id": ""
+      },
+      {
+        "name": "通知 Webhook",
+        "method": "PUT",
+        "path": "/api/v1/notify/webhooks",
+        "status": 200,
+        "ok": true,
+        "error": "",
+        "id": ""
+      },
+      {
+        "name": "计划任务",
+        "method": "POST",
+        "path": "/api/v1/task/items",
+        "status": 201,
+        "ok": true,
+        "error": "",
+        "id": "6c77fa8b61469acf"
+      },
+      {
+        "name": "证书任务（未启用）",
+        "method": "POST",
+        "path": "/api/v1/acme/jobs",
+        "status": 200,
+        "ok": true,
+        "error": "",
+        "id": "3574b77916768eaa"
+      },
+      {
+        "name": "API Token",
+        "method": "POST",
+        "path": "/api/v1/auth/tokens",
+        "status": 200,
+        "ok": true,
+        "error": "",
+        "id": "8e774c5ca6a93545"
+      },
+      {
+        "name": "第二个管理员账号",
+        "method": "POST",
+        "path": "/api/v1/auth/users",
+        "status": 200,
+        "ok": true,
+        "error": "",
+        "id": "d766d33103fb1b52"
+      }
+    ],
+    "mountId": "44e963a300eb4162",
+    "staticRuleId": "9e658f6eb29156c8"
+  },
+  "login": {
+    "screenshot": "login.png",
+    "a11y": {
+      "version": "4.14.0",
+      "violations": [],
+      "counts": {
+        "critical": 0,
+        "serious": 0,
+        "moderate": 0,
+        "minor": 0
+      },
+      "passCount": 34,
+      "incomplete": 1
+    },
+    "console": [],
+    "pageErrors": [],
+    "failedRequests": [],
+    "abortedRequests": [],
+    "httpErrors": [],
+    "external": []
+  },
+  "pages": [
+    {
+      "id": "dashboard",
+      "title": "概览",
+      "url": "http://127.0.0.1:16601/#/dashboard",
+      "screenshot": "dashboard.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 2153,
+      "metrics": {
+        "title": "概览",
+        "hash": "#/dashboard",
+        "contentChildren": 1,
+        "bodyHeight": 1486,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [],
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "passCount": 34,
+        "incomplete": 1
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": [],
+      "external": []
+    },
+    {
+      "id": "web",
+      "title": "Web 服务",
+      "url": "http://127.0.0.1:16601/#/web",
+      "screenshot": "web.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 2162,
+      "metrics": {
+        "title": "Web 服务",
+        "hash": "#/web",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [],
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "passCount": 47,
+        "incomplete": 1
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": [],
+      "external": []
+    },
+    {
+      "id": "forward",
+      "title": "端口转发",
+      "url": "http://127.0.0.1:16601/#/forward",
+      "screenshot": "forward.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 2063,
+      "metrics": {
+        "title": "端口转发",
+        "hash": "#/forward",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [],
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "passCount": 44,
+        "incomplete": 2
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": [],
+      "external": []
+    },
+    {
+      "id": "ddns",
+      "title": "动态域名",
+      "url": "http://127.0.0.1:16601/#/ddns",
+      "screenshot": "ddns.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 2049,
+      "metrics": {
+        "title": "动态域名",
+        "hash": "#/ddns",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [],
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "passCount": 44,
+        "incomplete": 1
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": [],
+      "external": []
+    },
+    {
+      "id": "acme",
+      "title": "证书",
+      "url": "http://127.0.0.1:16601/#/acme",
+      "screenshot": "acme.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 2206,
+      "metrics": {
+        "title": "证书",
+        "hash": "#/acme",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [],
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "passCount": 44,
+        "incomplete": 1
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": [],
+      "external": []
+    },
+    {
+      "id": "storage",
+      "title": "存储",
+      "url": "http://127.0.0.1:16601/#/storage",
+      "screenshot": "storage.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 1995,
+      "metrics": {
+        "title": "存储",
+        "hash": "#/storage",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [],
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "passCount": 40,
+        "incomplete": 1
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": [],
+      "external": []
+    },
+    {
+      "id": "files",
+      "title": "文件",
+      "url": "http://127.0.0.1:16601/#/files",
+      "screenshot": "files.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 2071,
+      "metrics": {
+        "title": "文件管理",
+        "hash": "#/files",
+        "contentChildren": 1,
+        "bodyHeight": 959,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [],
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "passCount": 43,
+        "incomplete": 2
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": [],
+      "external": []
+    },
+    {
+      "id": "waf",
+      "title": "WAF",
+      "url": "http://127.0.0.1:16601/#/waf",
+      "screenshot": "waf.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 3743,
+      "metrics": {
+        "title": "WAF 防护",
+        "hash": "#/waf",
+        "contentChildren": 1,
+        "bodyHeight": 3281,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [],
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "passCount": 45,
+        "incomplete": 2
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": [],
+      "external": []
+    },
+    {
+      "id": "task",
+      "title": "计划任务",
+      "url": "http://127.0.0.1:16601/#/task",
+      "screenshot": "task.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 1955,
+      "metrics": {
+        "title": "计划任务",
+        "hash": "#/task",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [],
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "passCount": 44,
+        "incomplete": 1
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": [],
+      "external": []
+    },
+    {
+      "id": "notify",
+      "title": "通知",
+      "url": "http://127.0.0.1:16601/#/notify",
+      "screenshot": "notify.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 2080,
+      "metrics": {
+        "title": "通知",
+        "hash": "#/notify",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [],
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "passCount": 40,
+        "incomplete": 1
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": [],
+      "external": []
+    },
+    {
+      "id": "logs",
+      "title": "日志",
+      "url": "http://127.0.0.1:16601/#/logs",
+      "screenshot": "logs.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 2055,
+      "metrics": {
+        "title": "日志",
+        "hash": "#/logs",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [],
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "passCount": 42,
+        "incomplete": 2
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": [],
+      "external": []
+    },
+    {
+      "id": "settings",
+      "title": "设置",
+      "url": "http://127.0.0.1:16601/#/settings",
+      "screenshot": "settings.png",
+      "mounted": true,
+      "networkIdle": true,
+      "durationMs": 1983,
+      "metrics": {
+        "title": "设置",
+        "hash": "#/settings",
+        "contentChildren": 1,
+        "bodyHeight": 900,
+        "docWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "modals": 0
+      },
+      "a11y": {
+        "version": "4.14.0",
+        "violations": [],
+        "counts": {
+          "critical": 0,
+          "serious": 0,
+          "moderate": 0,
+          "minor": 0
+        },
+        "passCount": 41,
+        "incomplete": 2
+      },
+      "console": [],
+      "pageErrors": [],
+      "failedRequests": [],
+      "abortedRequests": [],
+      "httpErrors": [],
+      "external": []
+    }
+  ],
+  "a11yTotals": {
+    "critical": 0,
+    "serious": 0,
+    "moderate": 0,
+    "minor": 0
+  },
+  "axeRuntimeVersion": "4.14.0",
+  "visualReview": ""
+}

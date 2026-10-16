@@ -1,682 +1,23 @@
-// nunt 前端页面模块：web.js
-// 依赖 lib/ui.js 的导出，同时每个文件内置本地兜底实现（类名与 style.css 对齐），
-// 因此 lib/ui.js 尚未完成时页面也不会白屏。
-
-// ---------------------------------------------------------------------------
-// 页面本地基础工具（自包含，无构建步骤）
+// Web 服务：反向代理 / 重定向 / 静态托管 / 文件管理 / WebDAV。
 //
-// 优先使用 lib/ui.js 的导出；lib/ui.js 尚未就绪时退回到本地实现，并把本地
-// 实现产生的 DOM 对齐 style.css 的类名（.card/.btn/.table/...），因此两种
-// 情况下页面的外观保持一致。导入名与本项目前端契约一致。
-// ---------------------------------------------------------------------------
+// 阶段 2 迁移（批次 D）：规则表格换成 kit 的 nunt-table（操作列走 actions —— 右对齐、
+// 不换行，不再有 axe 的 empty-table-header），类型筛选换成 sl-tab-group，关键字搜索保留；
+// 新建 / 编辑走 openDialog + formGrid，按类型（proxy / redirect / static / filebrowser /
+// webdav）显隐字段；访问日志用独立对话框展示（5 秒轮询，关闭对话框或离开页面都会真的
+// 停掉）。卡片标题一律 h2，页面私有样式用 pweb- 前缀并随 mount 的清理函数移除。
+//
+// 数据流与迁移前一致：GET/POST/PUT/DELETE /api/v1/web/rules[/{id}]、
+// POST /api/v1/web/rules/{id}/toggle（失败退回 PUT 全量更新）、
+// GET /api/v1/web/logs?rule=&limit=200，以及提交体里那组字段名。
+// #/web?rule=<id> 深链（WAF 页跳转过来）：自动过滤 + 高亮目标行 + 顶部提示条。
 import {
-  el as libEl,
-  toast as libToast,
-  confirmDialog as libConfirm,
-  openModal as libOpenModal,
-  fmtBytes as libFmtBytes,
-  fmtTime as libFmtTime,
-  escapeHtml as libEscapeHtml,
-  renderTable as libRenderTable,
-} from '../lib/ui.js';
+  NuntElement, html, nothing, define, renderInto, formGrid, openDialog, confirmDialog, toast,
+  errorMessage, fmtTime,
+} from '../lib/kit.js';
 
-const SVGNS = 'http://www.w3.org/2000/svg';
-const TXT = (s) => (s === null || s === undefined ? '' : String(s));
+const EOL = String.fromCharCode(10);
+const LOG_POLL_MS = 5000;
 
-function attach(parent, kids) {
-  for (const kid of kids) {
-    if (kid === null || kid === undefined || kid === false || kid === true) continue;
-    if (Array.isArray(kid)) { attach(parent, kid); continue; }
-    if (typeof kid === 'object' && kid.nodeType) { parent.appendChild(kid); continue; }
-    parent.appendChild(document.createTextNode(String(kid)));
-  }
-}
-
-function makeEl(tag, attrs, kids, ns) {
-  const node = ns ? document.createElementNS(SVGNS, tag) : document.createElement(tag);
-  if (attrs && typeof attrs === 'object' && !attrs.nodeType && !Array.isArray(attrs)) {
-    for (const key of Object.keys(attrs)) {
-      const value = attrs[key];
-      if (value === null || value === undefined || value === false) continue;
-      if (key === 'class' || key === 'className') node.setAttribute('class', TXT(value));
-      else if (key === 'style' && typeof value === 'object') Object.assign(node.style, value);
-      else if (key === 'dataset' && typeof value === 'object') Object.assign(node.dataset, value);
-      else if (key === 'text') node.textContent = TXT(value);
-      else if (key === 'value') node.value = TXT(value);
-      else if (key === 'checked') node.checked = !!value;
-      else if (key === 'disabled') node.disabled = !!value;
-      else if (key === 'selected') node.selected = !!value;
-      else if (/^on[a-z]+$/.test(key) && typeof value === 'function') node.addEventListener(key.slice(2).toLowerCase(), value);
-      else node.setAttribute(key, value === true ? '' : TXT(value));
-    }
-  } else if (attrs !== null && attrs !== undefined && typeof attrs !== 'object') {
-    kids = [attrs].concat(kids || []);
-  }
-  attach(node, kids || []);
-  return node;
-}
-
-function el(tag, attrs, ...kids) {
-  if (typeof tag === 'string' && /^[a-zA-Z][a-zA-Z0-9]*$/.test(tag)) return makeEl(tag, attrs, kids, false);
-  return makeEl('span', null, [tag].concat(kids || []), false);
-}
-
-const h = libEl || el;
-
-/* ------------------------------------------------------------------ 提示 */
-
-function toast(msg, type) {
-  if (libToast) { try { libToast(TXT(msg), type || 'info'); return; } catch (err) { /* 回退 */ } }
-  let host = document.querySelector('.toast-host');
-  if (!host) {
-    host = el('div', { class: 'toast-host', role: 'status', 'aria-live': 'polite' });
-    document.body.appendChild(host);
-  }
-  const kind = (type === 'ok' || type === 'warn' || type === 'err' || type === 'info') ? type : 'info';
-  const node = el('div', { class: 'toast ' + kind, text: TXT(msg) });
-  host.appendChild(node);
-  setTimeout(() => node.remove(), kind === 'err' ? 6000 : 3200);
-}
-
-/* ------------------------------------------------------------------ 弹窗 */
-
-function modal(options) {
-  const opts = options || {};
-  const bodyNode = el('div', { class: 'modal-body' });
-  if (opts.body && opts.body.nodeType) bodyNode.appendChild(opts.body);
-  else if (opts.body !== undefined && opts.body !== null) bodyNode.textContent = TXT(opts.body);
-
-  const footerNode = el('div', { class: 'modal-footer' });
-  const card = el('div', { class: 'modal-card' + (opts.wide ? ' wide' : ''), role: 'dialog', 'aria-modal': 'true' });
-  const titleId = 'page-modal-' + Math.random().toString(36).slice(2, 8);
-  card.setAttribute('aria-labelledby', titleId);
-
-  const closeBtn = el('button', {
-    class: 'icon-btn', type: 'button', title: '关闭', 'aria-label': '关闭',
-    text: String.fromCharCode(10005),
-    onclick: () => close(),
-  });
-  const header = el('div', { class: 'modal-header' }, el('span', { id: titleId, text: TXT(opts.title) }), el('span', { class: 'spacer' }), closeBtn);
-  const root = el('div', { class: 'modal' }, card);
-  card.appendChild(header);
-  card.appendChild(bodyNode);
-  if (opts.actions && opts.actions.length) card.appendChild(footerNode);
-
-  let closed = false;
-  function close() {
-    if (closed) return;
-    closed = true;
-    document.removeEventListener('keydown', onKey, true);
-    root.remove();
-    if (!document.querySelector('.modal')) document.body.classList.remove('modal-open');
-    if (typeof opts.onClose === 'function') { try { opts.onClose(); } catch (err) { /* 忽略 */ } }
-  }
-  function onKey(event) { if (event.key === 'Escape' && opts.onEscape !== false) close(); }
-
-  const api = { root, card, body: bodyNode, footer: footerNode, buttons: {}, close, setBusy() {} };
-  for (const action of opts.actions || []) {
-    if (!action) continue;
-    const kind = action.kind === 'primary' ? 'btn btn-primary'
-      : action.kind === 'danger' ? 'btn btn-danger'
-        : action.kind === 'ghost' ? 'btn btn-ghost' : 'btn';
-    const node = el('button', { class: kind, type: 'button', disabled: !!action.disabled, text: TXT(action.label) });
-    node.addEventListener('click', async () => {
-      if (typeof action.onClick !== 'function') { close(); return; }
-      let result;
-      try { result = await action.onClick(api); } catch (err) { return; }
-      if (result !== false && action.close !== false) close();
-    });
-    footerNode.appendChild(node);
-    api.buttons[TXT(action.label)] = node;
-  }
-  if (opts.maskClose !== false) root.addEventListener('mousedown', (event) => { if (event.target === root) close(); });
-  document.addEventListener('keydown', onKey, true);
-  document.body.classList.add('modal-open');
-  document.body.appendChild(root);
-  return api;
-}
-
-function openModal(options) {
-  if (libOpenModal) { try { return libOpenModal(options); } catch (err) { /* 回退 */ } }
-  return modal(options);
-}
-
-function confirmDialog(msg, options) {
-  if (libConfirm) {
-    try {
-      const p = libConfirm(TXT(msg), options);
-      if (p && typeof p.then === 'function') return p;
-      return Promise.resolve(!!p);
-    } catch (err) { /* 回退 */ }
-  }
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = (value) => { if (!done) { done = true; resolve(value); } };
-    modal({
-      title: '请确认',
-      body: el('div', null, el('p', { style: { margin: '0' }, text: TXT(msg) })),
-      onClose: () => finish(false),
-      actions: [
-        { label: '取消', onClick: () => finish(false) },
-        { label: '确定', kind: 'primary', onClick: () => finish(true) },
-      ],
-    });
-  });
-}
-
-/* ------------------------------------------------------------------ 格式化 */
-
-function fmtBytes(n) {
-  if (libFmtBytes) { try { return libFmtBytes(n); } catch (err) { /* 回退 */ } }
-  if (n === null || n === undefined || n === '') return '-';
-  const num = Number(n);
-  if (!isFinite(num)) return '-';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  let value = Math.abs(num);
-  let i = 0;
-  while (value >= 1024 && i < units.length - 1) { value /= 1024; i += 1; }
-  const text = i === 0 ? String(Math.round(value)) : (value >= 100 ? value.toFixed(0) : value.toFixed(1));
-  return (num < 0 ? '-' : '') + text + ' ' + units[i];
-}
-
-function fmtTime(t) {
-  if (libFmtTime) { try { return libFmtTime(t); } catch (err) { /* 回退 */ } }
-  if (t === null || t === undefined || t === '') return '-';
-  let date;
-  if (t instanceof Date) date = t;
-  else if (typeof t === 'number') date = new Date(t < 1e12 ? t * 1000 : t);
-  else {
-    date = new Date(String(t));
-    if (isNaN(date.getTime())) {
-      const num = Number(String(t));
-      if (!isNaN(num) && String(t).trim() !== '') date = new Date(num < 1e12 ? num * 1000 : num);
-    }
-  }
-  if (!date || isNaN(date.getTime())) return TXT(t);
-  const p = (x) => (x < 10 ? '0' + x : String(x));
-  return date.getFullYear() + '-' + p(date.getMonth() + 1) + '-' + p(date.getDate()) + ' ' + p(date.getHours()) + ':' + p(date.getMinutes()) + ':' + p(date.getSeconds());
-}
-
-function dateAgo(t) {
-  if (!t) return '-';
-  const date = (t instanceof Date) ? t : new Date(String(t));
-  if (isNaN(date.getTime())) return TXT(t);
-  const secs = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (secs < 0) return fmtTime(t);
-  if (secs < 60) return secs + ' 秒前';
-  if (secs < 3600) return Math.floor(secs / 60) + ' 分钟前';
-  if (secs < 86400) return Math.floor(secs / 3600) + ' 小时前';
-  return Math.floor(secs / 86400) + ' 天前';
-}
-
-function escapeHtml(s) {
-  if (libEscapeHtml) { try { return libEscapeHtml(s); } catch (err) { /* 回退 */ } }
-  return TXT(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
-function textOf(v, fallback) {
-  if (v === null || v === undefined || v === '') return fallback === undefined ? '-' : fallback;
-  if (Array.isArray(v)) {
-    const parts = v.filter((x) => x !== null && x !== undefined && String(x) !== '');
-    return parts.length ? parts.map((x) => String(x)).join(', ') : (fallback === undefined ? '-' : fallback);
-  }
-  return String(v);
-}
-
-/* ------------------------------------------------------------------ 组件 */
-
-function clear(node) { if (node) while (node.firstChild) node.removeChild(node.firstChild); return node; }
-
-function spinner(label) {
-  return el('div', { class: 'loading' }, el('span', { class: 'spinner' }), el('span', { text: label || '加载中…' }));
-}
-
-function emptyBox(msg) {
-  return el('div', { class: 'empty' }, el('div', { class: 'empty-title', text: msg || '暂无数据' }));
-}
-
-function errorCard(err, onRetry) {
-  const msg = (err && err.message) ? err.message : TXT(err || '未知错误');
-  const notice = el('div', { class: 'notice' },
-    el('div', { style: { fontWeight: '600' }, text: '接口调用失败' }),
-    el('div', { text: msg }),
-    el('div', { style: { opacity: '.85', marginTop: '4px' }, text: '该功能可能尚未实现，或后台服务异常；可稍后重试。' }),
-  );
-  if (onRetry) {
-    notice.appendChild(el('div', { style: { marginTop: '8px' } }, el('button', { class: 'btn btn-sm', type: 'button', text: '重试', onclick: () => onRetry() })));
-  }
-  return notice;
-}
-
-function btn(label, opts) {
-  const o = opts || {};
-  const kind = o.kind === 'primary' ? ' btn-primary' : (o.kind === 'danger' ? ' btn-danger' : (o.kind === 'ghost' ? ' btn-ghost' : ''));
-  const node = el('button', {
-    class: 'btn' + kind + (o.small ? ' btn-sm' : ''),
-    type: 'button',
-    title: o.title || '',
-    disabled: !!o.disabled,
-    onclick: o.onClick,
-  }, o.icon || null, el('span', { text: TXT(label) }));
-  if (o.tag) node.dataset.tag = o.tag;
-  return node;
-}
-
-function iconBtn(icon, opts) {
-  const o = opts || {};
-  const node = el('button', {
-    class: 'icon-btn',
-    type: 'button',
-    title: o.title || '',
-    'aria-label': o.title || '',
-    onclick: o.onClick,
-  }, icon || null);
-  if (o.tag) node.dataset.tag = o.tag;
-  return node;
-}
-
-function svgIcon(paths) {
-  return makeEl('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', width: '16', height: '16' },
-    paths.map((d) => makeEl('path', { d: d }, [], true)), true);
-}
-
-function editIcon() { return svgIcon(['M4 20h4l10-10-4-4L4 16v4z', 'M14 6l4 4']); }
-function trashIcon() { return svgIcon(['M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13']); }
-function logIcon() { return svgIcon(['M4 5h16v14H4z', 'M7 9h10M7 13h7']); }
-function runIcon() { return svgIcon(['M7 5l12 7-12 7z']); }
-
-function switchEl(on, onToggle) {
-  const box = el('input', { type: 'checkbox' });
-  box.checked = !!on;
-  const textNode = el('span', { text: on ? '已启用' : '已停用' });
-  const label = el('label', { class: 'switch', title: on ? '点击停用' : '点击启用' }, box, el('span', { class: 'track' }), textNode);
-  label.dataset.tag = 'toggle';
-  let busy = false;
-  const state = { on: !!on, set(next) { busy = false; state.on = !!next; box.checked = state.on; textNode.textContent = state.on ? '已启用' : '已停用'; } };
-  label.addEventListener('click', (event) => event.stopPropagation());
-  box.addEventListener('change', () => {
-    if (busy) return;
-    busy = true;
-    label.dataset.busy = '1';
-    const next = box.checked;
-    Promise.resolve(onToggle ? onToggle({ target: label, value: next }) : next)
-      .then((result) => { busy = false; delete label.dataset.busy; if (result === false) state.set(!next); })
-      .catch(() => { busy = false; delete label.dataset.busy; state.set(!next); });
-  });
-  return label;
-}
-
-function chip(txt) { return el('span', { class: 'chip', text: TXT(txt) }); }
-
-function chips(list, max) {
-  const arr = (list || []).filter((x) => x !== null && x !== undefined && String(x) !== '');
-  if (!arr.length) return el('span', { class: 'muted', text: '-' });
-  const box = el('span', { class: 'row' });
-  const limit = max || 3;
-  for (const item of arr.slice(0, limit)) box.appendChild(chip(item));
-  if (arr.length > limit) box.appendChild(el('span', { class: 'faint', style: { fontSize: '12px' }, text: '+' + (arr.length - limit) }));
-  return box;
-}
-
-function badge(txt, kind) {
-  const k = (kind === 'ok' || kind === 'warn' || kind === 'err') ? ' ' + kind : '';
-  return el('span', { class: 'badge' + k, text: TXT(txt) });
-}
-
-function bar(pct, kind) {
-  const p = Math.max(0, Math.min(100, Number(pct) || 0));
-  const k = (kind === 'warn' || kind === 'err') ? ' ' + kind : '';
-  return el('span', { class: 'bar' + k, style: { flex: '1 1 auto', minWidth: '70px' }, title: Math.round(p) + '%' },
-    el('i', { style: { width: p + '%' } }));
-}
-
-function card(title, headExtra, body) {
-  return el('div', { class: 'card' },
-    el('div', { class: 'card-header' }, el('h3', { text: TXT(title) }), el('span', { class: 'spacer' }), headExtra || null),
-    el('div', { class: 'card-body' }, body || null),
-  );
-}
-
-function tableEl(cols, rows, empty) {
-  const list = rows || [];
-  if (!list.length) return emptyBox(empty || '暂无数据');
-  const thead = el('thead', null, el('tr', null, (cols || []).map((c) => el('th', { text: c.title, style: c.align === 'right' ? { textAlign: 'right' } : null }))));
-  const tbody = el('tbody', null, list.map((row) => el('tr',
-    { class: row.onClick ? 'clickable' : null, dataset: row.tag ? { row: row.tag } : null, onclick: row.onClick || null },
-    (cols || []).map((c) => {
-      // 行包装对象 {raw, tag, onClick}：渲染函数始终拿到真实数据对象。
-      const data = (row && row.raw !== undefined) ? row.raw : row;
-      const value = c.render ? c.render(data) : (data ? data[c.key] : '');
-      const cell = el('td', { class: c.cls || null });
-      attach(cell, [value === null || value === undefined ? '-' : value]);
-      return cell;
-    }),
-  )));
-  return el('table', { class: 'table' }, thead, tbody);
-}
-
-/**
- * renderTable 渲染表格。
- * 优先使用 lib/ui.js 的 renderTable(container, config)；不可用时按同样的配置
- * 形状在本地渲染（columns[{title,key,render,align,cls}] + rows[{tag,onClick,raw}]）。
- * 返回承载表格的容器元素。
- */
-// dataTable 是本地表格渲染函数（renderTable 的兜底实现）。
-const dataTable = tableEl;
-
-function renderTable(container, config) {
-  const cfg = config || {};
-  const host = typeof container === 'string' ? document.querySelector(container) : container;
-  if (!host) return null;
-  const cols = cfg.columns || [];
-  const rows = cfg.rows || [];
-  if (libRenderTable) {
-    try {
-      libRenderTable(host, cfg);
-      const box = el('div', { class: 'page-table' });
-      while (host.firstChild) box.appendChild(host.firstChild);
-      host.appendChild(box);
-      return box;
-    } catch (err) { clear(host); }
-  }
-  clear(host);
-  host.appendChild(tableEl(cols, rows, cfg.empty));
-  return host;
-}
-
-function field(label, control, hint, wide) {
-  const node = el('div', { class: 'field' + (wide ? ' wide' : '') });
-  if (wide) node.style.gridColumn = '1 / -1';
-  if (label) node.appendChild(el('label', { text: TXT(label) }));
-  node.appendChild(control);
-  if (hint) node.appendChild(el('div', { class: 'hint', text: TXT(hint) }));
-  return node;
-}
-
-function fieldSet(legend, kids) {
-  const box = el('div', { class: 'stack', style: { margin: '14px 0' } });
-  if (legend) box.appendChild(el('div', { class: 'muted', style: { fontSize: '12px', fontWeight: '600' }, text: TXT(legend) }));
-  const grid = el('div', { class: 'grid' });
-  attach(grid, kids || []);
-  box.appendChild(grid);
-  return box;
-}
-
-function input(attrs) { return el('input', Object.assign({ class: 'input', type: 'text' }, attrs || {})); }
-function textarea(attrs) { return el('textarea', Object.assign({ class: 'input', rows: '4' }, attrs || {})); }
-
-function selectEl(items, value, attrs) {
-  const node = el('select', Object.assign({ class: 'select' }, attrs || {}));
-  for (const item of (items || [])) {
-    const o = (typeof item === 'string') ? { value: item, label: item } : item;
-    node.appendChild(el('option', { value: TXT(o.value), text: TXT(o.label) }));
-  }
-  node.value = (value === undefined || value === null) ? '' : String(value);
-  if (node.selectedIndex < 0 && node.options.length) node.selectedIndex = 0;
-  return node;
-}
-
-function checkEl(label, isChecked, attrs) {
-  const box = el('input', Object.assign({ type: 'checkbox' }, attrs || {}));
-  box.checked = !!isChecked;
-  return el('label', { class: 'check' }, box, el('span', { text: TXT(label) }));
-}
-
-function tabs(names, active, onPick) {
-  const box = el('div', { class: 'tabs', style: { borderBottom: '0', marginBottom: '0' } });
-  for (const item of names) {
-    const n = (typeof item === 'string') ? { id: item, label: item } : item;
-    box.appendChild(el('button', {
-      class: 'tab' + (String(n.id) === String(active) ? ' active' : ''),
-      type: 'button',
-      text: TXT(n.label),
-      onclick: () => onPick(n.id),
-    }));
-  }
-  return box;
-}
-
-function kv(pairs) {
-  const box = el('div', { class: 'kv' });
-  for (const pair of (pairs || [])) {
-    box.appendChild(el('span', { class: 'k', text: TXT(pair[0]) }));
-    const cell = el('span', { class: 'v' });
-    attach(cell, [pair[1] === null || pair[1] === undefined ? '-' : pair[1]]);
-    box.appendChild(cell);
-  }
-  return box;
-}
-
-function logView(lines, max) {
-  const arr = (lines || []).slice(-1 * (max || 300));
-  if (!arr.length) return emptyBox('暂无日志');
-  return el('div', { class: 'log-view', style: { minHeight: '140px' } }, arr.map((line) => el('div', { class: 'log-line' },
-    el('span', { class: 'msg', text: typeof line === 'string' ? line : JSON.stringify(line) }))));
-}
-
-/* ------------------------------------------------------------------ 表单取值 */
-
-function val(node) { return node && node.value !== undefined ? String(node.value).trim() : ''; }
-function lines(node) { return val(node).split(/[\n,]/).map((s) => s.trim()).filter((s) => s.length > 0); }
-
-function keyValues(node) {
-  const out = {};
-  for (const raw of val(node).split('\n')) {
-    const line = raw.trim();
-    if (!line) continue;
-    const idx = line.indexOf(':');
-    if (idx <= 0) continue;
-    const key = line.slice(0, idx).trim();
-    const value = line.slice(idx + 1).trim();
-    if (key) out[key] = value;
-  }
-  return out;
-}
-
-function kvText(map) {
-  const src = map || {};
-  return Object.keys(src).map((k) => k + ': ' + src[k]).join('\n');
-}
-
-function numOf(node, dflt) {
-  const text = val(node);
-  const n = Number(text);
-  return (text !== '' && isFinite(n)) ? n : (dflt === undefined ? 0 : dflt);
-}
-function checked(node) { return !!(node && node.checked); }
-
-/* ------------------------------------------------------------------ API */
-
-function currentToken() {
-  const w = typeof window !== 'undefined' ? window : {};
-  const boot = w.__NUNT__ || w.__DSH_BOOT__ || null;
-  if (boot && typeof boot === 'object' && boot.csrf) return boot.csrf;
-  const meta = document.querySelector('meta[name="csrf-token"]');
-  if (meta && meta.content) return meta.content;
-  const jar = (typeof document !== 'undefined' && document.cookie) ? document.cookie : '';
-  const m = jar.match(/(?:^|;\s*)csrf_token=([^;]+)/);
-  return m ? decodeURIComponent(m[1]) : '';
-}
-
-async function fetchJSON(method, path, payload, timeoutMs) {
-  const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
-  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs || 20000) : null;
-  try {
-    const res = await fetch(path, {
-      method,
-      credentials: 'same-origin',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': currentToken() },
-      body: (payload === undefined || payload === null) ? undefined : JSON.stringify(payload),
-      signal: ctrl ? ctrl.signal : undefined,
-    });
-    if (res.status === 204) return null;
-    const text = await res.text();
-    let data = null;
-    if (text) { try { data = JSON.parse(text); } catch (err) { data = text; } }
-    if (!res.ok) {
-      let msg = '';
-      if (data && typeof data === 'object') {
-        if (data.error && data.error.message) msg = data.error.message;
-        else if (data.message) msg = data.message;
-      }
-      if (!msg && typeof data === 'string' && data) msg = data.slice(0, 180);
-      if (!msg && res.status === 404) msg = '接口不存在（404），该功能可能尚未实现';
-      if (!msg) msg = '请求失败（HTTP ' + res.status + '）';
-      const err = new Error(msg);
-      err.status = res.status;
-      err.notFound = res.status === 404;
-      throw err;
-    }
-    return data;
-  } catch (e) {
-    if (e && e.name === 'AbortError') { const err = new Error('请求超时（服务器无响应）'); err.timeout = true; throw err; }
-    if (e instanceof Error) throw e;
-    throw new Error(String(e));
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-function wrapAPI(raw) {
-  const base = '/api/v1';
-  const qs = (params) => {
-    if (!params) return '';
-    const sp = new URLSearchParams();
-    for (const key of Object.keys(params)) {
-      const value = params[key];
-      if (value === undefined || value === null || value === '') continue;
-      sp.append(key, String(value));
-    }
-    const text = sp.toString();
-    return text ? '?' + text : '';
-  };
-  const call = (name, method, path, body, isQuery) => {
-    const fn = (raw && typeof raw[name] === 'function') ? raw[name].bind(raw) : null;
-    const full = base + path;
-    if (!fn) return fetchJSON(method, full + qs(isQuery ? body : null), isQuery ? undefined : body);
-    return Promise.resolve().then(() => (isQuery ? fn(full, body) : fn(full, body))).catch((err) => {
-      const retryable = err && (err.notFound === true || err.status === 404 || err.status >= 500 || err.name === 'TypeError');
-      if (!retryable) throw err;
-      return fetchJSON(method, full + qs(isQuery ? body : null), isQuery ? undefined : body);
-    });
-  };
-  return {
-    get: (p, params) => call('get', 'GET', p, params, true),
-    post: (p, b) => call('post', 'POST', p, b, false),
-    put: (p, b) => call('put', 'PUT', p, b, false),
-    del: (p, b) => call('del', 'DELETE', p, b, false),
-    raw,
-  };
-}
-
-/* ------------------------------------------------------------------ 数据 */
-
-function unwrap(data, keys) {
-  if (Array.isArray(data)) return data;
-  if (data && typeof data === 'object') {
-    for (const key of (keys || ['items', 'list', 'data'])) {
-      if (Array.isArray(data[key])) return data[key];
-    }
-  }
-  return [];
-}
-
-function debounce(fn, wait) {
-  let timer = null;
-  return function () {
-    const args = arguments;
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => { timer = null; fn.apply(null, args); }, wait || 220);
-  };
-}
-
-function makePoller(fn, ms) {
-  let timer = null;
-  let stopped = false;
-  async function tick() {
-    if (stopped) return;
-    try { await fn(); } catch (err) { /* 轮询失败静默 */ }
-    if (!stopped) timer = setTimeout(tick, ms);
-  }
-  timer = setTimeout(tick, ms);
-  return () => { stopped = true; if (timer) clearTimeout(timer); timer = null; };
-}
-
-function apiErr(e) { return (e && e.message) ? e.message : TXT(e || '未知错误'); }
-function notFoundHint(e) { return !!(e && (e.notFound === true || e.status === 404)); }
-
-function pageStyle(root, css) {
-  if (!css) return () => {};
-  const tag = document.createElement('style');
-  tag.textContent = css;
-  root.appendChild(tag);
-  return () => { if (tag.parentNode) tag.parentNode.removeChild(tag); };
-}
-
-// --- DNS 提供商元数据（DDNS 与证书页共用） ---------------------------------
-let dnsProviderCache = null;
-let dnsProviderFinal = false;
-let dnsProviderInflight = null;
-
-// fallbackProviderFields 在 /api/v1/ddns/providers 不可用时提供已知提供商的
-// 凭据输入，保证表单仍然可用。
-function fallbackProviderFields(id) {
-  const map = {
-    cloudflare: [{ key: 'token', label: 'API Token', secret: true, required: true, placeholder: 'Zone.DNS 编辑权限的 API Token' }],
-    alidns: [{ key: 'accessKeyId', label: 'AccessKey ID', required: true }, { key: 'accessKeySecret', label: 'AccessKey Secret', secret: true, required: true }],
-    dnspod: [{ key: 'id', label: 'SecretId', required: true }, { key: 'token', label: 'SecretKey', secret: true, required: true }],
-    godaddy: [{ key: 'key', label: 'API Key', required: true }, { key: 'secret', label: 'API Secret', secret: true, required: true }],
-    porkbun: [{ key: 'apiKey', label: 'API Key', required: true }, { key: 'secretKey', label: 'Secret Key', secret: true, required: true }],
-    huawei: [{ key: 'accessKeyId', label: 'AccessKey ID', required: true }, { key: 'secretAccessKey', label: 'Secret Access Key', secret: true, required: true }],
-    callback: [{ key: 'url', label: '回调地址', required: true, placeholder: 'https://example.com/ddns?ip={ip}' }],
-  };
-  return map[id] || null;
-}
-
-function normalizeProviders(data) {
-  return unwrap(data, ['providers', 'items']).map((p) => ({
-    id: p.id || p.name || p.provider,
-    title: p.title || p.label || p.name || p.id || p.provider,
-    fields: (p.fields || []).map((f) => ({
-      key: f.key,
-      label: f.label || f.key,
-      secret: !!f.secret,
-      required: !!f.required,
-      placeholder: f.placeholder || '',
-      help: f.help || '',
-    })),
-    authNote: p.authNote || p.note || '',
-  })).filter((p) => p.id);
-}
-
-// loadDNSProviders 带缓存：404 视为该接口不存在并记住，其它失败下次重试。
-async function loadDNSProviders() {
-  if (dnsProviderCache && dnsProviderCache.length) return dnsProviderCache;
-  if (dnsProviderFinal) return dnsProviderCache || [];
-  if (dnsProviderInflight) return dnsProviderInflight;
-  dnsProviderInflight = (async () => {
-    try {
-      const data = await api.get('/ddns/providers');
-      const list = normalizeProviders(data);
-      dnsProviderCache = list;
-      dnsProviderFinal = true;
-      return list;
-    } catch (e) {
-      if (e && (e.notFound === true || e.status === 404)) { dnsProviderFinal = true; dnsProviderCache = []; return []; }
-      return [];
-    } finally {
-      dnsProviderInflight = null;
-    }
-  })();
-  return dnsProviderInflight;
-}
-
-// 页面模块只导出 default；下面的名字供页面内部使用，不再二次导出（避免与
-// lib/ui.js 的语义混淆）。
-
-// ---------------------------------------------------------------------------
-// Web 服务：反向代理 / 重定向 / 静态托管 / 文件管理 / WebDAV
-// ---------------------------------------------------------------------------
 const TYPES = [
   { id: 'proxy', label: '反向代理' },
   { id: 'redirect', label: '重定向' },
@@ -684,292 +25,35 @@ const TYPES = [
   { id: 'filebrowser', label: '文件管理' },
   { id: 'webdav', label: 'WebDAV' },
 ];
+const TABS = [{ id: 'all', label: '全部' }].concat(TYPES);
 const TYPE_LABEL = { proxy: '反向代理', redirect: '重定向', static: '静态托管', filebrowser: '文件管理', webdav: 'WebDAV' };
 const TLS_LABEL = { off: '关闭', auto: '自动证书', custom: '指定证书' };
-const BALANCE_LABEL = { round_robin: '轮询', random: '随机', ip_hash: 'IP 哈希', least_conn: '最少连接' };
-const ACCESS_LABEL = { off: '关闭', allow: '仅允许', deny: '拒绝' };
-const PAGE_CSS = [
-  '.pweb-sum{font-size:12px}',
-  '.pweb-hint{margin-bottom:10px}',
-  '.pweb-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
-  '.pweb-search{width:180px}',
-  '.pweb-log{max-height:300px}',
-  '.pweb-hit>td{background:color-mix(in srgb,var(--brand) 10%,transparent)}',
-].join(String.fromCharCode(10));
-const NEWLINE = String.fromCharCode(10);
+// 负载均衡：后端 newBalancer 只认 "" | roundrobin | random | iphash，迁移前页面给的是
+// round_robin / ip_hash / least_conn，三个值全部会被后端以 unsupported balance strategy 拒绝
+// （新建反代规则默认就是 round_robin，所以那条路径根本存不下来）。这里对齐后端的取值，
+// 同时保留旧写法的显示标签，读回历史值时按别名归一（见 balanceValue）。
+const BALANCE_OPTIONS = [
+  { value: 'roundrobin', label: '轮询' },
+  { value: 'random', label: '随机' },
+  { value: 'iphash', label: 'IP 哈希' },
+];
+const BALANCE_LABEL = {
+  roundrobin: '轮询', random: '随机', iphash: 'IP 哈希',
+  round_robin: '轮询', ip_hash: 'IP 哈希', least_conn: '最少连接',
+};
+const BALANCE_ALIASES = { round_robin: 'roundrobin', ip_hash: 'iphash', least_conn: 'roundrobin' };
 
-function numVal(v, dflt) {
-  const n = Number(v);
-  return isFinite(n) ? n : (dflt || 0);
-}
-
-function tlsLabel(r) {
-  const mode = (r && r.tls && r.tls.mode) || 'off';
-  return TLS_LABEL[mode] || '关闭';
-}
-
-function targetText(r) {
-  if (!r) return '-';
-  if (r.type === 'proxy') {
-    const t = r.proxy || {};
-    const list = (t.targets || []);
-    if (!list.length) return '-';
-    const extra = list.length > 1 ? '（' + (BALANCE_LABEL[t.balance] || t.balance || '轮询') + '，共 ' + list.length + ' 个）' : '';
-    return list[0] + extra;
-  }
-  if (r.type === 'redirect') {
-    const t = r.redirect || {};
-    return (t.to || '-') + ' [' + (t.status || 302) + ']';
-  }
-  if (r.type === 'static') {
-    const t = r.static || {};
-    return t.mountId ? '挂载: ' + t.mountId : (t.root || '-');
-  }
-  const f = r.files || {};
-  return f.mountId ? '挂载: ' + f.mountId + (f.root ? ' ' + f.root : '') : (f.root || '-');
-}
-
-async function certOptions() {
-  try {
-    const data = await api.get('/acme/certificates');
-    return unwrap(data, ['certificates', 'items']).map((c) => {
-      const domains = c.domains || (c.domain ? [c.domain] : []);
-      const label = domains.join(', ') || c.name || c.id;
-      return { value: c.id || c.name || label, label: label };
-    });
-  } catch (e) {
-    return [];
-  }
-}
-
-async function mountOptions() {
-  try {
-    const data = await api.get('/storage/mounts');
-    return unwrap(data, ['mounts', 'items']).filter((m) => m.enable !== false).map((m) => ({
-      value: m.id,
-      label: (m.name || m.id) + (m.type === 'webdav' ? '（WebDAV）' : '（本地）'),
-    }));
-  } catch (e) {
-    return [];
-  }
-}
-
-function accessFields(base) {
-  const a = (base && base.access) || {};
-  const f = {};
-  f.accessMode = selectEl([
-    { value: 'off', label: '关闭' },
-    { value: 'allow', label: '白名单（仅允许以下 IP）' },
-    { value: 'deny', label: '黑名单（拒绝以下 IP）' },
-  ], a.mode || 'off');
-  f.accessIPs = textarea({ rows: '3', placeholder: '每行一条，支持 CIDR：' + NEWLINE + '192.168.1.0/24' + NEWLINE + '10.0.0.8', value: (a.ips || []).join(NEWLINE) });
-  f.uaMode = selectEl([
-    { value: 'off', label: '关闭' },
-    { value: 'allow', label: '白名单（仅允许匹配 UA）' },
-    { value: 'deny', label: '黑名单（拒绝匹配 UA）' },
-  ], a.uaMode || 'off');
-  f.uaList = textarea({ rows: '3', placeholder: '每行一条，支持 * 通配：' + NEWLINE + '*bot*' + NEWLINE + 'curl*', value: (a.uas || []).join(NEWLINE) });
-  return f;
-}
-
-function basicAuthFields(base) {
-  const b = base && base.basicAuth;
-  const users = (b && b.users) || [];
-  const first = users[0] || {};
-  const f = {};
-  f.authEnable = checkEl('启用 BasicAuth 保护', !!(b && b.enable));
-  f.authUser = input({ placeholder: '用户名', value: first.username || '' });
-  f.authPass = input({ type: 'password', autocomplete: 'new-password', placeholder: base && base.id ? '留空表示不修改' : '密码' });
-  f.authExtra = textarea({ rows: '2', placeholder: '其他账号，每行一个：user:password', value: users.slice(1).map((u) => u.username + ':' + u.password).join(NEWLINE) });
-  return f;
-}
-
-function collectAuth(F, editing) {
-  const users = [];
-  const user = val(F.authUser);
-  const pass = val(F.authPass);
-  if (user && pass) users.push({ username: user, password: pass });
-  for (const raw of val(F.authExtra).split(NEWLINE)) {
-    const line = raw.trim();
-    const idx = line.indexOf(':');
-    if (idx <= 0) continue;
-    users.push({ username: line.slice(0, idx).trim(), password: line.slice(idx + 1).trim() });
-  }
-  const out = { enable: checked(F.authEnable), users: users };
-  if (editing && out.enable && !users.length) delete out.users;
-  if (!out.enable) out.users = [];
-  return out;
-}
-
-function redirectFields(base) {
-  const t = (base && base.redirect) || {};
-  const f = {};
-  f.redirectTo = input({ value: t.to || '', placeholder: 'https://example.com/new' });
-  f.redirectStatus = selectEl([
-    { value: '301', label: '301 永久重定向' },
-    { value: '302', label: '302 临时重定向' },
-    { value: '307', label: '307 保持方法' },
-    { value: '308', label: '308 永久且保持方法' },
-  ], String(t.status || 302));
-  f.redirectKeep = checkEl('保留原始路径（拼接在目标之后）', !!t.keepPath);
-  return f;
-}
-
-function staticFields(base, mounts) {
-  const t = (base && base.static) || {};
-  const f = {};
-  f.staticMount = selectEl([{ value: '', label: '（不使用挂载，直接用本地目录）' }].concat(mounts), t.mountId || '');
-  f.staticRoot = input({ value: t.root || '', placeholder: '例如 /var/www/site 或 /srv/nunt/www' });
-  f.staticIndex = input({ value: (t.index || ['index.html']).join(' '), placeholder: 'index.html index.htm' });
-  f.staticCache = input({ type: 'number', min: '0', value: String(t.cacheSeconds || 0), placeholder: '0 表示不缓存' });
-  f.staticListing = checkEl('允许目录列表', !!t.listing);
-  f.staticSPA = checkEl('单页应用模式（找不到文件时回退 index.html）', !!t.spa);
-  return f;
-}
-
-function filesFields(base, mounts) {
-  const t = (base && base.files) || {};
-  const f = {};
-  f.filesMount = selectEl([{ value: '', label: '（不使用挂载，直接用本地目录）' }].concat(mounts), t.mountId || '');
-  f.filesRoot = input({ value: t.root || '/', placeholder: '/' });
-  f.filesTitle = input({ value: t.title || '', placeholder: '页面标题，留空使用规则名称' });
-  f.filesReadonly = checkEl('只读（禁止所有写操作）', !!t.readOnly);
-  f.filesUpload = checkEl('允许上传', !!t.allowUpload);
-  f.filesDelete = checkEl('允许删除', !!t.allowDelete);
-  f.filesMkdir = checkEl('允许新建目录', !!t.allowMkdir);
-  f.filesRename = checkEl('允许重命名', !!t.allowRename);
-  f.filesHidden = checkEl('显示隐藏文件', !!t.showHidden);
-  f.filesShare = checkEl('启用分享链接', !!t.shareLinks);
-  f.filesTTL = input({ type: 'number', min: '0', value: String(t.shareTtlMin || 0), placeholder: '0 表示永久' });
-  return f;
-}
-
-function proxyHint() {
-  return el('div', { class: 'notice' },
-    '上游列表每行一个地址（支持 http/https，可带端口）；路径重写会把匹配到的“路径重写前缀”替换为“路径替换为”，留空则不重写。');
-}
-
-function buildTarget(kind, base, mounts, host) {
-  clear(host);
-  if (kind === 'proxy') {
-    const p = (base && base.proxy) || {};
-    const targets = textarea({ rows: '4', placeholder: '每行一个上游地址：' + NEWLINE + 'http://127.0.0.1:8080' + NEWLINE + 'http://10.0.0.5:80', value: (p.targets || []).join(NEWLINE) });
-    const balance = selectEl([
-      { value: 'round_robin', label: '轮询' },
-      { value: 'random', label: '随机' },
-      { value: 'ip_hash', label: 'IP 哈希' },
-      { value: 'least_conn', label: '最少连接' },
-    ], p.balance || 'round_robin');
-    const hostHeader = input({ value: p.hostHeader || '', placeholder: '留空透传客户端 Host' });
-    const timeout = input({ type: 'number', min: '0', value: String(p.timeoutSec === undefined ? '' : p.timeoutSec), placeholder: '0 表示默认' });
-    const reqHeaders = textarea({ rows: '3', placeholder: '每行一条 key: value' + NEWLINE + 'X-Real-IP: $remote_addr', value: kvText(p.headers) });
-    const respHeaders = textarea({ rows: '3', placeholder: '每行一条 key: value', value: kvText(p.respHeaders) });
-    const prefix = input({ value: p.pathPrefix || '', placeholder: '例如 /api' });
-    const replace = input({ value: p.pathReplace || '', placeholder: '例如 /' });
-    const insecure = checkEl('跳过上游证书校验', !!p.insecureTls);
-    const noCompress = checkEl('禁用压缩', !!p.disableCompres);
-    host.appendChild(proxyHint());
-    host.appendChild(fieldSet('上游服务', [
-      field('上游列表', targets, '每行一个上游地址', true),
-      field('负载均衡方式', balance),
-      field('Host 头', hostHeader, '留空透传客户端 Host'),
-    ]));
-    host.appendChild(fieldSet('请求 / 响应调整', [
-      field('超时（秒）', timeout),
-      field('请求头', reqHeaders),
-      field('响应头', respHeaders),
-      field('路径重写前缀', prefix),
-      field('路径替换为', replace),
-      field('其他选项', el('div', { class: 'bar' }, insecure, noCompress)),
-    ]));
-    return {
-      collect: () => ({
-        proxy: {
-          targets: lines(targets),
-          balance: val(balance) || 'round_robin',
-          hostHeader: val(hostHeader),
-          headers: keyValues(reqHeaders),
-          respHeaders: keyValues(respHeaders),
-          pathPrefix: val(prefix),
-          pathReplace: val(replace),
-          timeoutSec: numOf(timeout, 0),
-          insecureTls: checked(insecure),
-          disableCompres: checked(noCompress),
-        },
-      }),
-    };
-  }
-  if (kind === 'redirect') {
-    const F = redirectFields(base);
-    host.appendChild(fieldSet('重定向设置', [
-      field('目标地址', F.redirectTo, '可以包含 https:// 前缀', true),
-      field('状态码', F.redirectStatus),
-      field('路径处理', F.redirectKeep),
-    ]));
-    host.appendChild(el('div', { class: 'notice', text: '开启“保留原始路径”后，请求 /a/b 会被重定向到 目标地址 + /a/b。' }));
-    return {
-      collect: () => ({ redirect: { to: val(F.redirectTo), status: numOf(F.redirectStatus, 302), keepPath: checked(F.redirectKeep) } }),
-      redirect: true,
-    };
-  }
-  if (kind === 'static') {
-    const F = staticFields(base, mounts);
-    host.appendChild(fieldSet('静态文件', [
-      field('存储挂载', F.staticMount, '来自“存储挂载”页面'),
-      field('本地目录', F.staticRoot, '未选择挂载时使用'),
-      field('索引文件', F.staticIndex, '空格分隔'),
-      field('缓存秒数', F.staticCache),
-      field('选项', el('div', { class: 'bar' }, F.staticListing, F.staticSPA)),
-    ]));
-    return {
-      collect: () => ({
-        static: {
-          mountId: val(F.staticMount),
-          root: val(F.staticRoot),
-          index: val(F.staticIndex).split(/\s+/).filter((s) => s.length > 0),
-          cacheSeconds: numOf(F.staticCache, 0),
-          listing: checked(F.staticListing),
-          spa: checked(F.staticSPA),
-        },
-      }),
-      needsMount: true,
-    };
-  }
-  const F = filesFields(base, mounts);
-  const isDav = kind === 'webdav';
-  host.appendChild(fieldSet(isDav ? 'WebDAV 服务' : '文件管理', [
-    field('存储挂载', F.filesMount, '来自“存储挂载”页面'),
-    field('根目录', F.filesRoot),
-    field('标题', F.filesTitle),
-    field('只读', F.filesReadonly),
-    field('权限', el('div', { class: 'bar' }, F.filesUpload, F.filesDelete, F.filesMkdir, F.filesRename)),
-    field('显示', el('div', { class: 'bar' }, F.filesHidden, F.filesShare)),
-    field('分享有效期（分钟）', F.filesTTL, '0 表示永久有效'),
-  ]));
-  return {
-    collect: () => ({
-      files: {
-        mountId: val(F.filesMount),
-        root: val(F.filesRoot) || '/',
-        title: val(F.filesTitle),
-        readOnly: checked(F.filesReadonly),
-        allowUpload: checked(F.filesUpload),
-        allowDelete: checked(F.filesDelete),
-        allowMkdir: checked(F.filesMkdir),
-        allowRename: checked(F.filesRename),
-        showHidden: checked(F.filesHidden),
-        shareLinks: checked(F.filesShare),
-        shareTtlMinutes: numOf(F.filesTTL, 0),
-      },
-    }),
-    needsMount: true,
-  };
+function balanceValue(v) {
+  const key = String(v === undefined || v === null ? '' : v).trim();
+  if (BALANCE_OPTIONS.filter((o) => o.value === key).length) return key;
+  if (BALANCE_ALIASES[key]) return BALANCE_ALIASES[key];
+  return 'roundrobin';
 }
 
 // ---------------------------------------------------------------------------
 // 请求体检查策略（与后端 model.WebRule.bodyPolicy 一一对应）
 //
-// 空串 = 继承全局默认策略；其余取值由 PLAN-waf-body-policy.md §2 冻结。
+// 空串 = 继承全局默认策略；其余取值由 CONTRACT.md 第 8 节冻结。
 // 说明文案里必须保留「gRPC 流式只查首消息」这一能力边界，避免运维误以为
 // 流式路由的每一条消息都被检查过。
 // ---------------------------------------------------------------------------
@@ -991,394 +75,1046 @@ const BODY_POLICY_HINT = {
   'grpc-stream': '首消息先判定一次，通过后连同 scanner 交给上游；后续帧只做帧校验（compressed flag、长度上限、截断）——不会逐消息做 CRS 检查。',
 };
 
+// 表格 WAF 列的策略短标签（迁移前是一整列「请求体策略」，本批按验收要求把信息并进 WAF 列）。
+const BODY_POLICY_SHORT = {
+  full: '全量',
+  peek: '偷看',
+  skip: '跳过',
+  'grpc-unary': 'gRPC 单消息',
+  'grpc-stream': 'gRPC 流式',
+};
+
+/* ------------------------------------------------------------------ 局部样式 */
+
+const PAGE_CSS = [
+  '.pweb-sum{font-size:12px}',
+  '.pweb-tools{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:12px}',
+  '.pweb-tools .pweb-search{width:240px}',
+  '.pweb-name{font-weight:600;word-break:break-word}',
+  '.pweb-path{font-size:11px;color:var(--text-faint);word-break:break-all}',
+  '.pweb-chips{display:flex;flex-wrap:wrap;gap:4px;align-items:center}',
+  '.pweb-chips-more{font-size:11px;color:var(--text-faint)}',
+  '.pweb-waf{display:flex;flex-direction:column;gap:3px;align-items:flex-start}',
+  '.pweb-switch{font-size:12px}',
+  '.pweb-target{word-break:break-all}',
+  '.pweb-focus-title{font-weight:600}',
+  '.pweb-focus-actions{margin-top:8px}',
+  '.pweb-marker{display:none}',
+  '.pweb-hit>td{background:color-mix(in srgb,var(--brand) 10%,transparent)}',
+  '.pweb-log{max-height:52vh;overflow:auto;padding:10px 12px;background:#080b10;border-radius:var(--radius-sm);font-family:var(--sl-font-mono);font-size:12.5px;line-height:1.6}',
+  '.pweb-log-line{white-space:pre-wrap;overflow-wrap:anywhere;color:#c8d1de;text-indent:-2em;padding-left:2em}',
+  '.pweb-log-line .src{color:#8b96a8}',
+  '.pweb-tabs::part(tabs){border-bottom:1px solid var(--line)}',
+  '.pweb-legend{font-size:12px;font-weight:600;color:var(--text-dim);margin:6px 0 2px}',
+  '.pweb-legend:first-child{margin-top:0}',
+  '.pweb-auth-list{display:flex;flex-direction:column;gap:8px;margin-bottom:8px}',
+  '.pweb-auth-row{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end}',
+  '.pweb-auth-empty{font-size:12px;color:var(--text-faint);margin:0 0 8px}',
+].join(EOL);
+
+function pageStyle(root, css) {
+  if (!css) return () => {};
+  const tag = document.createElement('style');
+  tag.textContent = css;
+  root.appendChild(tag);
+  return () => { if (tag.parentNode) tag.parentNode.removeChild(tag); };
+}
+
+/* ------------------------------------------------------------------ 纯函数（语义与迁移前一致） */
+
+function unwrap(data, keys) {
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === 'object') {
+    for (const key of (keys || ['items', 'list', 'data'])) {
+      if (Array.isArray(data[key])) return data[key];
+    }
+  }
+  return [];
+}
+
+// splitLines：换行或逗号分隔（迁移前是 split(/[\n,]/)，这里用 EOL 拼出同样的语义）。
+function splitLines(value) {
+  return String(value === undefined || value === null ? '' : value)
+    .split(EOL).join(',')
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function numVal(v, dflt) {
+  const text = String(v === undefined || v === null ? '' : v).trim();
+  if (text === '') return dflt === undefined ? 0 : dflt;
+  const n = Number(text);
+  return isFinite(n) ? n : (dflt === undefined ? 0 : dflt);
+}
+
+function tlsLabel(r) {
+  const mode = (r && r.tls && r.tls.mode) || 'off';
+  return TLS_LABEL[mode] || '关闭';
+}
+
+// targetText：列表里那一列「目标摘要」，逐字沿用迁移前的口径。
+function targetText(r) {
+  if (!r) return '-';
+  if (r.type === 'proxy') {
+    const t = r.proxy || {};
+    const list = (t.targets || []);
+    if (!list.length) return '-';
+    const extra = list.length > 1 ? '（' + (BALANCE_LABEL[t.balance] || t.balance || '轮询') + '，共 ' + list.length + ' 个）' : '';
+    return list[0] + extra;
+  }
+  if (r.type === 'redirect') {
+    const t = r.redirect || {};
+    return (t.to || '-') + ' [' + (t.status || 302) + ']';
+  }
+  if (r.type === 'static') {
+    const t = r.static || {};
+    return t.mountId ? '挂载: ' + t.mountId : (t.root || '-');
+  }
+  const f = r.files || {};
+  return f.mountId ? '挂载: ' + f.mountId + (f.root ? ' ' + f.root : '') : (f.root || '-');
+}
+
 function bodyPolicyHintOf(value) {
-  const key = BODY_POLICY_OPTIONS.filter((o) => o.value === String(value || ''))[0];
-  return key ? BODY_POLICY_HINT[key.value] : BODY_POLICY_HINT[''];
-}
-
-function bodyPolicyBadge(value) {
   const key = String(value || '');
-  if (key === 'full') return badge('全量', 'ok');
-  if (key === 'peek') return badge('偷看', 'warn');
-  if (key === 'skip') return badge('跳过', 'err');
-  if (key === 'grpc-unary') return badge('gRPC 单消息', 'ok');
-  if (key === 'grpc-stream') return badge('gRPC 流式', 'warn');
-  return el('span', { class: 'muted', text: '继承默认' });
+  return BODY_POLICY_HINT[key] === undefined ? BODY_POLICY_HINT[''] : BODY_POLICY_HINT[key];
 }
 
-function baseFields(base) {
-  const b = base || {};
-  const f = {};
-  f.name = input({ value: b.name || '', placeholder: '例如 博客首页' });
-  // WAF 开关与请求体策略：两者都是可编辑的（旧版本把 WAF 当成只读回显，
-  // 导致编辑规则时无法调整防护开关）。
-  f.waf = checkEl('启用 WAF 检查', !!b.waf);
-  f.bodyPolicy = selectEl(BODY_POLICY_OPTIONS, String(b.bodyPolicy || ''));
-  f.enable = checkEl('启用该规则', b.enable !== false);
-  f.type = selectEl(TYPES.map((t) => ({ value: t.id, label: t.label })), b.type || 'proxy');
-  f.listen = textarea({ rows: '3', placeholder: '每行一个监听地址，例如：' + NEWLINE + ':443' + NEWLINE + '0.0.0.0:8080', value: (b.listen || []).join(NEWLINE) });
-  f.domains = textarea({ rows: '3', placeholder: '每行一个域名，支持通配：' + NEWLINE + 'example.com' + NEWLINE + '*.example.com', value: (b.domains || []).join(NEWLINE) });
-  f.path = input({ value: b.path || '/', placeholder: '/' });
-  f.priority = input({ type: 'number', value: String(b.priority || 0) });
-  return f;
+/** chipList：监听 / 域名这种多值列的标签渲染（超出 max 的折叠成 +N）。 */
+function chipList(list, max) {
+  const arr = (Array.isArray(list) ? list : []).filter((x) => x !== null && x !== undefined && String(x) !== '');
+  if (!arr.length) return html`<span class="muted">-</span>`;
+  const limit = max || 3;
+  return html`<div class="pweb-chips">
+    ${arr.slice(0, limit).map((item) => html`<sl-tag size="small">${String(item)}</sl-tag>`)}
+    ${arr.length > limit ? html`<span class="pweb-chips-more">+${arr.length - limit}</span>` : nothing}
+  </div>`;
 }
 
-// bodyPolicyHintNode 随下拉选择实时更新策略说明。
-function bodyPolicyHintNode(select) {
-  const node = el('div', { class: 'hint', text: bodyPolicyHintOf(val(select)) });
-  select.addEventListener('change', () => { node.textContent = bodyPolicyHintOf(val(select)); });
-  return node;
+/** legendField：把迁移前 fieldSet 的小标题塞进 formGrid（用 div，避免 h3 触发 heading-order）。 */
+function legendField(name, text) {
+  const node = document.createElement('div');
+  node.className = 'pweb-legend';
+  node.textContent = text;
+  return { name, label: false, type: 'custom', wide: true, node };
 }
 
-function tlsFields(base) {
-  const t = (base && base.tls) || {};
-  const f = {};
-  f.mode = selectEl([
-    { value: 'off', label: '关闭（仅 HTTP）' },
-    { value: 'auto', label: '自动证书（ACME 自动申请）' },
-    { value: 'custom', label: '指定证书' },
-  ], t.mode || 'off');
-  f.cert = null;
-  f.hsts = checkEl('启用 HSTS（强制浏览器使用 HTTPS）', !!t.hsts);
-  return f;
+/** certOptions / mountOptions：证书与存储挂载下拉的选项（失败一律退回空列表）。 */
+async function certOptions(api) {
+  try {
+    const data = await api.get('/api/v1/acme/certificates');
+    return unwrap(data, ['certificates', 'items']).map((c) => {
+      const domains = c.domains || (c.domain ? [c.domain] : []);
+      const label = domains.join(', ') || c.name || c.id;
+      return { value: c.id || c.name || label, label };
+    });
+  } catch (err) {
+    return [];
+  }
 }
 
-async function openRuleForm(rule, ctx, reload) {
-  const base = rule || {};
-  const editing = !!base.id;
-  const F = baseFields(base);
-  const T = tlsFields(base);
-  const A = accessFields(base);
-  const B = basicAuthFields(base);
-  const targetBox = el('div', {});
-  const targetRef = { collect: () => ({}), needsMount: false };
-  const certRow = el('div', {});
+async function mountOptions(api) {
+  try {
+    const data = await api.get('/api/v1/storage/mounts');
+    return unwrap(data, ['mounts', 'items']).filter((m) => m.enable !== false).map((m) => ({
+      value: m.id,
+      label: (m.name || m.id) + (m.type === 'webdav' ? '（WebDAV）' : '（本地）'),
+    }));
+  } catch (err) {
+    return [];
+  }
+}
 
-  async function refreshCertRow() {
-    clear(certRow);
-    if (val(T.mode) === 'custom') {
-      const opts = await certOptions();
-      const certSel = opts.length
-        ? selectEl(opts, (base.tls && base.tls.certId) || '')
-        : input({ value: (base.tls && base.tls.certId) || '', placeholder: '证书 ID（暂无证书，请先在“证书”页面申请）' });
-      certRow.appendChild(field('证书', certSel, opts.length ? '' : '未能获取证书列表，可直接填写证书 ID'));
-      targetRef.cert = certSel;
-    } else {
-      targetRef.cert = null;
+const NO_MOUNT = { value: '', label: '（不使用挂载，直接用本地目录）' };
+
+/* ------------------------------------------------------------------ BasicAuth 账号编辑器 */
+
+/**
+ * authEditor：BasicAuth 的账号列表（多用户）。
+ *
+ * 为什么不用迁移前那套「主账号 + 其他账号文本框」：后端 hashAuthUsers 的规则是
+ * 「用户名在旧规则里存在 + 密码留空 = 保留原哈希」，而迁移前的前端在密码留空时
+ * 会把 users 从提交体里删掉，后端于是拿到 enable=true、users 为空，直接以
+ * 「basic authentication is enabled without users」拒绝保存。这里按后端真正支持的
+ * 语义做：每个账号一行，密码留空表示不修改；新加的账号必须填密码。
+ * 列表接口返回的是 argon2 哈希，界面不回显，占位符写明「留空表示不修改」。
+ */
+function authEditor(users, existingNames) {
+  const host = document.createElement('div');
+  host.className = 'pweb-auth-users';
+  const list = document.createElement('div');
+  list.className = 'pweb-auth-list';
+  const empty = document.createElement('p');
+  empty.className = 'pweb-auth-empty';
+  empty.textContent = '还没有账号。至少添加一个账号，BasicAuth 才能生效。';
+  const rows = [];
+
+  const addButton = document.createElement('sl-button');
+  addButton.setAttribute('size', 'small');
+  addButton.textContent = '添加账号';
+
+  function syncEmpty() {
+    if (rows.length) { if (empty.parentNode) empty.parentNode.removeChild(empty); }
+    else if (!empty.parentNode) host.insertBefore(empty, addButton);
+  }
+
+  function addRow(user) {
+    const name = String((user && user.username) || '');
+    const row = document.createElement('div');
+    row.className = 'pweb-auth-row';
+
+    const userInput = document.createElement('sl-input');
+    userInput.setAttribute('size', 'small');
+    userInput.setAttribute('label', '用户名');
+    userInput.setAttribute('placeholder', '用户名');
+    userInput.setAttribute('autocomplete', 'off');
+    userInput.value = name;
+
+    const passInput = document.createElement('sl-input');
+    passInput.setAttribute('size', 'small');
+    passInput.setAttribute('type', 'password');
+    passInput.setAttribute('label', '密码');
+    passInput.setAttribute('password-toggle', '');
+    passInput.setAttribute('autocomplete', 'new-password');
+    passInput.setAttribute('placeholder', existingNames.indexOf(name) >= 0 ? '留空表示不修改' : '密码');
+
+    const del = document.createElement('sl-icon-button');
+    del.setAttribute('name', 'x-lg');
+    del.setAttribute('label', '删除该账号');
+    del.addEventListener('click', () => {
+      const index = rows.indexOf(row);
+      if (index >= 0) rows.splice(index, 1);
+      if (row.parentNode) row.parentNode.removeChild(row);
+      syncEmpty();
+    });
+
+    row.appendChild(userInput);
+    row.appendChild(passInput);
+    row.appendChild(del);
+    list.appendChild(row);
+    rows.push(row);
+    syncEmpty();
+    return { row, userInput, passInput };
+  }
+
+  addButton.addEventListener('click', () => {
+    const entry = addRow({ username: '' });
+    if (typeof entry.userInput.focus === 'function') { try { entry.userInput.focus(); } catch (err) { /* 忽略 */ } }
+  });
+
+  host.appendChild(empty);
+  host.appendChild(list);
+  host.appendChild(addButton);
+  for (const user of (Array.isArray(users) ? users : [])) addRow(user);
+  syncEmpty();
+
+  return {
+    node: host,
+    addRow,
+    read() {
+      return rows.map((row) => {
+        const inputs = row.querySelectorAll('sl-input');
+        return {
+          username: String((inputs[0] && inputs[0].value) || '').trim(),
+          password: String((inputs[1] && inputs[1].value) || ''),
+        };
+      }).filter((user) => user.username || user.password);
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ 页面 */
+
+class WebPage extends NuntElement {
+  static properties = {
+    rules: { attribute: false },
+    loading: { type: Boolean },
+    error: { attribute: false },
+    typeTab: { type: String },
+    focusId: { type: String },
+    busyId: { type: String },
+  };
+
+  constructor() {
+    super();
+    this.ctx = null;
+    this.rules = [];
+    this.loading = true;
+    this.error = null;
+    this.typeTab = 'all';
+    this.focusId = '';
+    this.busyId = '';
+    this.query = '';
+    this.searchTimer = null;
+    this.logPollers = new Set();
+    this.dialogHosts = new Set();
+    this.dialogs = new Set();
+    this.disposed = false;
+    this.focusWarned = false;
+    this.highlightToken = 0;
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.load();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this.disposed = true;
+  }
+
+  /** dispose 由 mount 返回的清理函数调用：停掉日志轮询、关掉对话框、移除元素。 */
+  dispose() {
+    this.disposed = true;
+    this.highlightToken += 1;
+    if (this.searchTimer) { clearTimeout(this.searchTimer); this.searchTimer = null; }
+    for (const stop of Array.from(this.logPollers)) {
+      try { stop(); } catch (err) { /* 忽略 */ }
+    }
+    this.logPollers.clear();
+    for (const host of Array.from(this.dialogHosts)) {
+      try { renderInto(host, nothing); } catch (err) { /* 忽略 */ }
+    }
+    this.dialogHosts.clear();
+    for (const dialog of Array.from(this.dialogs)) {
+      try { dialog.close(); } catch (err) { /* 忽略 */ }
+    }
+    this.dialogs.clear();
+    this.remove();
+  }
+
+  openPageDialog(options) {
+    const api = openDialog(options);
+    this.dialogs.add(api);
+    if (api.dialog) api.dialog.addEventListener('sl-after-hide', () => this.dialogs.delete(api));
+    return api;
+  }
+
+  /* ---------------------------------------------------------------- 取数 */
+
+  async load() {
+    this.loading = true;
+    try {
+      const data = await this.ctx.api.get('/api/v1/web/rules');
+      if (this.disposed) return;
+      this.rules = unwrap(data, ['rules', 'items']);
+      this.error = null;
+    } catch (err) {
+      if (this.disposed) return;
+      this.rules = [];
+      this.error = err;
+    } finally {
+      if (!this.disposed) this.loading = false;
     }
   }
 
-  let mounts = await mountOptions();
-  function rebuildTarget() {
-    const kind = val(F.type);
-    if (targetRef.needsMount && !mounts.length) {
-      mountOptions().then((list) => { mounts = list; rebuildTarget(); });
-    }
-    const built = buildTarget(kind, base, mounts, targetBox);
-    targetRef.collect = built.collect;
-    targetRef.needsMount = !!built.needsMount;
+  filtered() {
+    const q = String(this.query || '').trim().toLowerCase();
+    return this.rules.filter((rule) => {
+      if (this.typeTab !== 'all' && rule.type !== this.typeTab) return false;
+      if (!q) return true;
+      const hay = [rule.name, rule.id, (rule.listen || []).join(' '), (rule.domains || []).join(' '), rule.path, rule.type]
+        .join(' ').toLowerCase();
+      return hay.indexOf(q) >= 0;
+    });
   }
 
-  const body = el('div', {},
-    el('div', { class: 'notice', text: editing ? '正在编辑规则：' + (base.name || base.id) : '新建规则。监听地址可写 :443、0.0.0.0:8080、[::]:443 等；不填域名则匹配任意 Host。' }),
-    fieldSet('基本信息', [
-      field('名称', F.name),
-      field('类型', F.type, '不同类型显示不同的目标配置'),
-      field('监听地址', F.listen, '每行一个', true),
-      field('域名', F.domains, '支持 *.example.com', true),
-      field('路径', F.path, '前缀匹配'),
-      field('优先级', F.priority, '数字越小越优先'),
-      field('启用', F.enable),
-    ]),
-    fieldSet('TLS', [
-      field('模式', T.mode),
-      certRow,
-      field('HSTS', T.hsts),
-    ]),
-    targetBox,
-    fieldSet('访问控制', [
-      field('IP 策略', A.accessMode),
-      field('IP 列表', A.accessIPs, '每行一条，支持 CIDR'),
-      field('UA 策略', A.uaMode),
-      field('UA 列表', A.uaList, '每行一条，支持 * 通配'),
-    ]),
-    fieldSet('BasicAuth', [
-      field('启用', B.authEnable),
-      field('用户名', B.authUser),
-      field('密码', B.authPass, editing ? '留空表示不修改' : ''),
-      field('其他账号', B.authExtra, '每行一个 user:password'),
-    ]),
-    fieldSet('WAF 与请求体检查策略', [
-      field('WAF 开关', F.waf, '关闭后该路由完全不经过 WAF（含请求体检查）'),
-      field('请求体策略', F.bodyPolicy, ''),
-      el('div', { class: 'field', style: { gridColumn: '1 / -1' } },
-        bodyPolicyHintNode(F.bodyPolicy),
-        el('div', { class: 'hint', text: '能力边界：gRPC 流式路由只做首消息检查 + 帧校验，后续消息不会被逐条检查；' +
-          '声明 grpc-unary 的路由若出现第二帧，enforce 模式下拒绝、observe 模式下只记录。' }),
-      ),
-    ]),
-  );
+  setType(id) {
+    const next = TABS.filter((tab) => tab.id === id).length ? id : 'all';
+    if (next === this.typeTab) return;
+    this.typeTab = next;
+  }
 
-  F.type.addEventListener('change', () => { rebuildTarget(); });
-  T.mode.addEventListener('change', () => { refreshCertRow(); });
-  rebuildTarget();
-  await refreshCertRow();
+  onSearchInput(event) {
+    const value = event.target && event.target.value !== undefined ? String(event.target.value) : '';
+    if (this.searchTimer) clearTimeout(this.searchTimer);
+    this.searchTimer = setTimeout(() => {
+      this.searchTimer = null;
+      if (!this.disposed) this.query = value;
+    }, 200);
+  }
 
-  openModal({
-    title: editing ? '编辑 Web 规则' : '新建 Web 规则',
-    body,
-    actions: [
-      { label: '取消', kind: 'ghost' },
+  /* ---------------------------------------------------------------- 动作 */
+
+  async toggle(rule, next) {
+    const want = (next === undefined) ? !rule.enable : !!next;
+    this.busyId = String(rule.id || '');
+    try {
+      try {
+        await this.ctx.api.post('/api/v1/web/rules/' + encodeURIComponent(rule.id) + '/toggle');
+      } catch (err) {
+        // 兼容没有 toggle 路由的旧后端：退回整条规则的更新（与迁移前一致）。
+        await this.ctx.api.put('/api/v1/web/rules/' + encodeURIComponent(rule.id), Object.assign({}, rule, { enable: want }));
+      }
+      if (this.disposed) return;
+      toast(want ? '已启用' : '已停用', 'ok');
+      await this.load();
+    } catch (err) {
+      if (this.disposed) return;
+      toast('切换失败：' + errorMessage(err), 'err');
+    } finally {
+      if (!this.disposed) this.busyId = '';
+    }
+  }
+
+  async removeRule(rule) {
+    const ok = await confirmDialog('确定删除规则「' + (rule.name || rule.id) + '」吗？该操作不可撤销。', { danger: true, okLabel: '删除' });
+    if (!ok) return;
+    try {
+      await this.ctx.api.del('/api/v1/web/rules/' + encodeURIComponent(rule.id));
+      if (this.disposed) return;
+      toast('已删除', 'ok');
+      await this.load();
+    } catch (err) {
+      if (this.disposed) return;
+      toast('删除失败：' + errorMessage(err), 'err');
+    }
+  }
+
+  /* ---------------------------------------------------------------- 表单 */
+
+  async openRuleForm(rule) {
+    const base = rule || {};
+    const editing = !!base.id;
+    // 证书与挂载下拉的选项来自接口；拿不到就退回手工输入（与迁移前一致）。
+    const [mounts, certs] = await Promise.all([mountOptions(this.ctx.api), certOptions(this.ctx.api)]);
+    if (this.disposed) return;
+
+    const tls = base.tls || {};
+    const access = base.access || {};
+    const auth = base.basicAuth || {};
+    const authUsers = Array.isArray(auth.users) ? auth.users : [];
+    const existingNames = authUsers.map((u) => String(u.username || ''));
+    const proxy = base.proxy || {};
+    const redirect = base.redirect || {};
+    const stat = base.static || {};
+    const files = base.files || {};
+
+    const mountChoices = [NO_MOUNT].concat(mounts);
+    const authField = authEditor(authUsers.map((u) => ({ username: u.username })), existingNames);
+
+    const targetLegend = document.createElement('div');
+    targetLegend.className = 'pweb-legend';
+    targetLegend.textContent = '反向代理（proxy）';
+
+    const bodyHint = document.createElement('div');
+    bodyHint.className = 'pweb-legend';
+    bodyHint.textContent = bodyPolicyHintOf(base.bodyPolicy);
+
+    const form = formGrid([
+      legendField('legendBasic', '基本信息'),
+      { name: 'name', label: '名称', value: base.name || '', placeholder: '例如 博客首页' },
       {
-        label: '保存', kind: 'primary',
-        onClick: async () => {
-          const name = val(F.name);
-          if (!name) { toast('请填写规则名称', 'warn'); return false; }
-          const listens = lines(F.listen);
-          if (!listens.length) { toast('请至少填写一个监听地址，例如 :443', 'warn'); return false; }
-          const kind = val(F.type);
-          const payload = {
-            name,
-            enable: checked(F.enable),
-            type: kind,
-            listen: listens,
-            domains: lines(F.domains),
-            path: val(F.path) || '/',
-            priority: numOf(F.priority, 0),
-            tls: {
-              mode: val(T.mode) || 'off',
-              certId: targetRef.cert ? val(targetRef.cert) : ((base.tls && base.tls.certId) || ''),
-              hsts: checked(T.hsts),
-            },
-            waf: checked(F.waf),
-            bodyPolicy: val(F.bodyPolicy),
-            access: {
-              mode: val(A.accessMode) || 'off',
-              ips: lines(A.accessIPs),
-              uaMode: val(A.uaMode) || 'off',
-              uas: lines(A.uaList),
-            },
-            basicAuth: collectAuth(B, editing),
-            proxy: null,
-            redirect: null,
-            static: null,
-            files: null,
-          };
-          const tgt = targetRef.collect() || {};
-          Object.assign(payload, tgt);
-          if (kind === 'proxy' && (!payload.proxy || !payload.proxy.targets.length)) { toast('请至少填写一个上游地址', 'warn'); return false; }
-          if (kind === 'redirect' && (!payload.redirect || !payload.redirect.to)) { toast('请填写重定向目标地址', 'warn'); return false; }
-          try {
-            if (editing) await api.put('/web/rules/' + encodeURIComponent(base.id), payload);
-            else await api.post('/web/rules', payload);
-            toast('保存成功', 'ok');
-            reload();
-          } catch (e) {
-            toast('保存失败：' + apiErr(e), 'error');
-            return false;
-          }
+        name: 'type',
+        label: '类型',
+        type: 'select',
+        value: base.type || 'proxy',
+        options: TYPES.map((t) => ({ value: t.id, label: t.label })),
+        hint: '不同类型显示不同的目标配置',
+      },
+      { name: 'enable', label: '启用', type: 'switch', value: base.enable !== false, text: '启用该规则' },
+      {
+        name: 'listen',
+        label: '监听地址',
+        type: 'textarea',
+        rows: 3,
+        wide: true,
+        value: (base.listen || []).join(EOL),
+        placeholder: '每行一个监听地址，例如：' + EOL + ':443' + EOL + '0.0.0.0:8080',
+        hint: '每行一个；可写 :443、0.0.0.0:8080、[::]:443 等',
+      },
+      {
+        name: 'domains',
+        label: '域名',
+        type: 'textarea',
+        rows: 3,
+        wide: true,
+        value: (base.domains || []).join(EOL),
+        placeholder: '每行一个域名，支持通配：' + EOL + 'example.com' + EOL + '*.example.com',
+        hint: '支持 *.example.com；留空则匹配任意 Host',
+      },
+      { name: 'path', label: '路径', value: base.path || '/', placeholder: '/', hint: '前缀匹配' },
+      { name: 'priority', label: '优先级', type: 'number', value: Number(base.priority) || 0, hint: '数字越小越优先' },
+
+      legendField('legendTLS', 'TLS'),
+      {
+        name: 'tlsMode',
+        label: 'TLS 模式',
+        type: 'select',
+        value: tls.mode || 'off',
+        options: [
+          { value: 'off', label: '关闭（仅 HTTP）' },
+          { value: 'auto', label: '自动证书（ACME 自动申请）' },
+          { value: 'custom', label: '指定证书' },
+        ],
+      },
+      certs.length
+        ? { name: 'tlsCertId', label: '证书', type: 'select', value: tls.certId || '', options: certs, placeholder: '选择证书' }
+        : {
+          name: 'tlsCertId',
+          label: '证书 ID',
+          value: tls.certId || '',
+          placeholder: '证书 ID（暂无证书，请先在“证书”页面申请）',
+          hint: '未能获取证书列表，可直接填写证书 ID',
+        },
+      { name: 'tlsHsts', label: 'HSTS', type: 'switch', value: !!tls.hsts, text: '启用 HSTS（强制浏览器使用 HTTPS）' },
+
+      { name: 'legendTarget', label: false, type: 'custom', wide: true, node: targetLegend },
+
+      // --- 反向代理 ---
+      {
+        name: 'proxyTargets',
+        label: '上游列表',
+        type: 'textarea',
+        rows: 4,
+        wide: true,
+        value: (proxy.targets || []).join(EOL),
+        placeholder: '每行一个上游地址：' + EOL + 'http://127.0.0.1:8080' + EOL + 'http://10.0.0.5:80',
+        hint: '每行一个上游地址（支持 http/https，可带端口）',
+      },
+      {
+        name: 'proxyBalance',
+        label: '负载均衡方式',
+        type: 'select',
+        value: balanceValue(proxy.balance),
+        options: BALANCE_OPTIONS,
+      },
+      { name: 'proxyHostHeader', label: 'Host 头', value: proxy.hostHeader || '', placeholder: '留空透传客户端 Host' },
+      { name: 'proxyTimeout', label: '超时（秒）', type: 'number', value: Number(proxy.timeoutSec) || 0, min: 0, placeholder: '0 表示默认' },
+      { name: 'proxyInsecure', label: '上游证书', type: 'switch', value: !!proxy.insecureTls, text: '跳过上游证书校验' },
+      { name: 'proxyNoCompress', label: '压缩', type: 'switch', value: !!(proxy.disableCompression || proxy.disableCompres), text: '禁用压缩' },
+      { name: 'proxyH2C', label: '上游协议', type: 'switch', value: !!proxy.h2c, text: 'h2c（明文 HTTP/2 上游，原生 gRPC 常用）' },
+      {
+        name: 'proxyHeaders',
+        label: '请求头',
+        type: 'kv',
+        wide: true,
+        value: proxy.headers || {},
+        hint: '每行一条 key: value，例如 X-Real-IP: $remote_addr',
+      },
+      { name: 'proxyRespHeaders', label: '响应头', type: 'kv', wide: true, value: proxy.respHeaders || {} },
+      { name: 'proxyPathPrefix', label: '路径重写前缀', value: proxy.pathPrefix || '', placeholder: '例如 /api' },
+      { name: 'proxyPathReplace', label: '路径替换为', value: proxy.pathReplace || '', placeholder: '例如 /' },
+
+      // --- 重定向 ---
+      {
+        name: 'redirectTo',
+        label: '目标地址',
+        wide: true,
+        value: redirect.to || '',
+        placeholder: 'https://example.com/new',
+        hint: '可以包含 https:// 前缀',
+      },
+      {
+        name: 'redirectStatus',
+        label: '状态码',
+        type: 'select',
+        value: String(redirect.status || 302),
+        options: [
+          { value: '301', label: '301 永久重定向' },
+          { value: '302', label: '302 临时重定向' },
+          { value: '307', label: '307 保持方法' },
+          { value: '308', label: '308 永久且保持方法' },
+        ],
+      },
+      { name: 'redirectKeep', label: '路径处理', type: 'switch', value: !!redirect.keepPath, text: '保留原始路径（拼接在目标之后）' },
+
+      // --- 静态托管 ---
+      { name: 'staticMount', label: '存储挂载', type: 'select', value: stat.mountId || '', options: mountChoices, hint: '来自“存储挂载”页面' },
+      { name: 'staticRoot', label: '本地目录', value: stat.root || '', placeholder: '例如 /var/www/site 或 /srv/nunt/www', hint: '未选择挂载时使用' },
+      { name: 'staticIndex', label: '索引文件', value: (stat.index || ['index.html']).join(' '), placeholder: 'index.html index.htm', hint: '空格分隔' },
+      { name: 'staticCache', label: '缓存秒数', type: 'number', value: Number(stat.cacheSeconds) || 0, min: 0, placeholder: '0 表示不缓存' },
+      { name: 'staticListing', label: '目录', type: 'switch', value: !!stat.listing, text: '允许目录列表' },
+      { name: 'staticSPA', label: '单页应用', type: 'switch', value: !!stat.spa, text: '单页应用模式（找不到文件时回退 index.html）' },
+
+      // --- 文件管理 / WebDAV ---
+      { name: 'filesMount', label: '存储挂载', type: 'select', value: files.mountId || '', options: mountChoices, hint: '来自“存储挂载”页面' },
+      { name: 'filesRoot', label: '根目录', value: files.root || '/', placeholder: '/' },
+      { name: 'filesTitle', label: '标题', value: files.title || '', placeholder: '页面标题，留空使用规则名称' },
+      { name: 'filesReadOnly', label: '只读', type: 'switch', value: !!files.readOnly, text: '只读（禁止所有写操作）' },
+      { name: 'filesUpload', label: '上传', type: 'switch', value: !!files.allowUpload, text: '允许上传' },
+      { name: 'filesDelete', label: '删除', type: 'switch', value: !!files.allowDelete, text: '允许删除' },
+      { name: 'filesMkdir', label: '新建目录', type: 'switch', value: !!files.allowMkdir, text: '允许新建目录' },
+      { name: 'filesRename', label: '重命名', type: 'switch', value: !!files.allowRename, text: '允许重命名' },
+      { name: 'filesHidden', label: '显示', type: 'switch', value: !!files.showHidden, text: '显示隐藏文件' },
+      { name: 'filesShare', label: '分享链接', type: 'switch', value: !!files.shareLinks, text: '启用分享链接' },
+      { name: 'filesShareTTL', label: '分享有效期（分钟）', type: 'number', value: Number(files.shareTtlMinutes) || 0, min: 0, placeholder: '0 表示永久' },
+
+      // --- 访问控制 ---
+      legendField('legendAccess', '访问控制'),
+      {
+        name: 'accessMode',
+        label: 'IP 策略',
+        type: 'select',
+        value: access.mode || 'off',
+        options: [
+          { value: 'off', label: '关闭' },
+          { value: 'allow', label: '白名单（仅允许以下 IP）' },
+          { value: 'deny', label: '黑名单（拒绝以下 IP）' },
+        ],
+      },
+      {
+        name: 'accessIPs',
+        label: 'IP 列表',
+        type: 'textarea',
+        rows: 3,
+        wide: true,
+        value: (access.ips || []).join(EOL),
+        placeholder: '每行一条，支持 CIDR：' + EOL + '192.168.1.0/24' + EOL + '10.0.0.8',
+        hint: '每行一条，支持 CIDR；留空表示不限制',
+      },
+      {
+        name: 'uaMode',
+        label: 'UA 策略',
+        type: 'select',
+        value: access.uaMode || 'off',
+        options: [
+          { value: 'off', label: '关闭' },
+          { value: 'allow', label: '白名单（仅允许匹配 UA）' },
+          { value: 'deny', label: '黑名单（拒绝匹配 UA）' },
+        ],
+      },
+      {
+        name: 'uaList',
+        label: 'UA 列表',
+        type: 'textarea',
+        rows: 3,
+        wide: true,
+        value: (access.uas || []).join(EOL),
+        placeholder: '每行一条，支持 * 通配：' + EOL + '*bot*' + EOL + 'curl*',
+        hint: '每行一条，支持 * 通配',
+      },
+
+      // --- BasicAuth ---
+      legendField('legendAuth', 'BasicAuth'),
+      { name: 'authEnable', label: '启用', type: 'switch', value: !!auth.enable, text: '启用 BasicAuth 保护' },
+      { name: 'authUsers', label: false, type: 'custom', wide: true, node: authField.node },
+
+      // --- WAF 与请求体策略 ---
+      legendField('legendWaf', 'WAF 与请求体检查策略'),
+      { name: 'waf', label: 'WAF 开关', type: 'switch', value: !!base.waf, text: '启用 WAF 检查', hint: '关闭后该路由完全不经过 WAF（含请求体检查）' },
+      { name: 'bodyPolicy', label: '请求体策略', type: 'select', value: String(base.bodyPolicy || ''), options: BODY_POLICY_OPTIONS },
+      { name: 'bodyPolicyHint', label: false, type: 'custom', wide: true, node: bodyHint },
+    ]);
+
+    const FILES_FIELDS = ['filesMount', 'filesRoot', 'filesTitle', 'filesReadOnly', 'filesUpload', 'filesDelete', 'filesMkdir', 'filesRename', 'filesHidden', 'filesShare', 'filesShareTTL'];
+    const targetFields = {
+      proxy: ['proxyTargets', 'proxyBalance', 'proxyHostHeader', 'proxyTimeout', 'proxyInsecure', 'proxyNoCompress', 'proxyH2C', 'proxyHeaders', 'proxyRespHeaders', 'proxyPathPrefix', 'proxyPathReplace'],
+      redirect: ['redirectTo', 'redirectStatus', 'redirectKeep'],
+      static: ['staticMount', 'staticRoot', 'staticIndex', 'staticCache', 'staticListing', 'staticSPA'],
+      filebrowser: FILES_FIELDS,
+      webdav: FILES_FIELDS,
+    };
+    const allTargetNames = Object.keys(targetFields).reduce((out, key) => out.concat(targetFields[key]), []);
+
+    // 注意：filebrowser 与 webdav 共用同一组字段，所以不能「按类型逐个覆盖」——
+    // 后一个类型会把前一个刚打开的字段又关掉。这里统一按「当前类型允许的字段集合」收敛。
+    const syncTarget = (kind) => {
+      const type = TYPES.filter((t) => t.id === kind).length ? kind : 'proxy';
+      const active = {};
+      for (const name of targetFields[type]) active[name] = true;
+      for (const name of allTargetNames) form.toggle(name, !!active[name]);
+      targetLegend.textContent = TYPE_LABEL[type] + '（' + type + '）';
+    };
+    syncTarget(base.type || 'proxy');
+    form.toggle('tlsCertId', (tls.mode || 'off') === 'custom');
+    form.toggle('authUsers', !!auth.enable);
+
+    form.node.onFieldChange = (name, value) => {
+      if (name === 'type') syncTarget(String(value || 'proxy'));
+      else if (name === 'tlsMode') form.toggle('tlsCertId', String(value || 'off') === 'custom');
+      else if (name === 'bodyPolicy') bodyHint.textContent = bodyPolicyHintOf(value);
+      else if (name === 'authEnable') form.toggle('authUsers', !!value);
+    };
+
+    this.openPageDialog({
+      title: editing ? '编辑 Web 规则' : '新建 Web 规则',
+      body: form.node,
+      wide: true,
+      actions: [
+        { label: '取消' },
+        {
+          label: '保存',
+          kind: 'primary',
+          close: false,
+          onClick: async (dlg, button) => {
+            form.clearErrors();
+            const values = form.read();
+            const name = String(values.name || '').trim();
+            if (!name) { form.fieldError('name', '请填写规则名称'); return; }
+            const listens = splitLines(values.listen);
+            if (!listens.length) { form.fieldError('listen', '请至少填写一个监听地址，例如 :443'); return; }
+            const kind = String(values.type || 'proxy');
+            const users = authField.read();
+            if (values.authEnable) {
+              if (!users.length) { form.fieldError('authUsers', '启用 BasicAuth 后必须至少有一个账号'); return; }
+              const unnamed = users.filter((u) => !u.username);
+              if (unnamed.length) { form.fieldError('authUsers', '账号的用户名不能为空'); return; }
+              const missing = users.filter((u) => !u.password && existingNames.indexOf(u.username) < 0);
+              if (missing.length) { form.fieldError('authUsers', '账号「' + missing[0].username + '」还没有密码'); return; }
+            }
+            const targets = splitLines(values.proxyTargets);
+            if (kind === 'proxy' && !targets.length) { form.fieldError('proxyTargets', '请至少填写一个上游地址'); return; }
+            const redirectTo = String(values.redirectTo || '').trim();
+            if (kind === 'redirect' && !redirectTo) { form.fieldError('redirectTo', '请填写重定向目标地址'); return; }
+
+            const payload = {
+              name,
+              enable: !!values.enable,
+              type: kind,
+              listen: listens,
+              domains: splitLines(values.domains),
+              path: String(values.path || '').trim() || '/',
+              priority: numVal(values.priority, 0),
+              tls: {
+                mode: String(values.tlsMode || 'off'),
+                certId: String(values.tlsCertId || '') || String(tls.certId || ''),
+                hsts: !!values.tlsHsts,
+              },
+              waf: !!values.waf,
+              bodyPolicy: String(values.bodyPolicy || ''),
+              access: {
+                mode: String(values.accessMode || 'off'),
+                ips: splitLines(values.accessIPs),
+                uaMode: String(values.uaMode || 'off'),
+                uas: splitLines(values.uaList),
+              },
+              basicAuth: { enable: !!values.authEnable, users: values.authEnable ? users : [] },
+              proxy: null,
+              redirect: null,
+              static: null,
+              files: null,
+            };
+            if (kind === 'proxy') {
+              payload.proxy = {
+                targets,
+                balance: balanceValue(values.proxyBalance),
+                hostHeader: String(values.proxyHostHeader || '').trim(),
+                headers: values.proxyHeaders || {},
+                respHeaders: values.proxyRespHeaders || {},
+                pathPrefix: String(values.proxyPathPrefix || '').trim(),
+                pathReplace: String(values.proxyPathReplace || '').trim(),
+                timeoutSec: numVal(values.proxyTimeout, 0),
+                insecureTls: !!values.proxyInsecure,
+                // 迁移前写的是 disableCompres，而后端 model.ProxyTarget 的 JSON tag 是
+                // disableCompression；rest.Decode 开了 DisallowUnknownFields，所以旧键不仅
+                // 无效，还会让整条规则的保存直接 400（代理规则从来就存不下来）。
+                // 这里改成后端认识的键名，勾选真正生效；h2c 是本批按验收要求补上的同族开关。
+                disableCompression: !!values.proxyNoCompress,
+                h2c: !!values.proxyH2C,
+              };
+            } else if (kind === 'redirect') {
+              payload.redirect = { to: redirectTo, status: numVal(values.redirectStatus, 302), keepPath: !!values.redirectKeep };
+            } else if (kind === 'static') {
+              payload.static = {
+                mountId: String(values.staticMount || ''),
+                root: String(values.staticRoot || '').trim(),
+                index: String(values.staticIndex || '').split(/\s+/).filter((s) => s.length > 0),
+                cacheSeconds: numVal(values.staticCache, 0),
+                listing: !!values.staticListing,
+                spa: !!values.staticSPA,
+              };
+            } else {
+              payload.files = {
+                mountId: String(values.filesMount || ''),
+                root: String(values.filesRoot || '').trim() || '/',
+                title: String(values.filesTitle || '').trim(),
+                readOnly: !!values.filesReadOnly,
+                allowUpload: !!values.filesUpload,
+                allowDelete: !!values.filesDelete,
+                allowMkdir: !!values.filesMkdir,
+                allowRename: !!values.filesRename,
+                showHidden: !!values.filesHidden,
+                shareLinks: !!values.filesShare,
+                shareTtlMinutes: numVal(values.filesShareTTL, 0),
+              };
+            }
+            dlg.setBusy(true, button);
+            try {
+              if (editing) await this.ctx.api.put('/api/v1/web/rules/' + encodeURIComponent(base.id), payload);
+              else await this.ctx.api.post('/api/v1/web/rules', payload);
+              if (this.disposed) return;
+              toast('保存成功', 'ok');
+              dlg.close();
+              await this.load();
+            } catch (err) {
+              form.error(errorMessage(err, '保存失败'));
+            } finally {
+              dlg.setBusy(false, button);
+            }
+          },
+        },
+      ],
+    });
+  }
+
+  /* ---------------------------------------------------------------- 访问日志 */
+
+  // logLine 保持迁移前的显示口径：时间  客户端 方法 路径  状态  耗时。
+  logLine(item) {
+    if (typeof item === 'string') return html`<div class="pweb-log-line">${item}</div>`;
+    const time = fmtTime(item.time || item.ts || item.at);
+    const ip = item.ip || item.remoteIp || item.clientIp || '-';
+    const method = item.method || '-';
+    const path = item.path || item.url || item.uri || '-';
+    const code = item.status || item.code || '-';
+    const ms = (item.durationMs !== undefined ? item.durationMs : item.latencyMs);
+    return html`<div class="pweb-log-line"><span class="src">${time}</span>  ${ip}  ${method} ${path}  ${code}${ms !== undefined ? '  ' + ms + 'ms' : ''}</div>`;
+  }
+
+  openRuleLogs(rule) {
+    const state = { entries: [], loading: true, error: null };
+    const box = document.createElement('div');
+    this.dialogHosts.add(box);
+
+    let stopped = false;
+    let timer = null;
+
+    const paint = () => {
+      const list = Array.isArray(state.entries) ? state.entries.slice(-300) : [];
+      if (state.error) {
+        renderInto(box, html`<nunt-error .error=${state.error} heading="无法读取访问日志" .onRetry=${() => tick()}></nunt-error>`);
+        return;
+      }
+      if (state.loading && !list.length) {
+        renderInto(box, html`<nunt-loading text="正在加载访问日志…"></nunt-loading>`);
+        return;
+      }
+      if (!list.length) {
+        renderInto(box, html`<nunt-empty text="暂无访问日志（可能未开启访问日志记录）"
+          hint="该规则收到请求后，这里会显示客户端、方法、状态与耗时。"></nunt-empty>`);
+        return;
+      }
+      renderInto(box, html`<div class="pweb-log">${list.map((item) => this.logLine(item))}</div>`);
+    };
+
+    const stop = () => {
+      stopped = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      this.logPollers.delete(stop);
+    };
+
+    const tick = async () => {
+      if (this.disposed || stopped) return;
+      try {
+        const data = await this.ctx.api.get('/api/v1/web/logs', { rule: rule.id, limit: 200 });
+        if (this.disposed || stopped) return;
+        state.entries = unwrap(data, ['logs', 'items', 'entries']);
+        state.error = null;
+      } catch (err) {
+        if (this.disposed || stopped) return;
+        state.error = err;
+      } finally {
+        if (!this.disposed && !stopped) {
+          state.loading = false;
+          paint();
+          timer = setTimeout(tick, LOG_POLL_MS);
+        }
+      }
+    };
+
+    const api = this.openPageDialog({
+      title: '访问日志 - ' + (rule.name || rule.id),
+      body: box,
+      wide: true,
+      actions: [{ label: '关闭' }],
+      onClose: () => { stop(); this.dialogHosts.delete(box); this.dialogs.delete(api); },
+    });
+    this.logPollers.add(stop);
+    paint();
+    tick();
+  }
+
+  /* ---------------------------------------------------------------- 渲染 */
+
+  ruleColumns() {
+    return [
+      {
+        key: 'name',
+        title: '名称',
+        sort: (row) => String((row && (row.name || row.id)) || ''),
+        render: (row) => html`<div>
+          <span class="pweb-marker" data-web-rule=${String(row.id || '')}></span>
+          <div class="pweb-name">${String(row.name || row.id || '')}</div>
+          <div class="pweb-path">${String(row.path || '/')}</div>
+        </div>`,
+      },
+      {
+        key: 'type',
+        title: '类型',
+        width: 110,
+        sort: (row) => TYPE_LABEL[row.type] || String((row && row.type) || ''),
+        render: (row) => html`<sl-badge pill variant="neutral">${TYPE_LABEL[row.type] || row.type || '-'}</sl-badge>`,
+      },
+      { key: 'listen', title: '监听', width: 150, render: (row) => chipList(row.listen, 2) },
+      { key: 'domains', title: '域名', width: 170, render: (row) => chipList(row.domains, 2) },
+      { key: 'target', title: '目标', render: (row) => html`<span class="mono pweb-sum pweb-target">${targetText(row)}</span>` },
+      {
+        key: 'tls',
+        title: 'TLS',
+        width: 105,
+        sort: (row) => tlsLabel(row),
+        render: (row) => {
+          const mode = (row.tls && row.tls.mode) || 'off';
+          return html`<sl-badge pill variant=${mode === 'off' ? 'neutral' : 'success'}>${tlsLabel(row)}</sl-badge>`;
         },
       },
-    ],
-  });
-}
+      {
+        key: 'waf',
+        title: 'WAF',
+        width: 140,
+        sort: (row) => (row && row.waf ? 1 : 0),
+        // 迁移前这里有独立的「请求体策略」列；本批按验收的列清单把它并进 WAF 列，
+        // 信息不丢：开启 WAF 时同时显示该路由显式声明的策略（没有则标「继承默认」）。
+        render: (row) => {
+          if (!row.waf) return html`<span class="muted">关闭</span>`;
+          const policy = String(row.bodyPolicy || '');
+          return html`<div class="pweb-waf">
+            <sl-badge pill variant="success">已开启</sl-badge>
+            <sl-badge pill variant="neutral" title=${policy ? '该路由显式声明的请求体策略' : '继承全局默认请求体策略'}>
+              ${policy ? (BODY_POLICY_SHORT[policy] || policy) : '继承默认'}
+            </sl-badge>
+          </div>`;
+        },
+      },
+      {
+        key: 'enable',
+        title: '状态',
+        width: 130,
+        sort: (row) => (row && row.enable ? 1 : 0),
+        // 状态文字必须放进 sl-switch 的可见标签：只给 title、或把 aria-label 指到别处的文字，
+        // 都会被 axe 判 label-title-only / serious（迁移前那个自绘开关的 <label> 里就有这段文字）。
+        render: (row) => html`<sl-switch size="small" class="pweb-switch"
+          ?checked=${!!row.enable} ?disabled=${this.busyId === String(row.id || '')}
+          title=${row.enable ? '点击停用' : '点击启用'}
+          @sl-change=${(event) => this.toggle(row, !!event.target.checked)}>${row.enable ? '已启用' : '已停用'}</sl-switch>`,
+      },
+      {
+        title: '操作',
+        actions: true,
+        width: 150,
+        render: (row) => html`
+          <sl-button size="small" title="访问日志" @click=${() => this.openRuleLogs(row)}>
+            <sl-icon name="journal-text" label="访问日志"></sl-icon>
+          </sl-button>
+          <sl-button size="small" title="编辑" @click=${() => this.openRuleForm(row)}>
+            <sl-icon name="pencil-square" label="编辑"></sl-icon>
+          </sl-button>
+          <sl-button size="small" variant="danger" outline title="删除" @click=${() => this.removeRule(row)}>
+            <sl-icon name="trash" label="删除"></sl-icon>
+          </sl-button>`,
+      },
+    ];
+  }
 
-function openRuleLogs(rule, ctx) {
-  const view = el('div', {}, spinner('正在加载访问日志…'));
-  let stop = null;
-  async function tick() {
-    try {
-      const data = await api.get('/web/logs', { rule: rule.id, limit: 200 });
-      const list = unwrap(data, ['logs', 'items', 'entries']);
-      clear(view);
-      if (!list.length) { view.appendChild(emptyBox('暂无访问日志（可能未开启访问日志记录）')); return; }
-      view.appendChild(logView(list.map((item) => {
-        if (typeof item === 'string') return item;
-        const t = fmtTime(item.time || item.ts || item.at);
-        const ip = item.ip || item.remoteIp || item.clientIp || '-';
-        const method = item.method || '-';
-        const path = item.path || item.url || item.uri || '-';
-        const code = item.status || item.code || '-';
-        const ms = (item.durationMs !== undefined ? item.durationMs : item.latencyMs);
-        return t + '  ' + ip + '  ' + method + ' ' + path + '  ' + code + (ms !== undefined ? '  ' + ms + 'ms' : '');
-      }), 300));
-    } catch (e) {
-      clear(view);
-      view.appendChild(errorCard(e, () => tick()));
+  // renderFocus：顶部提示条。说明本次是从 WAF 页跳过来的（#/web?rule=<id>），
+  // 并直接给出「设置请求体策略」的入口。
+  renderFocus() {
+    const id = String(this.focusId || '');
+    if (!id) return nothing;
+    const rule = this.rules.filter((r) => r.id === id)[0] || null;
+    return html`<div class="notice pweb-focus">
+      <div class="pweb-focus-title">${rule
+        ? '来自 WAF 页：为路由「' + (rule.name || rule.id) + '」声明请求体策略'
+        : '来自 WAF 页：找不到规则 ' + id}</div>
+      <div>${rule
+        ? '该路由尚未声明 bodyPolicy，当前继承全局默认策略；保存后按该路由自己的策略执行。'
+        : '该规则可能已被删除，请刷新列表。'}</div>
+      ${rule
+        ? html`<div class="pweb-focus-actions">
+            <sl-button size="small" variant="primary" @click=${() => this.openRuleForm(rule)}>设置请求体策略</sl-button>
+          </div>`
+        : nothing}
+    </div>`;
+  }
+
+  renderList(rows) {
+    return html`<nunt-table caption="Web 规则"
+      .columns=${this.ruleColumns()} .rows=${rows} .loading=${this.loading}
+      .error=${this.error} .onRetry=${() => this.load()}
+      .rowKey=${(row) => (row && row.id) || ''}
+      empty=${this.rules.length ? '没有符合条件的规则' : '还没有 Web 规则'}
+      emptyHint=${this.rules.length ? '换个类型或关键字试试。' : '点右上角「新建规则」把本机服务发布到公网。'}></nunt-table>`;
+  }
+
+  render() {
+    const rows = this.filtered();
+    return html`<section class="card">
+      <div class="card-header">
+        <h2>Web 规则</h2>
+        <span class="sub">${this.rules.length ? '共 ' + this.rules.length + ' 条规则' : ''}</span>
+        <span class="spacer"></span>
+        <span class="sub">点击规则行可查看最近访问日志</span>
+        <sl-button size="small" ?loading=${this.loading} @click=${() => this.load()}>
+          <sl-icon slot="prefix" name="arrow-clockwise" aria-hidden="true"></sl-icon>刷新
+        </sl-button>
+        <sl-button size="small" variant="primary" @click=${() => this.openRuleForm(null)}>
+          <sl-icon slot="prefix" name="plus-lg" aria-hidden="true"></sl-icon>新建规则
+        </sl-button>
+      </div>
+      <div class="card-body">
+        ${this.renderFocus()}
+        <div class="pweb-tools">
+          <sl-input class="pweb-search" size="small" label="搜索规则" placeholder="搜索名称/域名/路径"
+            value=${String(this.focusId || '')}
+            @sl-input=${(event) => this.onSearchInput(event)}></sl-input>
+        </div>
+        <sl-tab-group class="pweb-tabs" @sl-tab-show=${(event) => this.setType(event.detail.name)}>
+          ${TABS.map((tab) => html`<sl-tab slot="nav" panel=${tab.id} ?active=${this.typeTab === tab.id}>${tab.label}</sl-tab>`)}
+          ${TABS.map((tab) => html`<sl-tab-panel name=${tab.id} ?active=${this.typeTab === tab.id}>
+            ${this.typeTab === tab.id ? this.renderList(rows) : nothing}
+          </sl-tab-panel>`)}
+        </sl-tab-group>
+      </div>
+    </section>`;
+  }
+
+  /* ---------------------------------------------------------------- 深链高亮 */
+
+  updated() {
+    this.applyHighlight();
+  }
+
+  // applyHighlight：把 #/web?rule=<id> 对应的那一行标出来。
+  // 行序可能被表头排序改变，所以按行内的隐藏标记定位，而不是按行号。
+  async applyHighlight() {
+    const token = ++this.highlightToken;
+    await this.updateComplete;
+    const table = this.querySelector('nunt-table');
+    if (table && table.updateComplete) { try { await table.updateComplete; } catch (err) { /* 忽略 */ } }
+    if (this.disposed || token !== this.highlightToken) return;
+    for (const tr of Array.from(this.querySelectorAll('tr.pweb-hit'))) tr.classList.remove('pweb-hit');
+    const id = String(this.focusId || '');
+    if (!id) return;
+    const marker = Array.from(this.querySelectorAll('[data-web-rule]'))
+      .filter((node) => node.getAttribute('data-web-rule') === id)[0] || null;
+    const row = marker ? marker.closest('tr') : null;
+    if (row) { row.classList.add('pweb-hit'); return; }
+    if (!this.focusWarned && !this.loading && !this.error) {
+      this.focusWarned = true;
+      toast('未在当前规则列表里找到 ' + id + '，可能已被删除', 'warn');
     }
   }
-  const m = openModal({
-    title: '访问日志 - ' + (rule.name || rule.id),
-    body: view,
-    onClose: () => { if (stop) stop(); },
-    actions: [{ label: '关闭', kind: 'ghost' }],
-  });
-  stop = makePoller(tick, 5000);
-  tick();
-  return m;
 }
+
+define('nunt-page-web', WebPage);
 
 export default {
   id: 'web',
   title: 'Web 服务',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>',
   async mount(root, ctx) {
-    const api = wrapAPI(ctx && ctx.api);
     const offStyle = pageStyle(root, PAGE_CSS);
-    // WAF 页的「未声明 bodyPolicy 的路由」通过 #/web?rule=<id> 跳转到本页，
-    // 这里把该规则从列表里挑出来高亮，并提供「设置请求体策略」的一键入口。
-    const focusId = String((ctx && ctx.params && ctx.params.get('rule')) || '').trim();
-    const state = { type: 'all', q: focusId, rules: [] };
-    const bodyBox = el('div', {});
-    const focusBox = el('div', {});
-    let focusWarned = false;
-
-    async function getRule(id) {
-      const data = await api.get('/web/rules');
-      const list = unwrap(data, ['rules', 'items']);
-      return list.filter((r) => r.id === id)[0] || null;
-    }
-
-    async function toggle(rule, next) {
-      const want = (next === undefined) ? !rule.enable : !!next;
-      try {
-        await api.post('/web/rules/' + encodeURIComponent(rule.id) + '/toggle');
-      } catch (e) {
-        try {
-          await api.put('/web/rules/' + encodeURIComponent(rule.id), Object.assign({}, rule, { enable: want }));
-        } catch (e2) {
-          toast('切换失败：' + apiErr(e2), 'error');
-          return false;
-        }
-      }
-      toast(want ? '已启用' : '已停用', 'ok');
-      load();
-    }
-
-    async function remove(rule) {
-      const ok = await confirmDialog('确定删除规则「' + (rule.name || rule.id) + '」吗？该操作不可撤销。');
-      if (!ok) return;
-      try {
-        await api.del('/web/rules/' + encodeURIComponent(rule.id));
-        toast('已删除', 'ok');
-        load();
-      } catch (e) {
-        toast('删除失败：' + apiErr(e), 'error');
-      }
-    }
-
-    const columns = [
-      { title: '名称', render: (r) => el('div', {}, el('div', { text: r.name || r.id }), el('div', { class: 'muted mono', text: r.path || '/' })) },
-      { title: '类型', render: (r) => badge(TYPE_LABEL[r.type] || r.type || '-') },
-      { title: '监听', render: (r) => chips(r.listen, 2) },
-      { title: '域名', render: (r) => chips(r.domains, 2) },
-      { title: '目标', render: (r) => el('span', { class: 'mono pweb-sum', text: targetText(r) }) },
-      { title: 'TLS', render: (r) => badge(tlsLabel(r), r.tls && r.tls.mode === 'off' ? '' : 'ok') },
-      { title: 'WAF', render: (r) => (r.waf ? badge('已开启', 'ok') : el('span', { class: 'muted', text: '关闭' })) },
-      { title: '请求体策略', render: (r) => (r.waf ? bodyPolicyBadge(r.bodyPolicy) : el('span', { class: 'muted', text: '不检查' })) },
-      { title: '状态', render: (r) => switchEl(!!r.enable, (next) => toggle(r, next)) },
-      { title: '', cls: 'acts', render: (r) => el('span', {},
-        iconBtn(logIcon(), { title: '访问日志', tag: 'logs', onClick: () => openRuleLogs(r, ctx) }),
-        iconBtn(editIcon(), { title: '编辑', tag: 'edit', onClick: () => openRuleForm(r, ctx, load) }),
-        iconBtn(trashIcon(), { title: '删除', tag: 'remove', onClick: () => remove(r) }),
-      ) },
-    ];
-
-    function filtered() {
-      const q = state.q.trim().toLowerCase();
-      return state.rules.filter((r) => {
-        if (state.type !== 'all' && r.type !== state.type) return false;
-        if (!q) return true;
-        const hay = [r.name, r.id, (r.listen || []).join(' '), (r.domains || []).join(' '), r.path, r.type].join(' ').toLowerCase();
-        return hay.indexOf(q) >= 0;
-      });
-    }
-
-    function paint() {
-      clear(bodyBox);
-      const rows = filtered().map((r) => ({
-        raw: r, tag: r.id,
-        onClick: (ev) => {
-          if (ev && ev.target && ev.target.closest && ev.target.closest('button,a,input,label')) return;
-          openRuleLogs(r, ctx);
-        },
-      }));
-      if (!rows.length) {
-        bodyBox.appendChild(emptyBox(state.rules.length ? '没有符合条件的规则' : '还没有 Web 规则，点击右上角“新建规则”开始'));
-        return;
-      }
-      const table = dataTable(columns, rows, '暂无规则');
-      bodyBox.appendChild(table);
-      if (focusId) {
-        // dataTable 的行标签就是规则 id，用它定位并高亮目标行。
-        const hit = table.querySelector('tr[data-row="' + focusId.replace(/"/g, '') + '"]');
-        if (hit) hit.classList.add('pweb-hit');
-        if (!hit && !focusWarned) {
-          focusWarned = true;
-          toast('未在当前规则列表里找到 ' + focusId + '，可能已被删除', 'warn');
-        }
-      }
-    }
-
-    // paintFocus 顶部提示条：说明本次是从 WAF 页跳过来的，并直接给出编辑入口。
-    function paintFocus() {
-      clear(focusBox);
-      if (!focusId) return;
-      const rule = state.rules.filter((r) => r.id === focusId)[0] || null;
-      const open = rule
-        ? el('button', { class: 'btn btn-sm btn-primary', type: 'button', text: '设置请求体策略', onclick: () => openRuleForm(rule, ctx, load) })
-        : null;
-      focusBox.appendChild(el('div', { class: 'notice' },
-        el('div', { style: { fontWeight: '600' }, text: rule ? '来自 WAF 页：为路由「' + (rule.name || rule.id) + '」声明请求体策略' : '来自 WAF 页：找不到规则 ' + focusId }),
-        el('div', { text: rule ? '该路由尚未声明 bodyPolicy，当前继承全局默认策略；保存后按该路由自己的策略执行。' : '该规则可能已被删除，请刷新列表。' }),
-        open ? el('div', { style: { marginTop: '8px' } }, open) : null,
-      ));
-      focusBox.appendChild(el('div', { style: { height: '10px' } }));
-    }
-
-    async function load() {
-      clear(bodyBox);
-      bodyBox.appendChild(spinner('正在加载 Web 规则…'));
-      try {
-        const data = await api.get('/web/rules');
-        state.rules = unwrap(data, ['rules', 'items']);
-      } catch (e) {
-        clear(bodyBox);
-        bodyBox.appendChild(errorCard(e, () => load()));
-        return;
-      }
-      paintFocus();
-      paint();
-    }
-
-    const search = input({ class: 'input pweb-search', placeholder: '搜索名称/域名/路径', value: focusId });
-    search.addEventListener('input', debounce(() => { state.q = search.value; paint(); }, 200));
-
-    function paintTabs(host) {
-      clear(host);
-      host.appendChild(tabs([{ id: 'all', label: '全部' }].concat(TYPES), state.type, (id) => {
-        state.type = id;
-        paintTabs(host);
-        paint();
-      }));
-    }
-
-    const tabHost = el('div', {});
-    paintTabs(tabHost);
-
-    const head = el('div', { class: 'pweb-tools' },
-      tabHost,
-      el('span', { class: 'bar spacer' }),
-      search,
-      el('button', { class: 'btn btn-primary', type: 'button', text: '新建规则', onclick: () => openRuleForm(null, ctx, load) }),
-    );
-
-    root.appendChild(el('div', { class: 'card' },
-      el('div', { class: 'card-head' }, el('h3', { text: 'Web 规则' }), el('span', { class: 'grow' }), el('span', { class: 'muted', style: 'font-size:12px', text: '点击规则行可查看最近访问日志' })),
-      el('div', { class: 'card-body' }, focusBox, head, el('div', { style: 'height:10px' }), bodyBox),
-    ));
-
-    load();
-    return () => { offStyle(); };
+    const page = document.createElement('nunt-page-web');
+    page.ctx = ctx;              // 必须在 appendChild 之前赋值：connectedCallback 里要取数据
+    // WAF 页的「未声明 bodyPolicy 的路由」通过 #/web?rule=<id> 跳到本页：
+    // 自动过滤 + 高亮目标行 + 顶部提示条。
+    const params = ctx && ctx.params;
+    const focus = String((params && typeof params.get === 'function' ? params.get('rule') : '') || '').trim();
+    page.focusId = focus;
+    page.query = focus;
+    root.appendChild(page);
+    return () => { page.dispose(); offStyle(); };
   },
 };
