@@ -92,7 +92,6 @@ jobs:
           # because the archive itself carries no repository name.
           tags: |
             nunt:${{ needs.prepare.outputs.version }}
-            nunt:latest
             nunt:${{ needs.prepare.outputs.version }}-${{ matrix.arch }}
           outputs: type=docker,dest=/tmp/nunt-${{ needs.prepare.outputs.version }}-${{ matrix.arch }}.tar
           cache-from: type=gha,scope=${{ matrix.arch }}
@@ -147,7 +146,6 @@ jobs:
             BUILDTIME=${{ github.run_started_at }}
           tags: |
             nunt:${{ needs.prepare.outputs.version }}
-            nunt:latest
           outputs: type=oci,dest=/tmp/nunt-${{ needs.prepare.outputs.version }}-oci.tar
 
       - name: Compress and upload
@@ -204,8 +202,8 @@ jobs:
           docker compose up -d
           \`\`\`
 
-          The loaded image is tagged nunt:$VERSION and nunt:latest (plus
-          nunt:$VERSION-<arch>), so start the stack with:
+          The loaded image is tagged nunt:$VERSION (plus nunt:$VERSION-<arch>),
+          so start the stack with:
 
               NUNT_IMAGE=nunt:$VERSION docker compose up -d
 
