@@ -35,7 +35,7 @@ docker compose up -d --build
 ```
 
 - 使用 **host 网络**（`docker-compose.yml`）：端口转发、IPv6、80/443 都能正常工作，Linux 推荐。
-- Docker Desktop（macOS / Windows）用 \`docker-compose.bridge.yml\`，只映射 16601/80/443。
+- **只支持 host 网络**；Docker Desktop（macOS / Windows）不受支持——bridge 下端口转发、IPv6 与真实客户端 IP 都不可用。
 - 首次启动会在日志里打印**随机生成的管理员密码**，登录后请立即修改：
 
 ```

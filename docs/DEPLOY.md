@@ -5,7 +5,7 @@
 | 方式 | 适用场景 | 命令 |
 | --- | --- | --- |
 | Docker Compose（host 网络） | Linux 主机、软路由、NAS；需要端口转发 / IPv6 / 80、443 | `docker compose up -d --build` |
-| Docker Compose（桥接网络） | Docker Desktop（macOS / Windows） | `docker compose -f docker-compose.bridge.yml up -d --build` |
+
 | Release 镜像归档 | 不能联网构建、需要固定版本 | `docker load < nunt-v1.0.0-amd64.tar.gz` |
 | 直接运行二进制 | 路由器 / 小主机 | `./nunt -d /etc/nunt` |
 

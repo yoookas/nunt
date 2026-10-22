@@ -40,7 +40,7 @@ jobs:
       - name: Validate the compose files
         run: |
           docker compose -f docker-compose.yml config > /dev/null
-          docker compose -f docker-compose.bridge.yml config > /dev/null
+
 
       - name: Start the container with host networking
         run: |

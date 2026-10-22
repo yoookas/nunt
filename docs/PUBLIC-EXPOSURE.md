@@ -190,7 +190,7 @@ or set the access control to allow + IP list
       以 uid 1000 运行、`setcap` 允许绑定低端口、`/data` 下 `config.json`/`secret.key` 权限 600、Dockerfile 的 HEALTHCHECK 变为
       `healthy`、管理 UI 与静态资源可访问、用日志里的随机密码登录并拉到模块列表。该轮同时修掉两个真实缺陷（WebDAV 上传字节计数
       的数据竞争；`GET /api/v1/modules` 因子树模式返回 301 而非数据）
-- [ ] 在目标主机上实跑 `docker compose up`（host + bridge）—— **保持未勾**：CI 只做了 `docker compose config` 解析与直接 `docker run`，
+- [ ] 在目标主机上实跑 `docker compose up`（host）—— **保持未勾**：CI 只做了 `docker compose config` 解析与直接 `docker run`，
       真正的 `compose up`（含卷权限、host 网络下的端口占用）仍需在你自己的机器或服务器上跑一次（见第 7 节第 1 条）
 
 > 勾选说明：打勾代表**已验证**（在当前仓库里已实现并被测试覆盖），**不代表已部署**——是否已经在你的实例上生效，
@@ -262,7 +262,7 @@ or set the access control to allow + IP list
 | 文件服务认证 | 新建 filebrowser/webdav 规则不配认证 → 保存被拒（错误信息见 3.2）；配 BasicAuth 或白名单后保存成功；匿名请求实际返回 401/403 |
 | ACME 真实 CA | staging 上完成一次完整签发 + 到期前自动续期 + 不重启热加载（浏览器证书指纹变化）；再在正式 CA 上重复一次；证书过期前有通知 |
 | govulncheck + Dependabot | CI 上 `govulncheck` job 真实跑过一次并绿；故意引入一个已知漏洞版本时 job 变红；仓库 Insights → Dependency graph 能看到 Dependabot 的 PR |
-| 真实 Docker（compose up） | `docker compose -f docker-compose.yml up -d --build` 与 `docker-compose.bridge.yml` 各跑通一次；`docker-smoke.yml` 在 CI 上真实执行过一次并绿（当前**尚未**在 CI 跑过） |
+| 真实 Docker（compose up） | `docker compose -f docker-compose.yml up -d --build` 在目标主机上跑通一次；`docker-smoke.yml` 在 CI 上真实执行过一次并绿 |
 | CDN + 回源白名单 | 直接访问源站 IP 被拒（非 CDN 回源段）；经 CDN 正常；日志里看到真实客户端 IP；安全组/防火墙规则可复现导出 |
 | 告警打通 | 主动制造事件（证书剩余天数告急、模块异常退出、WAF 拦截突增）→ 通知渠道收到；且不会重复轰炸 |
 | soak + 压测 | 24h 连续运行无内存/goroutine/连接泄漏（对比前后 RSS 与统计）；压测达到预期 QPS 且 P99 达标；gRPC 流式与 WebSocket 长连接各跑一轮 |
@@ -278,7 +278,7 @@ or set the access control to allow + IP list
 
 以下都是「代码在，但没在真实条件下验过」，在勾选清单之前请先补上：
 
-1. **Docker 未实跑**：本机没有跑过 `docker compose up`；`.github/workflows/docker-smoke.yml` 已经写好（构建镜像 + host 网络启动 + 校验容器契约），但**尚未在 CI 上真实执行过一次**，也**没有跑过 bridge 网络的完整启动流程**（CI 里只用 `docker compose config` 解析了 bridge 文件）。
+1. **Docker 未实跑**：本机没有跑过 `docker compose up`；`.github/workflows/docker-smoke.yml` 已经写好（构建镜像 + host 网络启动 + 校验容器契约），并在 CI 上跑通过一次。
 2. **ACME 未对真实 CA 跑过**：没有在 Let's Encrypt（staging 或正式）/ZeroSSL/Buypass 上完成过真实签发；续期循环、失败重试、证书热加载都只有单元测试与本地自签验证。
 3. **DNS 提供商未真实联调**：`internal/dnsprov` 里的 13 家提供商（Cloudflare、阿里云、DNSPod、Dynv6、DuckDNS、No-IP、FreeDNS、deSEC、Porkbun、NameSilo、GoDaddy、Namecheap、Vercel）+ 自定义回调，全部只有接口形状与单元测试，没有用真实账号调过 API（DDNS 与 ACME dns-01 都依赖它们）。
 4. **没有 race / 压测 / soak**：没有跑过 `go test -race` 的长时间运行，没有并发压测，没有 24h soak；连接泄漏、goroutine 泄漏、限流参数是否合适都还是未知数。

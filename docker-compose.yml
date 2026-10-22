@@ -2,7 +2,8 @@
 #
 # Host networking is recommended: the web service, HTTP/HTTPS and port
 # forwarding need direct access to the host interfaces and to IPv6. On Docker
-# Desktop (macOS / Windows) use docker-compose.bridge.yml instead.
+# Host networking is the only supported deployment: bridge mode cannot do port
+# forwarding, IPv6, or keep real client IPs for the ACLs and access logs.
 #
 #   docker compose up -d --build
 #
