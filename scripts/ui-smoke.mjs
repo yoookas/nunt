@@ -16,8 +16,8 @@
  * 任何检查失败或 axe 非 0 时以非零码退出，方便 CI 直接当门禁用。
  *
  * 用法：
- *   node scripts/ui-smoke.mjs [--out .gocache/ui-smoke] [--exe nunt.exe] [--port 16601]
- *                             [--base http://127.0.0.1:16601] [--password xxx]
+ *   node scripts/ui-smoke.mjs [--out .gocache/ui-smoke] [--exe nunt.exe] [--port 3113]
+ *                             [--base http://127.0.0.1:3113] [--password xxx]
  *                             [--headed] [--keep-data] [--settle 900]
  *
  * --base 给了就连接已在运行的服务（此时必须给 --password 或用 NUNT_ADMIN_PASSWORD），
@@ -62,9 +62,9 @@ const PAGES = [
 function parseArgs(argv) {
   const opts = {
     exe: path.join(REPO, 'nunt.exe'),
-    // 管理端口的默认值：nunt 默认监听 :16601，脚本自己启动的实例也用这个；
+    // 管理端口的默认值：nunt 默认监听 :3113，脚本自己启动的实例也用这个；
     // 只有当实例被配置成别的地址时才需要 --port（ui-baseline 同理）。
-    port: 16601,
+    port: 3113,
     out: path.join(REPO, '.gocache', 'ui-smoke'),
     base: '',
     password: process.env.NUNT_ADMIN_PASSWORD || '',
@@ -566,7 +566,7 @@ const INTERACTIONS = {
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) {
-    process.stdout.write('用法：node scripts/ui-smoke.mjs [--out dir] [--exe nunt.exe] [--port 16601] [--base url] [--password xxx] [--headed] [--keep-data]' + String.fromCharCode(10));
+    process.stdout.write('用法：node scripts/ui-smoke.mjs [--out dir] [--exe nunt.exe] [--port 3113] [--base url] [--password xxx] [--headed] [--keep-data]' + String.fromCharCode(10));
     return;
   }
   await fsp.mkdir(opts.out, { recursive: true });

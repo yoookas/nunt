@@ -20,6 +20,12 @@ import (
 // CurrentVersion is the configuration schema version.
 const CurrentVersion = 1
 
+// DefaultAdminListen is the address the admin console listens on until an
+// operator changes it. Deployment can override it with NUNT_ADMIN_LISTEN or
+// NUNT_ADMIN_PORT (see internal/adminlisten), and the running process can move
+// it from the settings page without a restart.
+const DefaultAdminListen = ":3113"
+
 // Store is a concurrency safe holder of the configuration.
 type Store struct {
 	mu   sync.RWMutex
@@ -157,7 +163,7 @@ func Default() *model.Config {
 	return &model.Config{
 		Version: CurrentVersion,
 		System: model.SystemConfig{
-			AdminListen:     ":16601",
+			AdminListen:     DefaultAdminListen,
 			LogLevel:        "info",
 			SessionTTLHours: 12,
 			LoginMaxFail:    5,

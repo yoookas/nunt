@@ -3,7 +3,7 @@
  * nunt 前端基线采集脚本（迁移计划阶段 0）。
  *
  * 做什么：
- *   1. 启动编译好的 nunt.exe（临时数据目录，管理端口默认 16601）；
+ *   1. 启动编译好的 nunt.exe（临时数据目录，管理端口默认 3113）；
  *   2. 从 stdout 抓初始管理员密码，先走管理 API 完成一次登录（必要时改掉初始密码），
  *      再用真实浏览器登录表单完成一次登录；
  *   3. 通过管理 API 造演示数据（静态托管规则 / 端口转发 / DDNS / WAF / 通知 / 计划任务等）；
@@ -14,7 +14,7 @@
  * 依赖只用于开发期（playwright + axe-core），Go 构建与 Docker 镜像不需要 Node。
  *
  * 用法：
- *   node scripts/ui-baseline.mjs [--exe nunt.exe] [--port 16601] [--out docs/screenshots/before]
+ *   node scripts/ui-baseline.mjs [--exe nunt.exe] [--port 3113] [--out docs/screenshots/before]
  *                                [--data-dir <dir>] [--keep-data] [--headed] [--settle 800]
  *                                [--forward-port 12222] [--echo-port 12223]
  */
@@ -43,7 +43,7 @@ const PLAYWRIGHT_VERSION = require('playwright/package.json').version;
 function parseArgs(argv) {
   const opts = {
     exe: path.join(REPO, 'nunt.exe'),
-    port: 16601,
+    port: 3113,
     out: path.join(REPO, 'docs', 'screenshots', 'before'),
     dataDir: '',
     keepData: false,
@@ -120,7 +120,7 @@ function portFree(port, host) {
   });
 }
 
-// waitFree 轮询等待端口空出来：16601 是 nunt 的默认管理端口，本机可能已经有
+// waitFree 轮询等待端口空出来：3113 是 nunt 的默认管理端口，本机可能已经有
 // 别的实例在用，等一会儿比直接失败更实用。
 async function waitFree(port, seconds) {
   const deadline = Date.now() + seconds * 1000;
@@ -911,7 +911,7 @@ function buildReport(data) {
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) {
-    process.stdout.write('用法：node scripts/ui-baseline.mjs [--exe nunt.exe] [--port 16601] [--out dir] [--data-dir dir] [--keep-data] [--headed]\n');
+    process.stdout.write('用法：node scripts/ui-baseline.mjs [--exe nunt.exe] [--port 3113] [--out dir] [--data-dir dir] [--keep-data] [--headed]\n');
     return;
   }
   await fsp.mkdir(opts.out, { recursive: true });

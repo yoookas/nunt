@@ -47,11 +47,23 @@ docker compose up -d --build
 ============================================================
 ```
 
-管理地址：`http://<主机IP>:16601`
+管理地址：`http://<主机IP>:3113`
+
+#### 在控制台里改监听地址（保存后立即生效）
+
+「设置 → 系统参数 → 管理监听地址」可以直接修改端口 / 监听地址，**不需要重启进程**：
+
+1. 后端先在**新地址**上绑定监听器（端口被占用、权限不足、地址非法时直接返回 4xx 并保留旧监听）；
+2. 绑定成功后才把新地址写进 `config.json`，再由旧监听器返回这次保存的 200 响应；
+3. 大约 300 ms 后旧监听器优雅关闭（等待进行中的请求写完），**会话（cookie）不受影响**——
+   仍然是同一个进程、同一份内存会话表；
+4. 保存成功的响应里 `adminListen` 是真正生效的地址，设置页会提示新地址并给出「用新地址打开」链接。
+
+> 当前页面还挂在旧端口上，切换后请用新地址继续操作（页面顶部会保留这个链接）。
 
 #### 用环境变量指定控制台端口
 
-管理后台默认监听 `:16601`（配置字段 `system.adminListen`）。容器部署时可以直接用环境变量覆盖，**不需要改 `config.json`**，覆盖值也不会写回数据卷：
+管理后台默认监听 `:3113`（配置字段 `system.adminListen`）。容器部署时可以直接用环境变量覆盖，**不需要改 `config.json`**，覆盖值也不会写回数据卷：
 
 | 变量 | 含义 | 优先级 |
 | --- | --- | --- |
@@ -70,7 +82,7 @@ docker run -d --name nunt --network host \
   -e NUNT_ADMIN_LISTEN=127.0.0.1:18080 \
   -v "$PWD/data:/data" nunt:dev
 
-# compose：默认已显式设置 NUNT_ADMIN_LISTEN=:16601，直接覆盖变量即可
+# compose：NUNT_ADMIN_LISTEN 留空时用 config.json 里的值（新卷为 :3113），覆盖变量即可
 NUNT_ADMIN_LISTEN=127.0.0.1:18080 docker compose up -d
 
 # 或写进与 docker-compose.yml 同目录的 .env
@@ -78,11 +90,16 @@ echo 'NUNT_ADMIN_LISTEN=:18080' >> .env && docker compose up -d
 ```
 
 - 环境变量**只影响运行时**：`GET /api/v1/system/info` 的 `adminListen` 是实际生效值，
-  `adminListenConfig` 仍是配置文件里的值，`adminListenSource` 为 `env` 或 `config`；
-  设置页在来源为环境变量时会提示「修改此项不会改变实际端口」。
+  `adminListenConfig` 仍是配置文件里的值，`adminListenSource` 为 `env` 或 `config`。
+- **环境变量优先于设置页**：来源是 `env` 时设置页会禁用「管理监听地址」字段并说明原因；
+  直接调用 `PUT /api/v1/system/settings` 修改地址会被拒绝（`409` +
+  「当前监听地址由环境变量 NUNT_ADMIN_LISTEN 控制，修改配置不会生效」），配置不会被改动。
+  要改用设置页（含运行中切换），先移除环境变量并重启一次。环境变量存在时，其它设置照常保存。
 - 非法值（如 `NUNT_ADMIN_LISTEN=abc`、`NUNT_ADMIN_PORT=70000`）会让进程**启动即失败**并打印原因，
   不会静默回退到旧端口。
-- 容器健康检查会自动跟随 `NUNT_ADMIN_PORT` / `NUNT_ADMIN_LISTEN` 推导出的端口。
+- 容器健康检查按同一优先级取端口：`NUNT_ADMIN_PORT` → `NUNT_ADMIN_LISTEN` 的端口部分 →
+  `/data/config.json` 里的 `system.adminListen` → 内置默认 `3113`。因此在控制台里改过端口后，
+  healthcheck 会自动跟到新端口（读取配置文件里的值）。
 
 ### 2. 使用 Release 里的镜像文件（不上传任何镜像仓库）
 
@@ -275,6 +292,10 @@ pwsh -File scripts/verify.ps1
 
 # 起一个临时实例，登录并把每个模块接口、前端资源、创建规则后立即生效都跑一遍
 pwsh -File scripts/smoke.ps1
+
+# 真机验证「控制台里改监听地址，立即生效」：默认 3113 → 占用失败 → 切到 127.0.0.1:3199
+# （同一个会话仍然有效）→ 改回 3113
+pwsh -File scripts/listen-rebind.ps1
 
 # 前端：先构建二进制，再跑浅色主题冒烟（12 页 + 逐页交互 + axe）与深色主题基线（12 页截图 + axe）
 go build -o nunt.exe ./cmd/nunt

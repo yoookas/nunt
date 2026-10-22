@@ -32,22 +32,38 @@ NUNT_IMAGE=nunt:v1.0.0 docker compose up -d
 
 | 端口 | 用途 | 说明 |
 | --- | --- | --- |
-| 16601 | 管理后台 | 建议只在内网开放，必要时配 `system.adminAllowIps`（见第 3 节） |
+| 3113 | 管理后台 | 建议只在内网开放，必要时配 `system.adminAllowIps`（见第 3 节） |
 | 80 / 443 | Web 服务 | 由 Web 服务规则里的监听地址决定，可改成任意端口 |
 | 自定义 | 端口转发 | 规则里的源地址 |
 
 容器内以非 root（uid 1000）运行，镜像里已经给二进制设置了 `cap_net_bind_service`，因此可以直接绑定 80/443。
 
-### 2.1 用环境变量指定管理后台端口
+### 2.1 在控制台里改管理后台端口（立即生效）
 
-管理后台默认监听 `:16601`（配置字段 `system.adminListen`）。部署时可以用环境变量覆盖，
+管理后台默认监听 `:3113`（配置字段 `system.adminListen`）。**设置 → 系统参数 → 管理监听地址**
+可以直接改端口 / 监听地址，保存后立即生效，**不需要重启进程**：
+
+- 后端先在**新地址**上绑定监听器；端口被占用、权限不足、地址非法时返回 `4xx`（`409` / `403` / `400`）
+  并在 message 里给出原因，**旧监听保持不变**，配置也不会被改写；
+- 绑定成功后才把新地址写进 `config.json`，由旧监听器返回这次保存的 `200`（所以不会出现
+  「响应还没发出去端口就没了」）；
+- 旧监听器在约 300 ms 后优雅关闭（等待进行中的请求写完），**浏览器会话不受影响**：
+  仍是同一个进程、同一份内存会话表，cookie 继续有效；
+- 保存响应里的 `adminListen` 是真正生效的地址；设置页会提示新地址并给出「用新地址打开」链接，
+  切换后当前页面仍停在旧端口，请用新链接继续操作。
+
+> 运行时改端口只影响当前进程；如果容器被重建，会以 `config.json` 里的值为准（已经写进去了）。
+
+### 2.2 用环境变量指定管理后台端口
+
+管理后台默认监听 `:3113`（配置字段 `system.adminListen`）。部署时可以用环境变量覆盖，
 **不需要改 `config.json`**；覆盖值只影响当前进程，不会写回数据卷（换端口重启不会污染配置）。
 
 | 变量 | 取值 | 优先级 |
 | --- | --- | --- |
 | `NUNT_ADMIN_LISTEN` | 完整监听地址：`:8080`、`127.0.0.1:8080`、`[::1]:8080` | 最高 |
 | `NUNT_ADMIN_PORT` | 仅端口：`8080`（等价于 `:8080`） | 次之 |
-| `system.adminListen` | 配置文件里的值（默认 `:16601`） | 最低 |
+| `system.adminListen` | 配置文件里的值（默认 `:3113`） | 最低 |
 
 ```bash
 # 直接运行二进制
@@ -58,7 +74,7 @@ NUNT_ADMIN_PORT=18080 ./nunt -d /etc/nunt          # 仅端口
 docker run -d --name nunt --network host \
   -e NUNT_ADMIN_LISTEN=:18080 -v "$PWD/data:/data" nunt:dev
 
-# compose（docker-compose.yml 已显式设置 NUNT_ADMIN_LISTEN=:16601，覆盖变量即可）
+# compose（NUNT_ADMIN_LISTEN 留空时用 config.json 里的值，新卷为 :3113；覆盖变量即可）
 NUNT_ADMIN_LISTEN=127.0.0.1:18080 docker compose up -d
 ```
 
@@ -67,13 +83,20 @@ NUNT_ADMIN_LISTEN=127.0.0.1:18080 docker compose up -d
   同样不受支持。
 - **非法值启动即失败**：例如 `NUNT_ADMIN_LISTEN=abc`、`NUNT_ADMIN_LISTEN=127.0.0.1`、
   `NUNT_ADMIN_PORT=70000` 会打印明确错误并以非零码退出，不会静默回退到 `config.json` 的值。
-- **健康检查会自动跟随**：镜像的 `HEALTHCHECK` 先读 `NUNT_ADMIN_PORT`，再取
-  `NUNT_ADMIN_LISTEN` 的最后一段端口，最后回退到 `16601`；`docker-compose.yml` 里的
-  healthcheck 使用同一规则。
+- **健康检查会自动跟随**：镜像的 `HEALTHCHECK` 按与程序相同的优先级取端口——
+  `NUNT_ADMIN_PORT` → `NUNT_ADMIN_LISTEN` 的端口部分 → `/data/config.json` 里的
+  `system.adminListen` → 内置默认 `3113`。因此**在控制台里改过端口后，healthcheck 会自动跟到新端口**
+  （它读的是配置文件里的值）；healthcheck 固定访问 `127.0.0.1`，如果管理面只绑在某个具体网卡地址上，
+  需要自行调整（这是既有行为）。
+- **环境变量优先，且会锁住设置页的地址字段**：来源是 `env` 时，「管理监听地址」字段被禁用并说明原因；
+  直接调 `PUT /api/v1/system/settings` 修改地址会被拒绝（`409` +
+  「当前监听地址由环境变量 NUNT_ADMIN_LISTEN 控制，修改配置不会生效」），**配置不会写入**。
+  想改地址请先移除环境变量并重启一次，之后就可以在控制台里随时改、立即生效。
+  环境变量存在时，其它设置（日志级别、白名单等）照常保存。
 - **查看实际状态**：`GET /api/v1/system/info` 返回 `adminListen`（实际生效值）、
   `adminListenConfig`（配置文件里的值）、`adminListenSource`（`env` / `config`）和
-  `adminListenEnv`（具体生效的环境变量名）。设置页在来源为环境变量时会显示提示：此时修改
-  「管理监听地址」不会改变实际端口（保存仍会更新 `config.json`，供下次无环境变量启动时使用）。
+  `adminListenEnv`（具体生效的环境变量名）；`PUT /api/v1/system/settings` 的成功响应里也带
+  `adminListen` / `adminListenConfig` / `adminListenSource` / `adminListenApplied`。
 
 ## 3. 管理后台 IP 白名单
 

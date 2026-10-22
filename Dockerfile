@@ -54,14 +54,22 @@ COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 VOLUME ["/data"]
-EXPOSE 16601 80 443
-# The admin console port is only known at start up: it can come from
-# NUNT_ADMIN_PORT, from the port part of NUNT_ADMIN_LISTEN, or from the
-# built-in default. The shell form evaluates the same priority at runtime.
+EXPOSE 3113 80 443
+# The admin console port follows the same priority as the application:
+#   1. NUNT_ADMIN_PORT
+#   2. the port part of NUNT_ADMIN_LISTEN
+#   3. system.adminListen from the stored configuration (/data/config.json),
+#      which the settings page can change at runtime without a restart
+#   4. the built-in default (3113)
+# Reading the configuration file is what keeps the health check correct after
+# somebody moved the console from the settings page.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD port="${NUNT_ADMIN_PORT:-}"; \
       if [ -z "$port" ] && [ -n "${NUNT_ADMIN_LISTEN:-}" ]; then port="${NUNT_ADMIN_LISTEN##*:}"; fi; \
-      [ -n "$port" ] || port=16601; \
+      if [ -z "$port" ] && [ -r /data/config.json ]; then \
+        port=$(sed -n 's/.*"adminListen"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /data/config.json | head -n 1 | sed 's/^.*://'); \
+      fi; \
+      [ -n "$port" ] || port=3113; \
       wget -q -O /dev/null "http://127.0.0.1:${port}/healthz" || exit 1
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

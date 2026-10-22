@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nunt/nunt/internal/adminlisten"
 	"github.com/nunt/nunt/internal/certs"
 	"github.com/nunt/nunt/internal/config"
 	"github.com/nunt/nunt/internal/logging"
@@ -65,7 +66,20 @@ type Server struct {
 	// use of an API token) so it can be joined before the data directory goes
 	// away.
 	bg sync.WaitGroup
+	// admin is the rebindable admin listener, attached by the application after
+	// the API handler exists (the listener serves that handler). Unit tests may
+	// leave it nil: the API then reports the configured address and setting a
+	// new address only updates the configuration file.
+	admin atomic.Pointer[adminlisten.Server]
 }
+
+// SetAdminListener attaches the rebindable admin listener. It must be called
+// while the application is being assembled, before the listener serves.
+func (s *Server) SetAdminListener(srv *adminlisten.Server) { s.admin.Store(srv) }
+
+// AdminListener returns the attached admin listener (nil when the API is used
+// standalone).
+func (s *Server) AdminListener() *adminlisten.Server { return s.admin.Load() }
 
 // WaitBackground blocks until every background task started by the server has
 // finished. Call it on shutdown so that no deferred write lands after the

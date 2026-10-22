@@ -6,8 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -54,7 +52,7 @@ type App struct {
 	registry    *module.Registry
 	sessions    *security.SessionStore
 	api         *api.Server
-	server      *http.Server
+	admin       *adminlisten.Server
 
 	initialPassword string
 }
@@ -160,15 +158,12 @@ func New(opts Options) (*App, error) {
 	})
 	a.api.BroadcastLogs()
 
-	a.server = &http.Server{
-		Addr:              adminListen.Listen,
-		Handler:           adminlisten.WithInfo(a.api.Handler(), adminListen),
-		ReadHeaderTimeout: 15 * time.Second,
-		ReadTimeout:       0, // uploads and SSE streams may be long lived
-		WriteTimeout:      0,
-		IdleTimeout:       120 * time.Second,
-		ErrorLog:          slog.NewLogLogger(hub.Logger().Handler(), slog.LevelWarn),
-	}
+	// The admin listener is a manager rather than a plain http.Server: the
+	// settings page can move it to another address at runtime (see
+	// adminlisten.Server.Rebind). The API reads the address actually in use
+	// from the manager, so GET /api/v1/system/info follows a rebind.
+	a.admin = adminlisten.NewServer(a.api.Handler(), logger.With("component", "admin"), adminListen)
+	a.api.SetAdminListener(a.admin)
 
 	cfg.Subscribe(func(c *model.Config) {
 		hub.SetLevel(c.System.LogLevel)
@@ -213,22 +208,17 @@ func (a *App) Run(ctx context.Context) error {
 		log.Error("module failed to start", "error", err)
 	}
 
-	ln, err := net.Listen("tcp", a.server.Addr)
-	if err != nil {
-		return fmt.Errorf("listen on %s: %w", a.server.Addr, err)
+	if err := a.admin.Serve(a.adminListen.Listen); err != nil {
+		return fmt.Errorf("listen on %s: %w", a.adminListen.Listen, err)
 	}
-	errCh := make(chan error, 1)
-	go func() {
-		log.Info("admin interface listening", "addr", ln.Addr().String())
-		if err := a.server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
-		}
-	}()
 
 	select {
 	case <-ctx.Done():
 		log.Info("shutdown requested")
-	case err := <-errCh:
+	case err := <-a.admin.Errors():
+		// Log before Shutdown: Shutdown closes the log hub, so an error reported
+		// after it would be swallowed.
+		log.Error("admin server stopped with an error", "error", err)
 		a.Shutdown()
 		return err
 	}
@@ -240,8 +230,10 @@ func (a *App) Run(ctx context.Context) error {
 func (a *App) Shutdown() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := a.server.Shutdown(ctx); err != nil {
-		a.log.Logger().Warn("admin server shutdown", "error", err)
+	if a.admin != nil {
+		if err := a.admin.Close(); err != nil {
+			a.log.Logger().Warn("admin server shutdown", "error", err)
+		}
 	}
 	a.registry.StopAll(ctx)
 	a.notify.Close()

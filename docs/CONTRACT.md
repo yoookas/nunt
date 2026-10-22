@@ -366,8 +366,12 @@ export default {
 
 前置：`go build -o nunt.exe ./cmd/nunt`（脚本默认用仓库根的 `nunt.exe`，可用 `--exe` 指定）。
 两个 Playwright 脚本默认**自己起一个临时实例**（数据目录在 `.gocache/` 下，结束即删），
-也可以 `--base http://127.0.0.1:16601 --password <管理员密码>` 连一个已在运行的实例；
-它们都只用默认管理端口 16601（`nunt` 的默认监听地址，脚本不写配置文件）。
+也可以 `--base http://127.0.0.1:3113 --password <管理员密码>` 连一个已在运行的实例；
+它们都只用默认管理端口 3113（`nunt` 的默认监听地址，脚本不写配置文件）。
+
+> 端口默认值已从 16601 改为 **3113**（`config.DefaultAdminListen`）。`docs/screenshots/` 下
+> `before` / `phase*` / `polish` 里的 `16601` 是**当时采集的历史记录**，不是当前默认值；
+> 只有 `scripts/*.mjs`、`scripts/*.ps1` 与本文的默认端口需要跟着代码走。
 
 CI：`.github/workflows/ci.yml` 的 `frontend` job（**独立 job**，不影响 Go / Docker / govulncheck 的耗时）：
 

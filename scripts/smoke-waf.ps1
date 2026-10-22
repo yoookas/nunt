@@ -28,7 +28,7 @@ function Send-Chunked([int]$Port, [string]$Path) {
 }
 
 try {
-  $base = 'http://127.0.0.1:16601'
+  $base = 'http://127.0.0.1:3113'
   $ready = $false
   for ($i = 0; $i -lt 100; $i++) {
     try { if ((Invoke-WebRequest "$base/healthz" -TimeoutSec 2 -UseBasicParsing).StatusCode -eq 200) { $ready = $true; break } } catch { Start-Sleep -Milliseconds 200 }

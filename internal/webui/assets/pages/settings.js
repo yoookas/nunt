@@ -35,6 +35,10 @@ const PAGE_CSS = [
   '.psettings-actions{margin-top:14px}',
   '.psettings-json{margin:0;white-space:pre-wrap;word-break:break-all;max-height:60vh;overflow:auto}',
   '.psettings-notice{padding:10px 12px;border-radius:var(--radius-sm);background:var(--warn-soft);border:1px solid color-mix(in srgb, var(--warn) 35%, transparent);color:var(--sl-color-warning-800);font-size:13px;margin-bottom:12px}',  // warning-800：warning-600/700 在 --warn-soft 上分别只有 3.0/4.3:1（同 style.css 的 .notice）
+  // 切换成功后的常驻提示：toast 会自动消失，而「旧端口已经关闭」这件事需要一直可见。
+  '.psettings-switched{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 12px;border-radius:var(--radius-sm);background:var(--ok-soft);border:1px solid color-mix(in srgb, var(--ok) 35%, transparent);color:var(--text);font-size:13px;margin-bottom:12px}',
+  '.psettings-switched a,.psettings-toast-link{color:var(--accent);font-weight:600;text-decoration:underline}',
+  '.psettings-toast-link{margin-left:8px}',
   '.psettings-token{display:block;padding:12px;border-radius:var(--radius-sm);background:var(--bg-soft);border:1px dashed var(--line-strong);font-family:var(--sl-font-mono);font-size:13px;word-break:break-all;user-select:all}',
 ].join(String.fromCharCode(10));
 
@@ -62,6 +66,20 @@ function splitList(value) {
     .filter(Boolean);
 }
 
+/**
+ * adminListenURL 把监听地址换算成「同一主机、新端口」的浏览器地址。
+ *
+ * 换端口时主机不变（监听通配地址时就是浏览器当前的主机名），所以只替换端口。
+ * 地址解析不出来时返回空串，界面退化为只显示文本，不给出可能错误的链接。
+ */
+function adminListenURL(listen) {
+  const match = /:([0-9]+)\s*$/.exec(String(listen === undefined || listen === null ? '' : listen).trim());
+  if (!match) return '';
+  const loc = window.location;
+  const host = loc.hostname || 'localhost';
+  return loc.protocol + '//' + host + ':' + match[1] + '/';
+}
+
 /** downloadText 触发浏览器下载（与 lib/ui.js 的实现一致，迁移后不再依赖它）。 */
 function downloadText(filename, content, mime) {
   const blob = new Blob([content], { type: mime || 'text/plain;charset=utf-8' });
@@ -84,6 +102,8 @@ class SettingsPage extends NuntElement {
     basicError: { attribute: false },
     basicForm: { attribute: false },
     listenInfo: { attribute: false },
+    switchedTo: { type: String },
+    switchedAddr: { type: String },
     users: { attribute: false },
     usersLoading: { type: Boolean },
     usersError: { attribute: false },
@@ -105,6 +125,9 @@ class SettingsPage extends NuntElement {
     this.basicForm = null;
     this.systemSettings = null;
     this.listenInfo = null;
+    // 监听地址切换成功后，「旧端口已关闭」的提示要一直留在页面上。
+    this.switchedTo = '';
+    this.switchedAddr = '';
     this.users = [];
     this.usersLoading = false;
     this.usersError = null;
@@ -166,22 +189,32 @@ class SettingsPage extends NuntElement {
   /**
    * adminListenHint 生成「管理监听地址」字段的提示。
    *
-   * 环境变量覆盖只影响运行时（不写回 config.json），所以此时改这一项不会改变
+   * 环境变量覆盖只影响运行时（不写回 config.json），此时修改这一项不会改变
    * 实际端口；提示里点名具体的环境变量并给出实际生效值，避免用户误以为保存即生效。
+   * 没有环境变量时，保存会真的移动监听器（后端先绑新地址、成功后才关旧地址）。
    */
   adminListenHint() {
     const info = this.listenInfo;
     if (info && info.adminListenSource === 'env') {
       const source = info.adminListenEnv || 'NUNT_ADMIN_LISTEN / NUNT_ADMIN_PORT';
       const effective = info.adminListen ? '（实际生效 ' + String(info.adminListen) + '）' : '';
-      return '当前监听地址由环境变量 ' + source + ' 指定' + effective + '，修改此项不会改变实际端口；如需调整请改环境变量并重启服务。';
+      return '当前监听地址由环境变量 ' + source + ' 指定' + effective + '，此字段已禁用；'
+        + '如需调整请移除该环境变量并重启服务（保留环境变量时保存修改会被拒绝）。';
     }
-    return '修改后需要重启服务才能真正生效';
+    return '保存后立即生效，无需重启：服务先在新地址上监听成功，再关闭旧地址；端口被占用时保留旧监听并提示原因。';
   }
 
   buildBasicForm(data) {
+    const envControlled = !!(this.listenInfo && this.listenInfo.adminListenSource === 'env');
     return formGrid([
-      { name: 'adminListen', label: '管理监听地址', value: data.adminListen || '', placeholder: ':8080 或 127.0.0.1:8080', hint: this.adminListenHint() },
+      {
+        name: 'adminListen',
+        label: '管理监听地址',
+        value: data.adminListen || '',
+        placeholder: ':8080 或 127.0.0.1:8080',
+        hint: this.adminListenHint(),
+        disabled: envControlled,
+      },
       { name: 'baseUrl', label: '外部访问地址', value: data.baseUrl || '', placeholder: 'https://admin.example.com', hint: '用于生成回跳链接，可留空' },
       { name: 'logLevel', label: '日志级别', type: 'select', value: data.logLevel || 'info', options: LOG_LEVELS },
       { name: 'sessionTtlHours', label: '会话有效期（小时）', type: 'number', value: data.sessionTtlHours || 24, min: 1, max: 720 },
@@ -246,19 +279,68 @@ class SettingsPage extends NuntElement {
       checkUpdate: !!values.checkUpdate,
       baseUrl: String(values.baseUrl || '').trim(),
     };
+    // 保存前的实际监听地址：优先用 system/info（真实生效值），取不到时退回
+    // 设置里的值，至少能判断「这次保存有没有换端口」。
+    const previousListen = String(
+      (this.listenInfo && this.listenInfo.adminListen)
+      || (this.systemSettings && this.systemSettings.adminListen)
+      || '',
+    );
     this.configBusy = 'basic';
     try {
       const result = await this.ctx.api.put('/api/v1/system/settings', payload);
       if (this.disposed) return;
       this.systemSettings = result || payload;
+      // 后端返回的 adminListen 是「保存后真正生效的地址」：环境变量覆盖时它
+      // 仍是实际端口，正常保存时它已经等于新端口。
+      const effective = result && result.adminListen ? String(result.adminListen) : payload.adminListen;
+      this.listenInfo = Object.assign({}, this.listenInfo || {}, result ? {
+        adminListen: result.adminListen,
+        adminListenConfig: result.adminListenConfig,
+        adminListenSource: result.adminListenSource,
+        adminListenEnv: result.adminListenEnv,
+      } : { adminListen: effective, adminListenConfig: effective });
       this.basicForm = this.buildBasicForm(this.systemSettings);
       this.ctx.theme.set(payload.theme);
-      toast('设置已保存', 'ok');
+      if (result && result.adminListenSource === 'env') {
+        toast('设置已保存；监听地址仍由环境变量控制，未改变', 'warn');
+      } else if (effective && previousListen && effective !== previousListen) {
+        this.notifyListenSwitched(effective);
+      } else {
+        toast('设置已保存', 'ok');
+      }
     } catch (err) {
       if (this.disposed) return;
-      form.error(errorMessage(err, '保存失败'));
+      // 后端的 message（例如「端口 3133 已被占用…」）原样展示：表单内保留
+      // role=alert 的错误块，同时弹一条 toast，长表单里也能立刻看到。
+      const message = errorMessage(err, '保存失败');
+      form.error(message);
+      toast(message, 'err');
     } finally {
       if (!this.disposed) this.configBusy = '';
+    }
+  }
+
+  /**
+   * notifyListenSwitched：保存后监听地址真的变了。
+   *
+   * toast 只活几秒，而「当前页面还挂在旧地址上」是持续状态，所以同时把链接
+   * 留在系统参数卡片里（renderBasic 的 switchedTo），刷新页面后自然消失。
+   */
+  notifyListenSwitched(listen) {
+    const addr = String(listen || '');
+    const url = adminListenURL(addr);
+    this.switchedAddr = addr;
+    this.switchedTo = url;
+    const alert = toast('管理后台已切换到 ' + addr + '，当前页面仍在旧地址', 'ok');
+    // toast 默认 3.2 秒，给操作者留出点击「用新地址打开」的时间。
+    alert.duration = 15000;
+    if (url) {
+      const link = document.createElement('a');
+      link.href = url;
+      link.className = 'psettings-toast-link';
+      link.textContent = '用新地址打开';
+      alert.appendChild(link);
     }
   }
 
@@ -274,13 +356,21 @@ class SettingsPage extends NuntElement {
     } else {
       body = html`<nunt-loading text="正在读取系统设置…"></nunt-loading>`;
     }
+    // 切换成功后旧端口已经关闭，页面上的接口调用都会失败：把「用新地址打开」
+    // 作为常驻提示放在表单上方，而不是只依赖会自动消失的 toast。
+    const switched = this.switchedTo
+      ? html`<div class="psettings-switched" role="status">
+          <span>管理后台已切换到 <code class="mono">${this.switchedAddr}</code>，当前页面仍在旧地址。</span>
+          <a href=${this.switchedTo}>用新地址打开</a>
+        </div>`
+      : nothing;
     return html`<section class="card">
       <div class="card-header">
         <h2>系统参数</h2>
         <span class="spacer"></span>
-        <span class="sub">修改监听地址后请重启服务</span>
+        <span class="sub">监听地址保存后立即生效</span>
       </div>
-      <div class="card-body">${body}</div>
+      <div class="card-body">${switched}${body}</div>
     </section>`;
   }
 

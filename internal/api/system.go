@@ -2,12 +2,15 @@ package api
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/nunt/nunt/internal/adminlisten"
+	"github.com/nunt/nunt/internal/config"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/netutil"
 	"github.com/nunt/nunt/internal/rest"
@@ -36,7 +39,7 @@ func (s *Server) registerSystem() {
 func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	cfg := s.opts.Cfg.Snapshot()
 	stats := sysinfo.Collect(s.opts.DataDir)
-	listen := adminListenInfo(r.Context(), cfg.System.AdminListen)
+	listen := s.currentAdminListen(r.Context(), cfg.System.AdminListen)
 	rest.OK(w, map[string]any{
 		"version":   version.Get(),
 		"startedAt": stats.StartTime,
@@ -56,13 +59,20 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// adminListenInfo prefers the value resolved by the app at start up. The API
-// is also usable without the app (unit tests, embedders), so fall back to the
-// configured value and report it as if it came from the file.
-func adminListenInfo(ctx context.Context, configured string) adminlisten.Info {
+// currentAdminListen reports the address that is really in use. The listener
+// manager is authoritative because a settings save can move it at runtime; the
+// request context is the fallback for embedders that wrap the handler with
+// adminlisten.WithInfo, and the configuration file is the last resort (the API
+// is also usable without a running listener in unit tests).
+func (s *Server) currentAdminListen(ctx context.Context, configured string) adminlisten.Info {
+	if srv := s.AdminListener(); srv != nil {
+		info := srv.Info()
+		// The configuration may have changed since the listener was bound;
+		// always report the value currently stored in the file separately.
+		info.ConfigListen = configured
+		return info
+	}
 	if info, ok := adminlisten.FromContext(ctx); ok && info.Listen != "" {
-		// The configuration may have changed since start up; always report the
-		// value currently stored in the file separately.
 		info.ConfigListen = configured
 		return info
 	}
@@ -129,29 +139,137 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if !jsonBody(w, r, &req) {
 		return
 	}
-	if req.AdminListen != "" {
-		if _, err := netutil.NormalizeListen(req.AdminListen); err != nil {
-			rest.Fail(w, http.StatusBadRequest, "管理后台监听地址不合法：%s", err)
-			return
-		}
+	wanted, err := normalizeAdminListen(req.AdminListen)
+	if err != nil {
+		rest.Fail(w, http.StatusBadRequest, "管理后台监听地址不合法：%s", err)
+		return
 	}
+	req.AdminListen = wanted
 	if _, err := netutil.ParseIPList(req.AdminAllowIPs); err != nil {
 		rest.Fail(w, http.StatusBadRequest, "管理后台 IP 白名单不合法：%s", err)
 		return
+	}
+
+	// The listener moves first and the file is written only after the new
+	// address is bound: when the port is occupied, the process lacks the
+	// privilege, the value is invalid or the address is controlled by the
+	// environment, nothing is persisted and the old listener keeps running.
+	previous := s.opts.Cfg.Snapshot().System.AdminListen
+	moved := !sameAdminListen(wanted, previous)
+	if moved {
+		if err := s.rebindAdminListen(wanted); err != nil {
+			status, message := adminListenFailure(err)
+			rest.Fail(w, status, "%s", message)
+			return
+		}
 	}
 	if err := s.opts.Cfg.Update(func(c *model.Config) error {
 		c.System = req
 		return nil
 	}); err != nil {
+		if moved {
+			// A configuration write failure would leave the runtime on the new
+			// address while the file still has the old one; put the listener
+			// back so both agree. The only way this fails is somebody else
+			// taking the old port in the meantime.
+			if rollbackErr := s.rebindAdminListen(previous); rollbackErr != nil {
+				s.log.Error("admin listener rollback failed", "addr", previous, "error", rollbackErr)
+			}
+		}
 		rest.Fail(w, http.StatusInternalServerError, "无法保存设置：%s", err)
 		return
 	}
 	s.opts.Log.SetLevel(req.LogLevel)
-	s.audit(r, "system.settings")
+	s.audit(r, "system.settings", "adminListen", wanted, "moved", moved)
 	if s.opts.Reload != nil {
 		s.opts.Reload()
 	}
-	rest.OK(w, s.opts.Cfg.Snapshot().System)
+	rest.OK(w, s.systemSettingsResponse())
+}
+
+// rebindAdminListen moves the listener when the application attached one. The
+// API stays usable without a listener (unit tests and embedders), in which case
+// only the configuration file changes.
+func (s *Server) rebindAdminListen(addr string) error {
+	if srv := s.AdminListener(); srv != nil {
+		return srv.Rebind(addr)
+	}
+	return nil
+}
+
+// normalizeAdminListen validates a listen address. An empty value means "use the
+// default", exactly like config.Normalize does for the file.
+func normalizeAdminListen(raw string) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		raw = config.DefaultAdminListen
+	}
+	return netutil.NormalizeListen(raw)
+}
+
+// sameAdminListen reports whether the requested address already is the
+// configured one. An unparsable stored value counts as different so that the
+// next save repairs it.
+func sameAdminListen(wanted, configured string) bool {
+	previous, err := netutil.NormalizeListen(configured)
+	if err != nil {
+		return false
+	}
+	return netutil.SameListen(wanted, previous)
+}
+
+// adminListenFailure maps a rebind error to an HTTP status. Everything the
+// caller can fix is a 4xx that repeats the original message (the settings page
+// shows it verbatim); only an unexpected failure becomes a 500.
+func adminListenFailure(err error) (int, string) {
+	var rebindErr *adminlisten.RebindError
+	if errors.As(err, &rebindErr) {
+		switch rebindErr.Kind {
+		case adminlisten.KindEnv, adminlisten.KindInUse:
+			return http.StatusConflict, rebindErr.Error()
+		case adminlisten.KindPermission:
+			return http.StatusForbidden, rebindErr.Error()
+		case adminlisten.KindInvalid, adminlisten.KindBind:
+			return http.StatusBadRequest, rebindErr.Error()
+		}
+		return http.StatusBadRequest, err.Error()
+	}
+	return http.StatusInternalServerError, err.Error()
+}
+
+// systemSettingsResponse is the stored settings plus the listen address state.
+// The embedded adminListen field carries the address that is really in use, so
+// the page can tell the operator where the console ended up; the stored value,
+// the source and whether they agree are reported separately.
+type systemSettingsResponse struct {
+	model.SystemConfig
+	AdminListenConfig  string `json:"adminListenConfig"`
+	AdminListenSource  string `json:"adminListenSource"`
+	AdminListenEnv     string `json:"adminListenEnv"`
+	AdminListenApplied bool   `json:"adminListenApplied"`
+	AdminListenNotice  string `json:"adminListenNotice,omitempty"`
+}
+
+func (s *Server) systemSettingsResponse() systemSettingsResponse {
+	cfg := s.opts.Cfg.Snapshot()
+	info := s.currentAdminListen(context.Background(), cfg.System.AdminListen)
+	out := systemSettingsResponse{
+		SystemConfig:       cfg.System,
+		AdminListenConfig:  cfg.System.AdminListen,
+		AdminListenSource:  string(info.Source),
+		AdminListenEnv:     info.EnvVar,
+		AdminListenApplied: netutil.SameListen(info.Listen, cfg.System.AdminListen),
+	}
+	out.AdminListen = info.Listen
+	if info.Source == adminlisten.SourceEnv {
+		env := info.EnvVar
+		if env == "" {
+			env = adminlisten.EnvListen
+		}
+		out.AdminListenNotice = fmt.Sprintf(
+			"当前监听地址由环境变量 %s 控制（实际生效 %s）：修改配置不会改变运行中的端口，需移除该环境变量并重启服务后才生效。",
+			env, info.Listen)
+	}
+	return out
 }
 
 func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
@@ -196,6 +314,23 @@ func (s *Server) handleImportConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	old := s.opts.Cfg.Snapshot()
 	restoreSecrets(old, req.Config)
+	// An imported configuration may move the admin console too; validate the
+	// address and bind the new socket before the file is replaced.
+	wanted, err := normalizeAdminListen(req.Config.System.AdminListen)
+	if err != nil {
+		rest.Fail(w, http.StatusBadRequest, "导入配置里的管理后台监听地址不合法：%s", err)
+		return
+	}
+	req.Config.System.AdminListen = wanted
+	previous := old.System.AdminListen
+	moved := !sameAdminListen(wanted, previous)
+	if moved {
+		if err := s.rebindAdminListen(wanted); err != nil {
+			status, message := adminListenFailure(err)
+			rest.Fail(w, status, "%s", message)
+			return
+		}
+	}
 	if err := s.opts.Cfg.Update(func(c *model.Config) error {
 		// Tokens and users are managed through their own endpoints; only the
 		// imported users are kept when they carry a password hash.
@@ -220,14 +355,28 @@ func (s *Server) handleImportConfig(w http.ResponseWriter, r *http.Request) {
 		c.Notify = req.Config.Notify
 		return nil
 	}); err != nil {
+		if moved {
+			if rollbackErr := s.rebindAdminListen(previous); rollbackErr != nil {
+				s.log.Error("admin listener rollback failed", "addr", previous, "error", rollbackErr)
+			}
+		}
 		rest.Fail(w, http.StatusBadRequest, "无法导入配置：%s", err)
 		return
 	}
-	s.audit(r, "system.config.import")
+	s.audit(r, "system.config.import", "adminListen", wanted, "moved", moved)
 	if s.opts.Reload != nil {
 		s.opts.Reload()
 	}
-	rest.OK(w, map[string]any{"status": "imported"})
+	cfg := s.opts.Cfg.Snapshot()
+	info := s.currentAdminListen(context.Background(), cfg.System.AdminListen)
+	rest.OK(w, map[string]any{
+		"status":             "imported",
+		"adminListen":        info.Listen,
+		"adminListenConfig":  cfg.System.AdminListen,
+		"adminListenSource":  string(info.Source),
+		"adminListenEnv":     info.EnvVar,
+		"adminListenApplied": netutil.SameListen(info.Listen, cfg.System.AdminListen),
+	})
 }
 
 func maskConfigSecrets(cfg *model.Config) {

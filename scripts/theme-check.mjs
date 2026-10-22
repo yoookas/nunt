@@ -20,7 +20,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
 const AXE_SOURCE = await fsp.readFile(require.resolve('axe-core/axe.min.js'), 'utf8');
 const OUT = path.join(REPO, 'docs', 'screenshots', 'phase1');
-const PORT = 16601;
+const PORT = 3113;
 const BASE = 'http://127.0.0.1:' + PORT;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

@@ -26,10 +26,14 @@ services:
       PUID: "${PUID:-1000}"
       PGID: "${PGID:-1000}"
       # Admin console port. Empty means "keep whatever ./data/config.json says"
-      # (16601 on a fresh volume). Override it for one run without touching the
-      # config file:
+      # (3113 on a fresh volume). The console can also be moved at runtime from
+      # the settings page (saved to config.json, effective immediately); the
+      # image health check reads that stored value. Override the port for one
+      # run without touching the config file:
       #   NUNT_ADMIN_LISTEN=:18080 docker compose up -d
       # NUNT_ADMIN_PORT=18080 works the same way when this line is left empty.
+      # An environment override makes the settings page read-only for the
+      # address: remove it and restart to manage the port from the console.
       NUNT_ADMIN_LISTEN: "${NUNT_ADMIN_LISTEN:-}"
     volumes:
       - ./data:/data

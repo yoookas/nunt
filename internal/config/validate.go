@@ -40,7 +40,7 @@ func deepCopy(in, out any) error {
 // that older versions may have left empty.
 func Normalize(c *model.Config) {
 	if c.System.AdminListen == "" {
-		c.System.AdminListen = ":16601"
+		c.System.AdminListen = DefaultAdminListen
 	}
 	if c.System.LogLevel == "" {
 		c.System.LogLevel = "info"

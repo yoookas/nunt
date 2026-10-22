@@ -17,7 +17,7 @@
  *
  * 用法：
  *   node scripts/firstload.mjs [--exe nunt.exe] [--out .gocache/firstload] [--label before]
- *                              [--page web] [--port 16601] [--web-port 18090]
+ *                              [--page web] [--port 3113] [--web-port 18090]
  *
  * 输出：<out>/firstload.json（机器数据）+ 控制台汇总表；不需要 --base（自己起实例并播种）。
  */
@@ -36,7 +36,7 @@ function parseArgs(argv) {
     out: path.join(REPO, '.gocache', 'firstload'),
     label: 'current',
     page: 'web',
-    port: 16601,
+    port: 3113,
     webPort: 18090,
     forwardPort: 12230,
     echoPort: 12231,

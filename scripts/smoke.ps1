@@ -12,7 +12,7 @@ if (-not $env:GOPATH) { $env:GOPATH = Join-Path $root '.gocache\gopath' }
 $env:GOFLAGS = '-mod=mod'
 $env:GOTOOLCHAIN = 'auto'
 
-$port = 16601
+$port = 3113
 $dataDir = Join-Path $env:TEMP ('nunt-smoke-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
 

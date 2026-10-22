@@ -72,7 +72,7 @@ jobs:
       - name: Wait for the health endpoint
         run: |
           for attempt in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:16601/healthz > /dev/null; then
+            if curl -fsS http://127.0.0.1:3113/healthz > /dev/null; then
               echo "healthy after $attempt attempts"
               exit 0
             fi
@@ -101,9 +101,9 @@ jobs:
           docker exec nunt getcap /usr/local/bin/nunt | grep -q cap_net_bind_service
 
           # the admin interface and its assets are served
-          curl -fsS http://127.0.0.1:16601/ | grep -qi nunt
-          curl -fsS http://127.0.0.1:16601/app.js > /dev/null
-          curl -fsS http://127.0.0.1:16601/style.css > /dev/null
+          curl -fsS http://127.0.0.1:3113/ | grep -qi nunt
+          curl -fsS http://127.0.0.1:3113/app.js > /dev/null
+          curl -fsS http://127.0.0.1:3113/style.css > /dev/null
 
           # secrets are stored with restrictive permissions inside the volume
           docker exec nunt stat -c %a /data/secret.key | grep -qx 600
@@ -116,14 +116,14 @@ jobs:
           jq -n --arg u admin --arg p "$password" '{username:$u,password:$p}' > /tmp/login.json
           status=$(curl -sS -o /tmp/session.json -w '%{http_code}' -c /tmp/cookies \
             -H 'Content-Type: application/json' \
-            --data @/tmp/login.json http://127.0.0.1:16601/api/v1/auth/login || true)
+            --data @/tmp/login.json http://127.0.0.1:3113/api/v1/auth/login || true)
           echo "login status: $status"
           echo "login body:"; head -c 300 /tmp/session.json; echo
           [ "$status" = "200" ]
           jq -e '.csrf' /tmp/session.json > /dev/null
 
           # every module is registered and the registry is reachable with the session
-          curl -fsSL -b /tmp/cookies http://127.0.0.1:16601/api/v1/modules \
+          curl -fsSL -b /tmp/cookies http://127.0.0.1:3113/api/v1/modules \
             | jq -e 'length >= 6' > /dev/null
 
       - name: Stop the container
