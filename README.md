@@ -49,6 +49,41 @@ docker compose up -d --build
 
 管理地址：`http://<主机IP>:16601`
 
+#### 用环境变量指定控制台端口
+
+管理后台默认监听 `:16601`（配置字段 `system.adminListen`）。容器部署时可以直接用环境变量覆盖，**不需要改 `config.json`**，覆盖值也不会写回数据卷：
+
+| 变量 | 含义 | 优先级 |
+| --- | --- | --- |
+| `NUNT_ADMIN_LISTEN` | 完整监听地址，如 `:8080`、`127.0.0.1:8080` | 最高 |
+| `NUNT_ADMIN_PORT` | 仅端口，如 `8080`（内部等价于 `:8080`） | 次之 |
+| `system.adminListen` | 配置文件里的值 | 最低 |
+
+```bash
+# docker run：只换端口（监听所有网卡）
+docker run -d --name nunt --network host \
+  -e NUNT_ADMIN_PORT=18080 \
+  -v "$PWD/data:/data" nunt:dev
+
+# docker run：只监听回环（推荐配合 SSH / WireGuard 隧道）
+docker run -d --name nunt --network host \
+  -e NUNT_ADMIN_LISTEN=127.0.0.1:18080 \
+  -v "$PWD/data:/data" nunt:dev
+
+# compose：默认已显式设置 NUNT_ADMIN_LISTEN=:16601，直接覆盖变量即可
+NUNT_ADMIN_LISTEN=127.0.0.1:18080 docker compose up -d
+
+# 或写进与 docker-compose.yml 同目录的 .env
+echo 'NUNT_ADMIN_LISTEN=:18080' >> .env && docker compose up -d
+```
+
+- 环境变量**只影响运行时**：`GET /api/v1/system/info` 的 `adminListen` 是实际生效值，
+  `adminListenConfig` 仍是配置文件里的值，`adminListenSource` 为 `env` 或 `config`；
+  设置页在来源为环境变量时会提示「修改此项不会改变实际端口」。
+- 非法值（如 `NUNT_ADMIN_LISTEN=abc`、`NUNT_ADMIN_PORT=70000`）会让进程**启动即失败**并打印原因，
+  不会静默回退到旧端口。
+- 容器健康检查会自动跟随 `NUNT_ADMIN_PORT` / `NUNT_ADMIN_LISTEN` 推导出的端口。
+
 ### 2. 使用 Release 里的镜像文件（不上传任何镜像仓库）
 
 每次打 tag（如 `v1.0.0`）都会触发 GitHub Actions 构建容器镜像，并把**镜像归档文件**直接附到 Release 上：

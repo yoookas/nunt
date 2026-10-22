@@ -83,6 +83,7 @@ class SettingsPage extends NuntElement {
     basicLoading: { type: Boolean },
     basicError: { attribute: false },
     basicForm: { attribute: false },
+    listenInfo: { attribute: false },
     users: { attribute: false },
     usersLoading: { type: Boolean },
     usersError: { attribute: false },
@@ -103,6 +104,7 @@ class SettingsPage extends NuntElement {
     this.basicError = null;
     this.basicForm = null;
     this.systemSettings = null;
+    this.listenInfo = null;
     this.users = [];
     this.usersLoading = false;
     this.usersError = null;
@@ -161,9 +163,25 @@ class SettingsPage extends NuntElement {
 
   /* ---------------------------------------------------------------- 基础设置 */
 
+  /**
+   * adminListenHint 生成「管理监听地址」字段的提示。
+   *
+   * 环境变量覆盖只影响运行时（不写回 config.json），所以此时改这一项不会改变
+   * 实际端口；提示里点名具体的环境变量并给出实际生效值，避免用户误以为保存即生效。
+   */
+  adminListenHint() {
+    const info = this.listenInfo;
+    if (info && info.adminListenSource === 'env') {
+      const source = info.adminListenEnv || 'NUNT_ADMIN_LISTEN / NUNT_ADMIN_PORT';
+      const effective = info.adminListen ? '（实际生效 ' + String(info.adminListen) + '）' : '';
+      return '当前监听地址由环境变量 ' + source + ' 指定' + effective + '，修改此项不会改变实际端口；如需调整请改环境变量并重启服务。';
+    }
+    return '修改后需要重启服务才能真正生效';
+  }
+
   buildBasicForm(data) {
     return formGrid([
-      { name: 'adminListen', label: '管理监听地址', value: data.adminListen || '', placeholder: ':8080 或 127.0.0.1:8080', hint: '修改后需要重启服务才能真正生效' },
+      { name: 'adminListen', label: '管理监听地址', value: data.adminListen || '', placeholder: ':8080 或 127.0.0.1:8080', hint: this.adminListenHint() },
       { name: 'baseUrl', label: '外部访问地址', value: data.baseUrl || '', placeholder: 'https://admin.example.com', hint: '用于生成回跳链接，可留空' },
       { name: 'logLevel', label: '日志级别', type: 'select', value: data.logLevel || 'info', options: LOG_LEVELS },
       { name: 'sessionTtlHours', label: '会话有效期（小时）', type: 'number', value: data.sessionTtlHours || 24, min: 1, max: 720 },
@@ -192,9 +210,15 @@ class SettingsPage extends NuntElement {
     }
     this.basicLoading = true;
     try {
-      const data = await this.ctx.api.get('/api/v1/system/settings');
+      // 监听地址来源只在 /system/info 里（settings 返回的是配置文件内容）。
+      // 取不到 info 时不影响设置页，只是不显示环境变量提示。
+      const [data, info] = await Promise.all([
+        this.ctx.api.get('/api/v1/system/settings'),
+        this.ctx.api.get('/api/v1/system/info').catch(() => null),
+      ]);
       if (this.disposed) return;
       this.systemSettings = data || {};
+      this.listenInfo = info || null;
       this.basicForm = this.buildBasicForm(this.systemSettings);
       this.basicError = null;
     } catch (err) {

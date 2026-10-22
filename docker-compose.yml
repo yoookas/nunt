@@ -1,9 +1,8 @@
 # docker compose for nunt (host networking).
 #
-# Host networking is recommended: the web service, HTTP/HTTPS and port
-# forwarding need direct access to the host interfaces and to IPv6. On Docker
 # Host networking is the only supported deployment: bridge mode cannot do port
-# forwarding, IPv6, or keep real client IPs for the ACLs and access logs.
+# forwarding, IPv6, or keep real client IPs for the ACLs and access logs, so
+# Docker Desktop (macOS / Windows) is not supported.
 #
 #   docker compose up -d --build
 #
@@ -26,6 +25,22 @@ services:
       # PUID/PGID must match the owner of ./data on the host
       PUID: "${PUID:-1000}"
       PGID: "${PGID:-1000}"
+      # Admin console listen address. It overrides system.adminListen in
+      # ./data/config.json for this run only; the value is never written back,
+      # so changing ports does not modify the data volume.
+      #
+      # Priority: NUNT_ADMIN_LISTEN > NUNT_ADMIN_PORT > system.adminListen.
+      # With host networking there is no port mapping to keep in sync: the
+      # port below is the port on the host. To change it without editing
+      # config.json:
+      #   NUNT_ADMIN_LISTEN=127.0.0.1:18080 docker compose up -d
+      # or put NUNT_ADMIN_LISTEN=:18080 in a .env file next to this file.
+      NUNT_ADMIN_LISTEN: "${NUNT_ADMIN_LISTEN:-:16601}"
+      # Port-only override, passed through for completeness. It cannot win
+      # while NUNT_ADMIN_LISTEN above is set; to use it, set that line to
+      # NUNT_ADMIN_LISTEN: "" (or remove it) and use e.g.
+      #   NUNT_ADMIN_PORT=18080 docker compose up -d
+      NUNT_ADMIN_PORT: "${NUNT_ADMIN_PORT:-}"
     volumes:
       - ./data:/data
     # Privileged ports are allowed through the file capability baked into the
@@ -33,7 +48,16 @@ services:
     cap_add:
       - NET_BIND_SERVICE
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:16601/healthz"]
+      # Same rule as the image HEALTHCHECK: NUNT_ADMIN_PORT first, then the
+      # port part of NUNT_ADMIN_LISTEN, then 16601. "$$" keeps the shell
+      # variables for the container instead of compose-time interpolation.
+      test:
+        - CMD-SHELL
+        - >-
+          port="$${NUNT_ADMIN_PORT:-}";
+          if [ -z "$$port" ] && [ -n "$${NUNT_ADMIN_LISTEN:-}" ]; then port="$${NUNT_ADMIN_LISTEN##*:}"; fi;
+          [ -n "$$port" ] || port=16601;
+          wget -q -O /dev/null "http://127.0.0.1:$${port}/healthz" || exit 1
       interval: 30s
       timeout: 5s
       retries: 3

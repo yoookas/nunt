@@ -9,10 +9,11 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-
+	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/nunt/nunt/internal/adminlisten"
 	"github.com/nunt/nunt/internal/api"
 	"github.com/nunt/nunt/internal/certs"
 	"github.com/nunt/nunt/internal/config"
@@ -42,17 +43,18 @@ type Options struct {
 
 // App is the running service.
 type App struct {
-	opts     Options
-	cfg      *config.Store
-	log      *logging.Hub
-	box      *secret.Box
-	certs    *certs.Store
-	mounts   *mounts.Manager
-	notify   *notify.Service
-	registry *module.Registry
-	sessions *security.SessionStore
-	api      *api.Server
-	server   *http.Server
+	opts        Options
+	cfg         *config.Store
+	adminListen adminlisten.Info
+	log         *logging.Hub
+	box         *secret.Box
+	certs       *certs.Store
+	mounts      *mounts.Manager
+	notify      *notify.Service
+	registry    *module.Registry
+	sessions    *security.SessionStore
+	api         *api.Server
+	server      *http.Server
 
 	initialPassword string
 }
@@ -73,6 +75,13 @@ func New(opts Options) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load configuration: %w", err)
 	}
+	// Environment overrides win over system.adminListen. Resolve validates the
+	// effective value here so an invalid override aborts startup instead of
+	// silently listening on the configured address.
+	adminListen, err := adminlisten.Resolve(cfg.Snapshot().System.AdminListen, os.Getenv)
+	if err != nil {
+		return nil, fmt.Errorf("resolve the admin listen address: %w", err)
+	}
 	level := opts.LogLevel
 	if level == "" {
 		level = cfg.Snapshot().System.LogLevel
@@ -83,6 +92,7 @@ func New(opts Options) (*App, error) {
 	a := &App{
 		opts:            opts,
 		cfg:             cfg,
+		adminListen:     adminListen,
 		log:             hub,
 		initialPassword: initialPassword,
 	}
@@ -151,8 +161,8 @@ func New(opts Options) (*App, error) {
 	a.api.BroadcastLogs()
 
 	a.server = &http.Server{
-		Addr:              cfg.Snapshot().System.AdminListen,
-		Handler:           a.api.Handler(),
+		Addr:              adminListen.Listen,
+		Handler:           adminlisten.WithInfo(a.api.Handler(), adminListen),
 		ReadHeaderTimeout: 15 * time.Second,
 		ReadTimeout:       0, // uploads and SSE streams may be long lived
 		WriteTimeout:      0,
@@ -189,6 +199,16 @@ func (a *App) Reload() {
 // cancelled or the server fails.
 func (a *App) Run(ctx context.Context) error {
 	log := a.log.Logger()
+	if a.adminListen.Source == adminlisten.SourceEnv {
+		log.Info("admin listen address comes from the environment, not config.json",
+			"addr", a.adminListen.Listen,
+			"env", a.adminListen.EnvVar,
+			"config", a.adminListen.ConfigListen)
+	} else {
+		log.Info("admin listen address comes from the configuration file",
+			"addr", a.adminListen.Listen,
+			"config", a.adminListen.ConfigListen)
+	}
 	for _, err := range a.registry.StartAll(ctx) {
 		log.Error("module failed to start", "error", err)
 	}

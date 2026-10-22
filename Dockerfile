@@ -55,8 +55,14 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 VOLUME ["/data"]
 EXPOSE 16601 80 443
+# The admin console port is only known at start up: it can come from
+# NUNT_ADMIN_PORT, from the port part of NUNT_ADMIN_LISTEN, or from the
+# built-in default. The shell form evaluates the same priority at runtime.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -q -O /dev/null http://127.0.0.1:16601/healthz || exit 1
+  CMD port="${NUNT_ADMIN_PORT:-}"; \
+      if [ -z "$port" ] && [ -n "${NUNT_ADMIN_LISTEN:-}" ]; then port="${NUNT_ADMIN_LISTEN##*:}"; fi; \
+      [ -n "$port" ] || port=16601; \
+      wget -q -O /dev/null "http://127.0.0.1:${port}/healthz" || exit 1
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["nunt", "-d", "/data"]

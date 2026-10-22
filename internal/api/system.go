@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/nunt/nunt/internal/adminlisten"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/netutil"
 	"github.com/nunt/nunt/internal/rest"
@@ -34,16 +36,45 @@ func (s *Server) registerSystem() {
 func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	cfg := s.opts.Cfg.Snapshot()
 	stats := sysinfo.Collect(s.opts.DataDir)
+	listen := adminListenInfo(r.Context(), cfg.System.AdminListen)
 	rest.OK(w, map[string]any{
 		"version":   version.Get(),
 		"startedAt": stats.StartTime,
 		"dataDir":   s.opts.DataDir,
 		"webRules":  len(cfg.Web.Rules),
 		"modules":   s.opts.Registry.Statuses(),
+		// The listen address really in use, the value stored in config.json and
+		// where the effective value came from ("env" or "config"). The env
+		// variable name is included so the UI can point at the right override.
+		"adminListen":       listen.Listen,
+		"adminListenConfig": cfg.System.AdminListen,
+		"adminListenSource": string(listen.Source),
+		"adminListenEnv":    listen.EnvVar,
 		// Effective admin IP allow list (empty = unrestricted) and how many
 		// requests it rejected since start up.
 		"adminAllowList": s.adminAllowListInfo(),
 	})
+}
+
+// adminListenInfo prefers the value resolved by the app at start up. The API
+// is also usable without the app (unit tests, embedders), so fall back to the
+// configured value and report it as if it came from the file.
+func adminListenInfo(ctx context.Context, configured string) adminlisten.Info {
+	if info, ok := adminlisten.FromContext(ctx); ok && info.Listen != "" {
+		// The configuration may have changed since start up; always report the
+		// value currently stored in the file separately.
+		info.ConfigListen = configured
+		return info
+	}
+	effective := configured
+	if normalized, err := netutil.NormalizeListen(configured); err == nil {
+		effective = normalized
+	}
+	return adminlisten.Info{
+		Listen:       effective,
+		ConfigListen: configured,
+		Source:       adminlisten.SourceConfig,
+	}
 }
 
 func (s *Server) handleSystemStats(w http.ResponseWriter, r *http.Request) {

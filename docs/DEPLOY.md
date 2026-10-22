@@ -5,9 +5,12 @@
 | 方式 | 适用场景 | 命令 |
 | --- | --- | --- |
 | Docker Compose（host 网络） | Linux 主机、软路由、NAS；需要端口转发 / IPv6 / 80、443 | `docker compose up -d --build` |
-
 | Release 镜像归档 | 不能联网构建、需要固定版本 | `docker load < nunt-v1.0.0-amd64.tar.gz` |
 | 直接运行二进制 | 路由器 / 小主机 | `./nunt -d /etc/nunt` |
+
+> **只支持 host 网络**：bridge 模式下端口转发、IPv6 与真实客户端 IP 都不可用，因此
+> **Docker Desktop（macOS / Windows）不受支持**。host 网络下容器监听的端口就是宿主端口，
+> 没有 `ports:` 映射需要维护。
 
 ### 从 Release 安装镜像
 
@@ -34,6 +37,43 @@ NUNT_IMAGE=nunt:v1.0.0 docker compose up -d
 | 自定义 | 端口转发 | 规则里的源地址 |
 
 容器内以非 root（uid 1000）运行，镜像里已经给二进制设置了 `cap_net_bind_service`，因此可以直接绑定 80/443。
+
+### 2.1 用环境变量指定管理后台端口
+
+管理后台默认监听 `:16601`（配置字段 `system.adminListen`）。部署时可以用环境变量覆盖，
+**不需要改 `config.json`**；覆盖值只影响当前进程，不会写回数据卷（换端口重启不会污染配置）。
+
+| 变量 | 取值 | 优先级 |
+| --- | --- | --- |
+| `NUNT_ADMIN_LISTEN` | 完整监听地址：`:8080`、`127.0.0.1:8080`、`[::1]:8080` | 最高 |
+| `NUNT_ADMIN_PORT` | 仅端口：`8080`（等价于 `:8080`） | 次之 |
+| `system.adminListen` | 配置文件里的值（默认 `:16601`） | 最低 |
+
+```bash
+# 直接运行二进制
+NUNT_ADMIN_LISTEN=127.0.0.1:18080 ./nunt -d /etc/nunt
+NUNT_ADMIN_PORT=18080 ./nunt -d /etc/nunt          # 仅端口
+
+# docker run（host 网络）
+docker run -d --name nunt --network host \
+  -e NUNT_ADMIN_LISTEN=:18080 -v "$PWD/data:/data" nunt:dev
+
+# compose（docker-compose.yml 已显式设置 NUNT_ADMIN_LISTEN=:16601，覆盖变量即可）
+NUNT_ADMIN_LISTEN=127.0.0.1:18080 docker compose up -d
+```
+
+- **只支持 host 网络**，容器监听端口就是宿主端口，换端口时**没有端口映射需要同步**。
+  bridge 模式下的端口转发、IPv6 与真实客户端 IP 都不可用，Docker Desktop（macOS / Windows）
+  同样不受支持。
+- **非法值启动即失败**：例如 `NUNT_ADMIN_LISTEN=abc`、`NUNT_ADMIN_LISTEN=127.0.0.1`、
+  `NUNT_ADMIN_PORT=70000` 会打印明确错误并以非零码退出，不会静默回退到 `config.json` 的值。
+- **健康检查会自动跟随**：镜像的 `HEALTHCHECK` 先读 `NUNT_ADMIN_PORT`，再取
+  `NUNT_ADMIN_LISTEN` 的最后一段端口，最后回退到 `16601`；`docker-compose.yml` 里的
+  healthcheck 使用同一规则。
+- **查看实际状态**：`GET /api/v1/system/info` 返回 `adminListen`（实际生效值）、
+  `adminListenConfig`（配置文件里的值）、`adminListenSource`（`env` / `config`）和
+  `adminListenEnv`（具体生效的环境变量名）。设置页在来源为环境变量时会显示提示：此时修改
+  「管理监听地址」不会改变实际端口（保存仍会更新 `config.json`，供下次无环境变量启动时使用）。
 
 ## 3. 管理后台 IP 白名单
 
