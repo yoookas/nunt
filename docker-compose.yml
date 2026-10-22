@@ -1,14 +1,13 @@
-# docker compose for nunt (host networking).
+# nunt 的 docker compose 配置（host 网络）。
 #
-# Host networking is the only supported deployment: bridge mode cannot do port
-# forwarding, IPv6, or keep real client IPs for the ACLs and access logs, so
-# Docker Desktop (macOS / Windows) is not supported.
+# 只支持 host 网络：bridge 模式下端口转发、IPv6、以及访问日志/白名单所需的
+# 真实客户端 IP 都拿不到，因此不支持 Docker Desktop（macOS / Windows）。
 #
 #   docker compose up -d --build
 #
-# To run a released image instead of building from source:
+# 用已发布的镜像而不是从源码构建：
 #   docker load < nunt-v1.0.0-amd64.tar.gz
-#   docker compose up -d      # after setting the image name below
+#   docker compose up -d      # 先把下面的镜像名改成 nunt:v1.0.0
 services:
   nunt:
     build:
@@ -22,24 +21,21 @@ services:
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       DATA_DIR: /data
-      # PUID/PGID must match the owner of ./data on the host
+      # PUID/PGID 必须与宿主机 ./data 目录的属主一致
       PUID: "${PUID:-1000}"
       PGID: "${PGID:-1000}"
-      # Admin console port. Empty means "keep whatever ./data/config.json says"
-      # (3113 on a fresh volume). The console can also be moved at runtime from
-      # the settings page (saved to config.json, effective immediately); the
-      # image health check reads that stored value. Override the port for one
-      # run without touching the config file:
+      # 管理后台监听地址。留空表示沿用 ./data/config.json 里的值（全新数据卷默认 3113）；
+      # 也可以在网页控制台的设置页里直接修改，保存即生效并写回 config.json，镜像的
+      # 健康检查会读取这个值。只想临时换端口、不改配置文件时：
       #   NUNT_ADMIN_LISTEN=:18080 docker compose up -d
-      # NUNT_ADMIN_PORT=18080 works the same way when this line is left empty.
-      # An environment override makes the settings page read-only for the
-      # address: remove it and restart to manage the port from the console.
+      # 这一行留空时，NUNT_ADMIN_PORT=18080 效果相同。
+      # 一旦用环境变量覆盖，设置页的地址字段会变成只读：想改回由控制台管理，
+      # 需要去掉该环境变量并重启。
       NUNT_ADMIN_LISTEN: "${NUNT_ADMIN_LISTEN:-}"
     volumes:
       - ./data:/data
-    # Privileged ports are allowed through the file capability baked into the
-    # image; NET_ADMIN is only needed when the service manages interfaces.
+    # 低端口靠镜像里写入的文件能力（setcap）即可绑定；
+    # 只有让服务去管理网卡时才需要 NET_ADMIN。
     cap_add:
       - NET_BIND_SERVICE
-    # The image already declares HEALTHCHECK and it follows the environment
-    # variables, so there is nothing to override here.
+    # 镜像本身已声明 HEALTHCHECK，且会自动跟随环境变量与配置里的端口，这里无需覆盖。
