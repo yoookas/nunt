@@ -88,6 +88,12 @@ jobs:
             VERSION=${{ needs.prepare.outputs.version }}
             COMMIT=${{ github.sha }}
             BUILDTIME=${{ github.run_started_at }}
+          # Without an explicit tag docker load imports the archive as <none>,
+          # because the archive itself carries no repository name.
+          tags: |
+            nunt:${{ needs.prepare.outputs.version }}
+            nunt:latest
+            nunt:${{ needs.prepare.outputs.version }}-${{ matrix.arch }}
           outputs: type=docker,dest=/tmp/nunt-${{ needs.prepare.outputs.version }}-${{ matrix.arch }}.tar
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
@@ -139,6 +145,9 @@ jobs:
             VERSION=${{ needs.prepare.outputs.version }}
             COMMIT=${{ github.sha }}
             BUILDTIME=${{ github.run_started_at }}
+          tags: |
+            nunt:${{ needs.prepare.outputs.version }}
+            nunt:latest
           outputs: type=oci,dest=/tmp/nunt-${{ needs.prepare.outputs.version }}-oci.tar
 
       - name: Compress and upload
@@ -195,6 +204,12 @@ jobs:
           docker compose up -d
           \`\`\`
 
+          The loaded image is tagged nunt:$VERSION and nunt:latest (plus
+          nunt:$VERSION-<arch>), so start the stack with:
+
+              NUNT_IMAGE=nunt:$VERSION docker compose up -d
+
           amd64, arm64 and armv7 are single architecture docker archives; the -oci
-          archive contains all three platforms. Verify the download with
-          SHA256SUMS. Nothing is published to Docker Hub or GHCR."
+          archive contains all three platforms but uses the OCI layout, which
+          docker load does not read (use ctr or podman for that one). Verify the
+          downloads with SHA256SUMS. Nothing is published to Docker Hub or GHCR."
