@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 # build stage
 # ---------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS build
 
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
