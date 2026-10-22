@@ -36,7 +36,7 @@ NUNT_IMAGE=nunt:v1.0.0 docker compose up -d
 | 80 / 443 | Web 服务 | 由 Web 服务规则里的监听地址决定，可改成任意端口 |
 | 自定义 | 端口转发 | 规则里的源地址 |
 
-容器内以非 root（uid 1000）运行，镜像里已经给二进制设置了 `cap_net_bind_service`，因此可以直接绑定 80/443。
+容器内以非 root（uid 1000）运行，镜像里已经给二进制设置了 `cap_net_bind_service`，因此可以直接绑定 80/443；默认的 compose 不需要 `cap_add`。只有你额外加了 `cap_drop: [ALL]`（或跑在老版本 Docker / rootless / Podman 上）时，才需要补回 `cap_add: [NET_BIND_SERVICE]`，否则绑定 80/443 会失败。
 
 ### 2.1 在控制台里改管理后台端口（立即生效）
 

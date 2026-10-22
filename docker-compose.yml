@@ -34,8 +34,4 @@ services:
       NUNT_ADMIN_LISTEN: "${NUNT_ADMIN_LISTEN:-}"
     volumes:
       - ./data:/data
-    # 低端口靠镜像里写入的文件能力（setcap）即可绑定；
-    # 只有让服务去管理网卡时才需要 NET_ADMIN。
-    cap_add:
-      - NET_BIND_SERVICE
     # 镜像本身已声明 HEALTHCHECK，且会自动跟随环境变量与配置里的端口，这里无需覆盖。
