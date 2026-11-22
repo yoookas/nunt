@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -76,5 +77,38 @@ func TestSubscribersGetIndependentSnapshots(t *testing.T) {
 	}
 	if got := store.Snapshot().System.LogLevel; got != "info" {
 		t.Fatalf("the stored configuration was mutated: %q", got)
+	}
+}
+
+// An enabled rule may only name a provider this build ships; a disabled draft
+// is allowed to stay incomplete.
+func TestValidateRejectsUnknownDNSProviders(t *testing.T) {
+	cfg := Default()
+	cfg.Users = []model.User{{ID: "u1", Username: "admin", Role: "admin", Enabled: true}}
+	cfg.DDNS.Rules = []model.DDNSRule{{
+		ID: "r1", Name: "home", Enable: true, Domain: "example.com", Provider: "cloudflare",
+	}}
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "unknown DNS provider") {
+		t.Fatalf("an unknown provider was accepted: %v", err)
+	}
+
+	cfg.DDNS.Rules[0].Provider = "alidns"
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("alidns was rejected: %v", err)
+	}
+
+	cfg.DDNS.Rules[0].Enable = false
+	cfg.DDNS.Rules[0].Provider = "nope"
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("a disabled draft was rejected: %v", err)
+	}
+
+	cfg.ACME.Jobs = []model.CertJob{{
+		ID: "j1", Name: "cert", Enable: true, Domains: []string{"a.example.com"},
+		Challenge: "dns", DNSProvider: "cloudflare",
+	}}
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "unknown DNS provider") {
+		t.Fatalf("an unknown certificate provider was accepted: %v", err)
 	}
 }

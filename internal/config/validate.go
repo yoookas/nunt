@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/nunt/nunt/internal/dnsprov"
 	"github.com/nunt/nunt/internal/model"
 )
 
@@ -232,6 +233,18 @@ func Validate(c *model.Config) error {
 		if strings.TrimSpace(r.Domain) == "" {
 			return fmt.Errorf("ddns rule %q: domain is required", displayName(r.Name, r.ID))
 		}
+		// A disabled rule is a draft and may still be incomplete; an enabled
+		// one must name a provider this build actually ships.
+		if !r.Enable {
+			continue
+		}
+		provider := strings.TrimSpace(r.Provider)
+		if provider == "" {
+			return fmt.Errorf("ddns rule %q: a DNS provider is required", displayName(r.Name, r.ID))
+		}
+		if _, ok := dnsprov.Default().Meta(provider); !ok {
+			return fmt.Errorf("ddns rule %q: unknown DNS provider %q", displayName(r.Name, r.ID), provider)
+		}
 	}
 	for _, j := range c.ACME.Jobs {
 		if len(j.Domains) == 0 {
@@ -239,6 +252,11 @@ func Validate(c *model.Config) error {
 		}
 		if j.Challenge == "dns" && j.DNSProvider == "" {
 			return fmt.Errorf("certificate job %q: a DNS provider is required for the dns-01 challenge", displayName(j.Name, j.ID))
+		}
+		if j.Enable && strings.TrimSpace(j.DNSProvider) != "" {
+			if _, ok := dnsprov.Default().Meta(j.DNSProvider); !ok {
+				return fmt.Errorf("certificate job %q: unknown DNS provider %q", displayName(j.Name, j.ID), j.DNSProvider)
+			}
 		}
 	}
 	for _, m := range c.Storage.Mounts {

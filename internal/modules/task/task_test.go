@@ -183,7 +183,7 @@ func TestValidateTaskActions(t *testing.T) {
 func TestActionRuleToggleUpdatesConfig(t *testing.T) {
 	deps, store, _ := testDeps(t)
 	err := store.Update(func(c *model.Config) error {
-		c.DDNS.Rules = []model.DDNSRule{{ID: "d1", Name: "ddns one", Enable: false, Domain: "example.com"}}
+		c.DDNS.Rules = []model.DDNSRule{{ID: "d1", Name: "ddns one", Enable: false, Domain: "example.com", Provider: "alidns"}}
 		c.Forward.Rules = []model.ForwardRule{{
 			ID: "f1", Name: "fwd", Enable: true, Protocol: "tcp",
 			SrcAddr: "127.0.0.1:18080", DstAddr: "127.0.0.1:80",
@@ -269,7 +269,7 @@ func TestActionRuleToggleEditorPayload(t *testing.T) {
 			ID: "f1", Name: "fwd", Enable: true, Protocol: "tcp",
 			SrcAddr: "127.0.0.1:18080", DstAddr: "127.0.0.1:80",
 		}}
-		c.DDNS.Rules = []model.DDNSRule{{ID: "d1", Name: "d", Enable: false, Domain: "example.com"}}
+		c.DDNS.Rules = []model.DDNSRule{{ID: "d1", Name: "d", Enable: false, Domain: "example.com", Provider: "alidns"}}
 		return nil
 	})
 	if err != nil {
@@ -868,7 +868,7 @@ func TestCronParserAcceptsDescriptor(t *testing.T) {
 func TestRegistryReloadIsCalledOnRuleToggle(t *testing.T) {
 	deps, store, _ := testDeps(t)
 	err := store.Update(func(c *model.Config) error {
-		c.DDNS.Rules = []model.DDNSRule{{ID: "d1", Name: "d", Enable: false, Domain: "example.com"}}
+		c.DDNS.Rules = []model.DDNSRule{{ID: "d1", Name: "d", Enable: false, Domain: "example.com", Provider: "alidns"}}
 		return nil
 	})
 	if err != nil {
