@@ -143,7 +143,7 @@
    - 跑够覆盖业务周期的时间（至少一个完整的工作日 + 一次批量任务/报表窗口）；
    - 在 WAF 页看命中日志，把误报的规则 ID 加进 `waf.disabledRules`，必要时降低 `waf.paranoiaLevel`；
    - 误报清零（或降到可接受）后再切 `waf.logOnly=false` + `waf.mode="block"`。
-2. **证书先在 staging CA 上跑通**：`acme.ca` 选 `letsencrypt-staging`（或 `custom` + `acme.caCustomUrl` 指向测试目录），确认 http-01 / dns-01 流程、入库、热加载都正常，再切回 `letsencrypt` / `zerossl` / `buypass` 正式 CA。
+2. **证书先在 staging CA 上跑通**：`acme.ca` 选 `letsencrypt-staging`（或 `custom` + `acme.caCustomUrl` 指向测试目录），确认 http-01 / dns-01 流程、入库、热加载都正常，再切回 `letsencrypt` 正式 CA。
    - 注意 ACME 有速率限制，调试期反复签发用 staging，别把正式 CA 的配额打满。
 3. **业务流量先小范围**：先切一个低风险域名/路径，观察 30–60 分钟（错误率、5xx、WAF 拦截量、连接数），再逐步扩大。
 4. **管理面收紧放在最后一步之前**：确认隧道或白名单可用**之后**再改 `adminListen`/`adminAllowIps`——顺序反了会把自己关在门外（此时只能上机改 `config.json` 并重启）。
@@ -208,7 +208,7 @@
 以下都是「代码在，但没在真实条件下验过」，在勾选清单之前请先补上：
 
 1. **Docker 未实跑**：本机没有跑过 `docker compose up`；`.github/workflows/docker-smoke.yml` 已经写好（构建镜像 + host 网络启动 + 校验容器契约），并在 CI 上跑通过一次。
-2. **ACME 未对真实 CA 跑过**：没有在 Let's Encrypt（staging 或正式）/ZeroSSL/Buypass 上完成过真实签发；续期循环、失败重试、证书热加载都只有单元测试与本地自签验证。
+2. **ACME 未对真实 CA 跑过**：没有在 Let's Encrypt（staging 或正式）上完成过真实签发；续期循环、失败重试、证书热加载都只有单元测试与本地自签验证。
 3. **DNS 提供商未真实联调**：`internal/dnsprov` 只保留了阿里云 DNS 与腾讯云 DNSPod 两家国内提供商，外加自定义回调；它们目前只有接口形状与单元测试，没有用真实账号调过 API（DDNS 与 ACME dns-01 都依赖它们）。
 4. **没有 race / 压测 / soak**：没有跑过 `go test -race` 的长时间运行，没有并发压测，没有 24h soak；连接泄漏、goroutine 泄漏、限流参数是否合适都还是未知数。
 5. **前端未真机浏览器验证**：管理界面只做过静态资源可访问性检查（HTTP 200），没有在真实浏览器里逐页点过（尤其是 WAF 规则编辑、SSE 日志这几处）。

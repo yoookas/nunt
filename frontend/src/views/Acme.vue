@@ -38,6 +38,7 @@ const jobForm = reactive({
   enable: true,
   domainsText: '',
   keyType: 'ec256',
+  ca: '',
   challenge: 'http',
   dnsProvider: '',
   dnsCreds: {},
@@ -64,6 +65,7 @@ const jobTitle = computed(() => (editing.value ? '编辑证书任务' : '新建�
 const jobColumns = [
   { title: '域名', dataIndex: 'domainsJoined', slotName: 'domains', ellipsis: true, tooltip: true },
   { title: '挑战方式', dataIndex: 'challenge', slotName: 'challenge', width: 120 },
+  { title: 'CA', dataIndex: 'ca', slotName: 'ca', width: 160, ellipsis: true, tooltip: true },
   { title: 'DNS 提供商', dataIndex: 'dnsProvider', slotName: 'provider', width: 160, ellipsis: true, tooltip: true },
   { title: '续期天数', dataIndex: 'renewDays', slotName: 'renewDays', width: 100 },
   { title: '启用', dataIndex: 'enable', slotName: 'enable', width: 90 },
@@ -173,6 +175,12 @@ function certTone(record) {
   return 'green'
 }
 
+function caLabel(id) {
+  if (!id) return '全局'
+  const found = authorities.value.find((item) => item.id === id)
+  return found ? found.title : id
+}
+
 function certSourceLabel(source) {
   if (!source) return '-'
   if (source === 'upload') return '上传'
@@ -183,6 +191,11 @@ function certSourceLabel(source) {
 const caOptions = computed(() =>
   authorities.value.map((item) => ({ value: item.id, label: item.title || item.id })),
 )
+
+const jobCaOptions = computed(() => [
+  { value: '', label: `跟随全局（${caTitle.value}）` },
+  ...caOptions.value,
+])
 
 const caTitle = computed(() => {
   const found = authorities.value.find((item) => item.id === acmeConfig.ca)
@@ -291,6 +304,7 @@ function openJobForm(job) {
   jobForm.enable = base.enable !== false
   jobForm.domainsText = (Array.isArray(base.domains) ? base.domains : []).join('\n')
   jobForm.keyType = normalizeKeyType(base.keyType)
+  jobForm.ca = base.ca || ''
   jobForm.challenge = normalizeChallenge(base.challenge)
   jobForm.dnsProvider = base.dnsProvider || ''
   jobForm.dnsCreds = { ...(base.dnsCreds || {}) }
@@ -335,6 +349,7 @@ async function saveJob() {
     enable: !!jobForm.enable,
     domains,
     keyType: normalizeKeyType(jobForm.keyType),
+    ca: jobForm.ca,
     challenge: normalizeChallenge(jobForm.challenge),
     dnsProvider: jobForm.challenge === 'dns' ? jobForm.dnsProvider : '',
     dnsCreds: creds,
@@ -551,7 +566,7 @@ onUnmounted(() => {
             :columns="jobColumns"
             :pagination="false"
             row-key="id"
-            :scroll="{ x: 980 }"
+            :scroll="{ x: 1140 }"
             size="small"
           >
             <template #domains="{ record }">
@@ -562,6 +577,9 @@ onUnmounted(() => {
             </template>
             <template #challenge="{ record }">
               <a-tag>{{ challengeLabel(record.challenge) }}</a-tag>
+            </template>
+            <template #ca="{ record }">
+              <a-tag :color="record.ca ? 'arcoblue' : 'gray'">{{ caLabel(record.ca) }}</a-tag>
             </template>
             <template #provider="{ record }">
               <span v-if="normalizeChallenge(record.challenge) === 'dns'" class="mono">
@@ -669,12 +687,20 @@ onUnmounted(() => {
         </a-form-item>
 
         <a-row :gutter="16">
-          <a-col :span="12">
+          <a-col :span="8">
             <a-form-item label="挑战方式">
               <a-select v-model="jobForm.challenge" :options="CHALLENGE_OPTIONS" @change="ensureCredFields" />
             </a-form-item>
           </a-col>
-          <a-col :span="12">
+          <a-col :span="8">
+            <a-form-item label="证书颁发机构">
+              <a-select v-model="jobForm.ca" :options="jobCaOptions" />
+              <template #extra>
+                <span class="muted">任务可以单独选 CA；账户按 CA 分开注册</span>
+              </template>
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
             <a-form-item label="密钥类型">
               <a-select v-model="jobForm.keyType" :options="KEY_OPTIONS" />
             </a-form-item>

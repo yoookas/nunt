@@ -15,8 +15,6 @@ func TestDirectoryURL(t *testing.T) {
 		{"default", acmeConfig{ca: "letsencrypt"}, "https://acme-v02.api.letsencrypt.org/directory"},
 		{"empty", acmeConfig{}, "https://acme-v02.api.letsencrypt.org/directory"},
 		{"staging", acmeConfig{ca: "letsencrypt-staging"}, "https://acme-staging-v02.api.letsencrypt.org/directory"},
-		{"zerossl", acmeConfig{ca: "zerossl"}, "https://acme.zerossl.com/v2/DV90"},
-		{"buypass", acmeConfig{ca: "buypass"}, "https://api.buypass.com/acme/directory"},
 		{"custom", acmeConfig{ca: "custom", custom: "https://ca.internal/directory"}, "https://ca.internal/directory"},
 		{"mixed case", acmeConfig{ca: "  LetsEncrypt  "}, "https://acme-v02.api.letsencrypt.org/directory"},
 	}
@@ -40,6 +38,8 @@ func TestDirectoryURLErrors(t *testing.T) {
 		cfg  acmeConfig
 	}{
 		{"unknown", acmeConfig{ca: "startcom"}},
+		{"removed zerossl", acmeConfig{ca: "zerossl"}},
+		{"removed buypass", acmeConfig{ca: "buypass"}},
 		{"custom without url", acmeConfig{ca: "custom"}},
 		{"custom with a bad scheme", acmeConfig{ca: "custom", custom: "ftp://ca.internal/dir"}},
 	}

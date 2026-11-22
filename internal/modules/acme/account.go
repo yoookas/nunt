@@ -5,7 +5,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -26,16 +28,17 @@ import (
 	"github.com/nunt/nunt/internal/version"
 )
 
-// accountManager owns the ACME account key and its registration. One account
-// is shared by every job because an ACME account is not tied to a domain.
+// accountManager owns the ACME account key and one registration per directory.
+// An ACME account is not tied to a domain, but it does belong to one CA, so a
+// job may pick a different CA and get its own registration while sharing the
+// account key.
 type accountManager struct {
 	deps *module.Deps
 	log  *slog.Logger
 
-	mu         sync.Mutex
-	caURL      string
-	acmeClient *acme.Client
-	account    *acme.Account
+	mu       sync.Mutex
+	clients  map[string]*acme.Client
+	accounts map[string]*acme.Account
 }
 
 // storedAccount is the on disk representation of a registration.
@@ -50,7 +53,12 @@ type storedAccount struct {
 // newAccountManager creates the manager. Nothing touches the disk until the
 // first issuance, so the module stays cheap to construct.
 func newAccountManager(deps *module.Deps, log *slog.Logger) *accountManager {
-	return &accountManager{deps: deps, log: log}
+	return &accountManager{
+		deps:     deps,
+		log:      log,
+		clients:  map[string]*acme.Client{},
+		accounts: map[string]*acme.Account{},
+	}
 }
 
 // dir returns <DataDir>/acme.
@@ -59,17 +67,29 @@ func (m *accountManager) dir() string { return filepath.Join(m.deps.DataDir, "ac
 // keyPath returns the account key path.
 func (m *accountManager) keyPath() string { return filepath.Join(m.dir(), "account.key") }
 
-// accountPath returns the account metadata path.
-func (m *accountManager) accountPath() string { return filepath.Join(m.dir(), "account.json") }
+// accountPath returns the account metadata path of one directory. The
+// directory URL is hashed so several CAs never share a registration file.
+func (m *accountManager) accountPath(directory string) string {
+	sum := sha256.Sum256([]byte(directory))
+	return filepath.Join(m.dir(), "account-"+hex.EncodeToString(sum[:8])+".json")
+}
 
-// clientFor returns a ready to use ACME client for the configured CA,
-// creating and registering the account on first use.
-func (m *accountManager) clientFor(ctx context.Context, cfg *model.ACMEConfig) (*acme.Client, error) {
-	dir, err := directoryURL(cfg)
+// clientFor returns a ready to use ACME client for the job level CA (an empty
+// ca follows the instance default), creating and registering the account on
+// first use.
+func (m *accountManager) clientFor(ctx context.Context, cfg *model.ACMEConfig, ca string) (*acme.Client, error) {
+	effective := model.ACMEConfig{}
+	if cfg != nil {
+		effective = *cfg
+	}
+	if strings.TrimSpace(ca) != "" {
+		effective.CA = ca
+	}
+	dir, err := directoryURL(&effective)
 	if err != nil {
 		return nil, err
 	}
-	email := strings.TrimSpace(cfg.Email)
+	email := strings.TrimSpace(effective.Email)
 	if email != "" {
 		if _, err := mail.ParseAddress(email); err != nil {
 			return nil, fmt.Errorf("invalid contact email %q: %w", email, err)
@@ -79,11 +99,11 @@ func (m *accountManager) clientFor(ctx context.Context, cfg *model.ACMEConfig) (
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.acmeClient != nil && m.caURL == dir {
-		if err := m.syncContact(ctx, email); err != nil {
+	if client := m.clients[dir]; client != nil {
+		if err := m.syncContact(ctx, client, m.accounts[dir], email, dir); err != nil {
 			return nil, err
 		}
-		return m.acmeClient, nil
+		return client, nil
 	}
 
 	key, err := m.loadOrCreateKey()
@@ -97,18 +117,18 @@ func (m *accountManager) clientFor(ctx context.Context, cfg *model.ACMEConfig) (
 		UserAgent:    version.Name + "/" + version.Version + " (acme)",
 	}
 
-	stored, err := m.loadAccount()
+	stored, err := m.loadAccount(dir)
 	if err != nil {
 		return nil, err
 	}
 	var registered *acme.Account
-	if stored != nil && stored.Directory == dir && stored.URI != "" {
+	if stored != nil && stored.URI != "" {
 		client.KID = acme.KeyID(stored.URI)
 		registered, err = client.GetReg(ctx, stored.URI)
 		if err != nil {
 			// The stored registration may belong to another key or may have
 			// been deactivated: register again with the current key.
-			m.log.Warn("acme: stored account is unusable, registering again", "error", err)
+			m.log.Warn("acme: stored account is unusable, registering again", "directory", dir, "error", err)
 			client.KID = ""
 			registered, err = m.register(ctx, client, email)
 			if err != nil {
@@ -125,14 +145,13 @@ func (m *accountManager) clientFor(ctx context.Context, cfg *model.ACMEConfig) (
 	if err := m.saveAccount(registered, dir); err != nil {
 		return nil, err
 	}
-	m.caURL = dir
-	m.acmeClient = client
-	m.account = registered
-	if err := m.syncContact(ctx, email); err != nil {
+	m.clients[dir] = client
+	m.accounts[dir] = registered
+	if err := m.syncContact(ctx, client, registered, email, dir); err != nil {
 		return nil, err
 	}
 	m.log.Info("acme account ready", "directory", dir, "account", registered.URI)
-	return m.acmeClient, nil
+	return client, nil
 }
 
 // register creates the account, accepting the terms of service.
@@ -148,36 +167,27 @@ func (m *accountManager) register(ctx context.Context, client *acme.Client, emai
 	return registered, nil
 }
 
-// syncContact keeps the registration in sync with the configured address.
-func (m *accountManager) syncContact(ctx context.Context, email string) error {
-	if m.account == nil || m.acmeClient == nil {
+// syncContact keeps the registration of one directory in sync with the
+// configured address.
+func (m *accountManager) syncContact(ctx context.Context, client *acme.Client, acct *acme.Account, email, directory string) error {
+	if acct == nil || client == nil {
 		return nil
 	}
 	want := ""
 	if email != "" {
 		want = "mailto:" + email
 	}
-	if want == "" || (len(m.account.Contact) == 1 && m.account.Contact[0] == want) {
+	if want == "" || (len(acct.Contact) == 1 && acct.Contact[0] == want) {
 		return nil
 	}
-	updated := *m.account
+	updated := *acct
 	updated.Contact = []string{want}
-	res, err := m.acmeClient.UpdateReg(ctx, &updated)
+	res, err := client.UpdateReg(ctx, &updated)
 	if err != nil {
 		return fmt.Errorf("update acme account contact: %w", err)
 	}
-	m.account = res
-	if err := m.saveAccount(res, m.caURL); err != nil {
-		return err
-	}
-	return nil
-}
-
-// Account returns the registered account, if any.
-func (m *accountManager) Account() *acme.Account {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.account
+	m.accounts[directory] = res
+	return m.saveAccount(res, directory)
 }
 
 // loadOrCreateKey reads the account key, generating an ECDSA P-256 key on
@@ -231,9 +241,10 @@ func parseAccountKey(data []byte) (*ecdsa.PrivateKey, error) {
 	return key, nil
 }
 
-// loadAccount reads the stored registration; a missing file is not an error.
-func (m *accountManager) loadAccount() (*storedAccount, error) {
-	path := m.accountPath()
+// loadAccount reads the stored registration of one directory; a missing file
+// is not an error.
+func (m *accountManager) loadAccount(directory string) (*storedAccount, error) {
+	path := m.accountPath(directory)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if store.IsNotExist(err) {
@@ -248,7 +259,8 @@ func (m *accountManager) loadAccount() (*storedAccount, error) {
 	return &acct, nil
 }
 
-// saveAccount persists the registration atomically with 0600 permissions.
+// saveAccount persists the registration of one directory atomically with 0600
+// permissions.
 func (m *accountManager) saveAccount(acct *acme.Account, directory string) error {
 	if acct == nil {
 		return nil
@@ -260,10 +272,10 @@ func (m *accountManager) saveAccount(acct *acme.Account, directory string) error
 		Contact:   acct.Contact,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
-	if prev, err := m.loadAccount(); err == nil && prev != nil && prev.CreatedAt != "" {
+	if prev, err := m.loadAccount(directory); err == nil && prev != nil && prev.CreatedAt != "" {
 		rec.CreatedAt = prev.CreatedAt
 	}
-	if err := store.WriteJSONAtomic(m.accountPath(), rec, 0o600); err != nil {
+	if err := store.WriteJSONAtomic(m.accountPath(directory), rec, 0o600); err != nil {
 		return fmt.Errorf("persist acme account: %w", err)
 	}
 	return nil

@@ -27,6 +27,7 @@ type certJobUpdate struct {
 	Enable       bool              `json:"enable"`
 	Domains      []string          `json:"domains"`
 	KeyType      string            `json:"keyType"`
+	CA           string            `json:"ca"`
 	Challenge    string            `json:"challenge"`
 	DNSProvider  string            `json:"dnsProvider"`
 	DNSCreds     map[string]string `json:"dnsCreds"`
@@ -267,6 +268,18 @@ func (a *ACME) buildJob(req certJobUpdate, existing *model.CertJob) (*model.Cert
 	if err != nil {
 		return nil, err
 	}
+	ca, err := normalizeCA(req.CA)
+	if err != nil {
+		return nil, err
+	}
+	if ca == "custom" {
+		// The custom directory URL lives in the instance wide settings; a job
+		// that selects the custom CA is useless without it.
+		cfg := a.deps.Cfg.Snapshot()
+		if _, err := directoryURL(&model.ACMEConfig{CA: "custom", CACustomURL: cfg.ACME.CACustomURL}); err != nil {
+			return nil, fmt.Errorf("自定义 CA 需要先在 ACME 设置里填写目录 URL：%s", err)
+		}
+	}
 	provider := strings.TrimSpace(req.DNSProvider)
 	resolvers := normalizeResolvers(req.DNSResolvers)
 	if challenge == challengeDNS {
@@ -294,6 +307,7 @@ func (a *ACME) buildJob(req certJobUpdate, existing *model.CertJob) (*model.Cert
 		Enable:       req.Enable,
 		Domains:      domains,
 		KeyType:      keyType,
+		CA:           ca,
 		Challenge:    challenge,
 		DNSProvider:  provider,
 		DNSResolvers: resolvers,

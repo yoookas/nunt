@@ -289,11 +289,14 @@ type ACMEConfig struct {
 
 // CertJob is one certificate to keep issued and renewed.
 type CertJob struct {
-	ID           string            `json:"id"`
-	Name         string            `json:"name"`
-	Enable       bool              `json:"enable"`
-	Domains      []string          `json:"domains"`
-	KeyType      string            `json:"keyType,omitempty"`
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Enable  bool     `json:"enable"`
+	Domains []string `json:"domains"`
+	KeyType string   `json:"keyType,omitempty"`
+	// CA selects the certificate authority for this job; empty follows the
+	// instance wide default.
+	CA           string            `json:"ca,omitempty"`
 	Challenge    string            `json:"challenge"`
 	DNSProvider  string            `json:"dnsProvider,omitempty"`
 	DNSCreds     map[string]string `json:"dnsCreds,omitempty"`

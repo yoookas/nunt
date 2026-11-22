@@ -54,7 +54,7 @@ func TestGetConfigDefaults(t *testing.T) {
 	if view.CA != "letsencrypt" || view.KeyType != "ec256" {
 		t.Fatalf("defaults = %+v", view)
 	}
-	if len(view.Authorities) != 5 || len(view.KeyTypes) != 4 {
+	if len(view.Authorities) != 3 || len(view.KeyTypes) != 4 {
 		t.Fatalf("catalogs = %d authorities, %d key types", len(view.Authorities), len(view.KeyTypes))
 	}
 }

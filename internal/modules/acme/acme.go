@@ -506,6 +506,7 @@ func (a *ACME) ensureOnce(ctx context.Context, names []string) error {
 			Enable:    true,
 			Domains:   names,
 			Challenge: defaultChallenge(),
+			CA:        cfg.ACME.CA,
 			KeyType:   cfg.ACME.KeyType,
 			RenewDays: defaultRenewDays,
 			CreatedAt: time.Now(),

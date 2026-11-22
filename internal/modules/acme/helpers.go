@@ -37,13 +37,11 @@ const (
 var caDirectories = map[string]string{
 	"letsencrypt":         "https://acme-v02.api.letsencrypt.org/directory",
 	"letsencrypt-staging": "https://acme-staging-v02.api.letsencrypt.org/directory",
-	"zerossl":             "https://acme.zerossl.com/v2/DV90",
-	"buypass":             "https://api.buypass.com/acme/directory",
 }
 
 // caCatalog lists the selectable certificate authorities in a stable order.
 func caCatalog() []map[string]string {
-	ids := []string{"letsencrypt", "letsencrypt-staging", "zerossl", "buypass", "custom"}
+	ids := []string{"letsencrypt", "letsencrypt-staging", "custom"}
 	out := make([]map[string]string, 0, len(ids))
 	for _, id := range ids {
 		out = append(out, map[string]string{"id": id, "title": caTitle(id), "directory": caDirectories[id]})
@@ -58,10 +56,6 @@ func caTitle(id string) string {
 		return "Let's Encrypt"
 	case "letsencrypt-staging":
 		return "Let's Encrypt (staging)"
-	case "zerossl":
-		return "ZeroSSL"
-	case "buypass":
-		return "Buypass"
 	case "custom":
 		return "Custom ACME directory"
 	default:
@@ -92,6 +86,22 @@ func directoryURL(cfg *model.ACMEConfig) (string, error) {
 		return url, nil
 	}
 	return "", fmt.Errorf("unknown certificate authority %q", cfg.CA)
+}
+
+// normalizeCA validates a certificate authority selector. An empty value means
+// "use the instance default".
+func normalizeCA(v string) (string, error) {
+	ca := strings.ToLower(strings.TrimSpace(v))
+	if ca == "" {
+		return "", nil
+	}
+	if ca == "custom" {
+		return ca, nil
+	}
+	if _, ok := caDirectories[ca]; !ok {
+		return "", fmt.Errorf("unknown certificate authority %q", v)
+	}
+	return ca, nil
 }
 
 // normalizeChallenge returns the canonical (stored) form of a challenge

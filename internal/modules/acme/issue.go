@@ -26,6 +26,7 @@ type request struct {
 	dnsCreds     map[string]string // decrypted
 	dnsResolvers []string
 	keyType      string
+	ca           string
 	renewDays    int
 	remark       string
 	// persist stores the key type back into the job configuration.
@@ -60,6 +61,10 @@ func newRequest(cfg *model.Config, job model.CertJob) request {
 	if renewDays <= 0 {
 		renewDays = defaultRenewDays
 	}
+	ca := strings.ToLower(strings.TrimSpace(job.CA))
+	if ca == "" && cfg != nil {
+		ca = strings.ToLower(strings.TrimSpace(cfg.ACME.CA))
+	}
 	return request{
 		jobID:        job.ID,
 		domains:      append([]string{}, job.Domains...),
@@ -68,6 +73,7 @@ func newRequest(cfg *model.Config, job model.CertJob) request {
 		dnsCreds:     job.DNSCreds,
 		dnsResolvers: append([]string{}, job.DNSResolvers...),
 		keyType:      strings.ToLower(strings.TrimSpace(keyType)),
+		ca:           ca,
 		renewDays:    renewDays,
 		remark:       job.Remark,
 	}
@@ -97,6 +103,9 @@ func (r *request) validate(cfg *model.Config) error {
 	if _, err := normalizeKeyType(r.keyType); err != nil {
 		return err
 	}
+	if _, err := normalizeCA(r.ca); err != nil {
+		return err
+	}
 	if cfg != nil && strings.TrimSpace(cfg.ACME.Email) != "" && !strings.Contains(cfg.ACME.Email, "@") {
 		return fmt.Errorf("invalid contact email %q", cfg.ACME.Email)
 	}
@@ -113,7 +122,7 @@ func (a *ACME) issue(ctx context.Context, req request) (Result, error) {
 	result.Domains = req.domains
 	result.KeyType = req.keyType
 
-	client, err := a.account.clientFor(ctx, &cfg.ACME)
+	client, err := a.account.clientFor(ctx, &cfg.ACME, req.ca)
 	if err != nil {
 		return result, fmt.Errorf("prepare acme account: %w", err)
 	}
