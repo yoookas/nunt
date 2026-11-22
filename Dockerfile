@@ -1,6 +1,18 @@
 # syntax=docker/dockerfile:1
 
 # ---------------------------------------------------------------------------
+# web stage: build the Vue admin interface into internal/webui/assets
+# ---------------------------------------------------------------------------
+FROM --platform=$BUILDPLATFORM node:24-alpine AS web
+
+WORKDIR /src/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY frontend ./
+# vite writes ../internal/webui/assets relative to this directory.
+RUN npm run build
+
+# ---------------------------------------------------------------------------
 # build stage
 # ---------------------------------------------------------------------------
 FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS build
@@ -26,6 +38,9 @@ COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 COPY . .
+# The bundle built above replaces whatever is committed, so the image never
+# ships a stale admin interface.
+COPY --from=web /src/internal/webui/assets ./internal/webui/assets
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     GOARM=${TARGETVARIANT#v} go build -trimpath -tags "nomsgpack" \

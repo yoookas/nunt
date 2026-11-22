@@ -102,8 +102,9 @@ jobs:
 
           # the admin interface and its assets are served
           curl -fsS http://127.0.0.1:3113/ | grep -qi nunt
-          curl -fsS http://127.0.0.1:3113/app.js > /dev/null
-          curl -fsS http://127.0.0.1:3113/style.css > /dev/null
+          curl -fsS http://127.0.0.1:3113/ | grep -q 'id="app"'
+          asset=$(curl -fsS http://127.0.0.1:3113/ | grep -o '/static/[^"]*\.js' | head -1)
+          curl -fsS "http://127.0.0.1:3113${asset}" > /dev/null
 
           # secrets are stored with restrictive permissions inside the volume
           docker exec nunt stat -c %a /data/secret.key | grep -qx 600

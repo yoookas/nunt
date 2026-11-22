@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -337,7 +338,20 @@ func TestEmbeddedAssetsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FS: %v", err)
 	}
-	names := []string{"index.html", "app.js", "style.css", "pages/waf.js", "pages/dashboard.js", "vendor/shoelace/nunt-shoelace.js"}
+	// The bundle names carry a content hash, so discover them from the shell
+	// instead of pinning file names that change on every build.
+	shell, err := fs.ReadFile(sub, "index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	names := []string{"index.html"}
+	refs := regexp.MustCompile(`(?:src|href)="(/static/[^"]+)"`).FindAllStringSubmatch(string(shell), -1)
+	for _, ref := range refs {
+		names = append(names, strings.TrimPrefix(ref[1], "/"))
+	}
+	if len(names) < 2 {
+		t.Fatalf("index.html references no static bundle: %s", shell)
+	}
 	for _, name := range names {
 		want, err := fs.ReadFile(sub, name)
 		if err != nil {

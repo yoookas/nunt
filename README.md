@@ -1,7 +1,7 @@
 # nunt
 
 一个用 Go 编写的自托管边缘服务：**反向代理、重定向、静态托管、端口转发、动态域名（DDNS）、ACME 自动证书、WebDAV、文件管理、Coraza WAF**，
-带一个轻量、无构建步骤的 Web 管理界面，支持 Docker Compose 一键部署。
+带一个 Vue 3 + Arco Design 的 Web 管理界面（构建产物嵌进二进制），支持 Docker Compose 一键部署。
 
 > 设计目标：单二进制、跨平台、默认安全、界面简洁；面向软路由 / NAS / 家庭服务器 / 小团队内网。
 
@@ -197,6 +197,7 @@ go run ./cmd/nunt -d ./data -log-level debug
 目录结构：
 
 ```
+frontend/           管理界面（Vue 3 + Arco Design + Vite，构建产物进 internal/webui/assets）
 cmd/nunt            入口
 internal/app        装配与生命周期
 internal/api        管理后台 REST API + SSE
@@ -210,7 +211,7 @@ internal/vfs        安全文件系统抽象（os.Root）
 internal/mounts     存储挂载（本地 / 远程 WebDAV）
 internal/security   密码、会话、限流
 internal/rest       路由与 JSON 工具
-internal/webui      前端静态资源（embed，无构建步骤）
+internal/webui      管理界面构建产物（go:embed，源码在 frontend/）
 web 前端            internal/webui/assets/{index.html,style.css,app.js,lib,pages}
 ```
 
@@ -219,19 +220,15 @@ web 前端            internal/webui/assets/{index.html,style.css,app.js,lib,pag
 
 ### 前端
 
-前端是**纯静态 ES Module**，不需要 npm / 打包器，直接放在 `internal/webui/assets` 并通过 `go:embed` 打进二进制。
-界面建立在 vendor 进仓库的两棵 ESM 树上——**Shoelace 2.20.1**（组件，MIT）与 **Lit 3.3.3**（自研组件编写层，MIT）——
-加一层自研的共享组件库 `assets/lib/kit.js`（表格 / 表单 / 对话框 / 提示 / 状态块 / 卡片容器）。
-CSP 不变、零外部请求：图标与字体全部来自本地 vendor。
+管理界面是独立的 **Vue 3 + Arco Design Vue + Vite 8** 工程，源码在 `frontend/`，构建产物提交在
+`internal/webui/assets/` 并通过 `go:embed` 打进二进制——所以 `go build` 和最终镜像都不需要 Node；
+镜像的 `web` 阶段会重新构建一次，保证镜像不会带过期前端。
 
-- vendor 同步与校验：`pwsh -File scripts/sync-vendor.ps1 [-VerifyOnly]`（Shoelace）、
-  `pwsh -File scripts/sync-lit.ps1 [-VerifyOnly]`（Lit）；npm 只在**开发期**用于这两个脚本与 UI 测试，
-  Go 构建与 Docker 镜像不需要 Node；
-- 新增页面：在 `assets/pages/<id>.js` 里 `export default { id, title, icon, mount(root, ctx) }`，
-  再在 `app.js` 的页面清单里注册；页面模板、kit 导出清单与硬约束见
-  [docs/CONTRACT.md 第 7 节](docs/CONTRACT.md)；
-- 12 个页面在深/浅两个主题下的 **axe 四档（critical/serious/moderate/minor）都是 0**，
-  迁移前后的体积、可访问性与缺陷清单见 [docs/FRONTEND-REPORT.md](docs/FRONTEND-REPORT.md)。
+- 构建：`npm ci --prefix frontend && npm run build --prefix frontend`（或 `make web`），产物会整体重写
+  `internal/webui/assets`；**改了前端必须重新构建并提交产物**，CI 会重跑构建并检查产物是否最新；
+- 开发：`cd frontend && npm run dev`，页面热更新；12 个页面 + 登录页都在 `frontend/src/views/`；
+- 约束：零外部请求（CSP `script-src 'self'`）、明暗主题用 `arco-theme` 切换、页面只用 Arco 组件与语义色变量。
+  详细约定见 [docs/CONTRACT.md 第 7 节](docs/CONTRACT.md)。
 
 ### 本地验证
 
@@ -246,14 +243,14 @@ pwsh -File scripts/smoke.ps1
 # （同一个会话仍然有效）→ 改回 3113
 pwsh -File scripts/listen-rebind.ps1
 
-# 前端：先构建二进制，再跑浅色主题冒烟（12 页 + 逐页交互 + axe）与深色主题基线（12 页截图 + axe）
+# 前端：安装依赖、构建、再构建二进制
+npm ci --prefix frontend
+npm run build --prefix frontend
+npm run smoke --prefix frontend   # jsdom 冒烟：13 个路由逐个挂载，捕获运行时错误
 go build -o nunt.exe ./cmd/nunt
-node scripts/ui-smoke.mjs --out .gocache/ui-smoke      # 失败时非零退出
-node scripts/ui-baseline.mjs --out docs/screenshots/phase3 --label 'phase3'
 ```
 
-（这两个脚本需要开发期依赖：`pnpm install` 与 `pnpm exec playwright install chromium`；
-CI 里的 `frontend` job 跑的就是同一组命令。）
+（`npm run build` 会重写 `internal/webui/assets`；CI 的 `frontend` job 会重跑构建并检查产物是否已提交。）
 
 ---
 
@@ -266,7 +263,7 @@ CI 里的 `frontend` job 跑的就是同一组命令。）
 3. 压缩为 `.tar.gz`、生成 `SHA256SUMS`；
 4. 创建/更新 Release 并上传全部附件。**不登录、不推送任何镜像仓库。**
 
-`.github/workflows/ci.yml`：push / PR 时执行 `gofmt` 检查、`go vet`、`go test`、构建二进制与镜像（不推送），并跑**阻塞式**的 `govulncheck` 依赖漏洞扫描（依赖中存在可达的已知漏洞时 CI 直接失败）；另有独立的 `frontend` job 用无头 Chromium 跑 12 页的 axe 与逐页交互冒烟（浅色 `ui-smoke` + 深色 `ui-baseline`），截图与报告作为 artifact 上传。
+`.github/workflows/ci.yml`：push / PR 时执行 `gofmt` 检查、`go vet`、`go test`、构建二进制与镜像（不推送），并跑**阻塞式**的 `govulncheck` 依赖漏洞扫描（依赖中存在可达的已知漏洞时 CI 直接失败）；另有独立的 `frontend` job 用 Node 构建 Vue 管理界面，并校验 `internal/webui/assets` 的提交产物与源码一致（过期即失败）。
 `.github/workflows/docker-smoke.yml`：在真实 docker daemon 上构建镜像并校验容器契约（非 root 用户、低端口 capability、配置与密钥权限、管理 UI 可访问、用日志里的随机密码登录）。
 `.github/dependabot.yml`：gomod 每周、GitHub Actions 每月检查依赖更新（限制同时开启的 PR 数，minor/patch 自动分组）。
 

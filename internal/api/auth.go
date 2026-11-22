@@ -469,6 +469,9 @@ func (s *Server) handleDeleteToken(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	type view struct {
+		// ID is the hashed session id; the delete endpoint needs it and it
+		// cannot be turned back into the cookie token.
+		ID        string    `json:"id"`
 		Username  string    `json:"username"`
 		IP        string    `json:"ip"`
 		UserAgent string    `json:"userAgent"`
@@ -479,7 +482,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	current, _ := IdentityFrom(r.Context())
 	out := []view{}
 	for _, sess := range s.opts.Sessions.List() {
-		v := view{sess.Username, sess.IP, sess.UserAgent, sess.CreatedAt, sess.ExpiresAt, false}
+		v := view{sess.ID, sess.Username, sess.IP, sess.UserAgent, sess.CreatedAt, sess.ExpiresAt, false}
 		if current != nil && current.Session != nil && current.Session.ID == sess.ID {
 			v.Current = true
 		}

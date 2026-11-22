@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -981,5 +982,28 @@ func TestEditRebuildsTheSchedule(t *testing.T) {
 	tk.Reload(store.Snapshot())
 	if got := tk.entries["t1"]; got.entry == afterActions.entry {
 		t.Fatal("the entry was not rebuilt after the cron expression changed")
+	}
+}
+
+// The global shell switch has its own endpoint, so the page never rewrites the
+// whole configuration to toggle it.
+func TestSettingsEndpointTogglesAllowShell(t *testing.T) {
+	deps, store, _ := testDeps(t)
+	tk := New(deps)
+	if err := tk.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer func() { _ = tk.Stop(context.Background()) }()
+
+	mux := rest.NewMux(slog.Default())
+	tk.RegisterAPI(mux)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/task/settings", strings.NewReader(`{"allowShell":true}`))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT settings = %d: %s", rec.Code, rec.Body.String())
+	}
+	if !store.Snapshot().Tasks.AllowShell {
+		t.Fatal("allowShell was not stored")
 	}
 }

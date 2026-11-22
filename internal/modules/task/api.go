@@ -19,6 +19,29 @@ func (t *Task) registerAPI(mux *rest.Mux) {
 	g.Delete("/items/{id}", t.handleDelete)
 	g.Post("/items/{id}/toggle", t.handleToggle)
 	g.Post("/items/{id}/run", t.handleRun)
+	g.Put("/settings", t.handleSettings)
+}
+
+// taskSettings is the global scheduler switch. It is separate from the task
+// list so the page never has to rewrite the whole configuration to toggle it.
+type taskSettings struct {
+	AllowShell bool `json:"allowShell"`
+}
+
+func (t *Task) handleSettings(w http.ResponseWriter, r *http.Request) {
+	var req taskSettings
+	if err := rest.Decode(w, r, &req); err != nil {
+		rest.Fail(w, http.StatusBadRequest, "%s", err.Error())
+		return
+	}
+	if err := t.update(func(c *model.Config) error {
+		c.Tasks.AllowShell = req.AllowShell
+		return nil
+	}); err != nil {
+		rest.Fail(w, http.StatusBadRequest, "cannot save the task settings: %s", err)
+		return
+	}
+	rest.OK(w, map[string]any{"allowShell": req.AllowShell})
 }
 
 func (t *Task) handleList(w http.ResponseWriter, r *http.Request) {

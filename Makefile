@@ -9,9 +9,14 @@ LDFLAGS := -s -w \
   -X github.com/nunt/nunt/internal/version.Commit=$(COMMIT) \
   -X github.com/nunt/nunt/internal/version.BuildTime=$(BUILDTIME)
 
-.PHONY: all build run test vet fmt lint clean docker release
+.PHONY: all build web run test vet fmt lint clean docker release
 
 all: build
+
+# Rebuild the admin interface into internal/webui/assets. The bundle is
+# committed, so a plain "make build" needs no Node toolchain.
+web:
+	cd frontend && npm ci --no-audit --no-fund && npm run build
 
 build:
 	CGO_ENABLED=0 go build -trimpath -tags "nomsgpack" -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/nunt

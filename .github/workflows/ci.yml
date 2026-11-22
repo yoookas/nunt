@@ -40,24 +40,17 @@ jobs:
       - name: Build
         run: go build -trimpath -o /tmp/nunt ./cmd/nunt
 
-  # Frontend (Playwright + axe) job.
+  # Frontend job.
   #
-  # It is a separate job so the Go jobs above are neither slowed down nor
-  # affected by it: Node/pnpm/Chromium are development-only tooling, the Go
-  # build and the Docker image still need no Node at all.
+  # The admin interface is a Vue 3 + Arco Design application built with Vite.
+  # Its output is committed under internal/webui/assets (so the binary keeps
+  # embedding it and a plain "go build" needs no Node), which is why this job
+  # also fails when rebuilding changes those files.
   #
-  # What it proves: the 12 console pages really work in a browser - they mount,
-  # every key interaction still behaves, there are no console errors, no failed
-  # requests and no requests leaving the service, and axe reports zero
-  # critical/serious/moderate/minor findings in both themes
-  # (ui-smoke runs light, ui-baseline runs dark).
-  #
-  # Local equivalent (Linux/macOS; on Windows build nunt.exe instead):
-  #   pnpm install
-  #   pnpm exec playwright install --with-deps chromium
+  # Local equivalent:
+  #   npm ci --prefix frontend
+  #   npm run build --prefix frontend   # rewrites internal/webui/assets
   #   go build -o nunt ./cmd/nunt
-  #   node scripts/ui-smoke.mjs --exe ./nunt --out artifacts/ui-smoke
-  #   node scripts/ui-baseline.mjs --exe ./nunt --out artifacts/ui-baseline --label ci
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -70,49 +63,34 @@ jobs:
           go-version: "1.26.10"
           cache: true
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
-          cache: pnpm
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
-      - name: Install dev dependencies (Playwright + axe-core)
-        run: pnpm install --frozen-lockfile
+      - name: Install the frontend dependencies
+        run: npm ci --prefix frontend --no-audit --no-fund
 
-      - name: Install Chromium
-        run: pnpm exec playwright install --with-deps chromium
+      - name: Build the admin interface
+        run: npm run build --prefix frontend
 
-      - name: Build the binary
+      - name: Runtime smoke of every route (jsdom)
+        run: npm run smoke --prefix frontend
+
+      - name: The committed bundle must match the sources
+        # The binary embeds internal/webui/assets, so a stale bundle would ship
+        # an old interface. Rebuilding must produce the committed files.
+        run: |
+          if ! git diff --quiet -- internal/webui/assets; then
+            echo "::error::internal/webui/assets is stale; run 'make web' and commit the result"
+            git status --short internal/webui/assets | head -20
+            exit 1
+          fi
+
+      - name: Build the binary with the embedded interface
         run: go build -o nunt ./cmd/nunt
-
-      - name: UI smoke (light theme, per page interactions)
-        run: node scripts/ui-smoke.mjs --exe ./nunt --out artifacts/ui-smoke
-
-      - name: UI baseline (dark theme, 12 pages + axe)
-        run: node scripts/ui-baseline.mjs --exe ./nunt --out artifacts/ui-baseline --label "ci"
-
-      - name: Upload the text reports
-        # The checks above have already run; uploading is a convenience, so a
-        # full artifact quota must not turn a green run red. Only the small text
-        # reports are kept: the screenshots are the bulk and live in git under
-        # docs/screenshots anyway.
-        if: always()
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-ui-reports
-          path: |
-            artifacts/ui-smoke/**/*.json
-            artifacts/ui-smoke/**/*.md
-            artifacts/ui-baseline/**/*.json
-            artifacts/ui-baseline/**/*.md
-          if-no-files-found: warn
-          retention-days: 3
 
   docker:
     runs-on: ubuntu-latest

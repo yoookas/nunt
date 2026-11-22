@@ -62,7 +62,11 @@ try {
     }
   }
 
-  foreach ($asset in @('/', '/app.js', '/style.css', '/pages/web.js', '/pages/ddns.js')) {
+  $shell = Invoke-WebRequest -UseBasicParsing "$base/" -WebSession $session
+  if ($shell.Content -notmatch 'id="app"') { throw 'the admin shell is not the Vue app' }
+  $bundle = [regex]::Match($shell.Content, 'src="(/static/[^"]+\.js)"')
+  if (-not $bundle.Success) { throw 'the admin shell references no script bundle' }
+  foreach ($asset in @('/', $bundle.Groups[1].Value)) {
     $r = Invoke-WebRequest -Uri "$base$asset" -UseBasicParsing
     Write-Host ("  GET  " + $asset + " -> " + $r.StatusCode + " (" + $r.RawContentLength + " bytes)")
   }

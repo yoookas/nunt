@@ -1,7 +1,8 @@
 // Package webui embeds the single page admin interface.
 //
-// The assets are plain HTML/CSS/JavaScript without a build step so the binary
-// stays self contained and the container image needs no node toolchain.
+// The bundle is built from frontend/ (Vue 3 + Arco Design + Vite) and committed
+// under assets/, so the binary stays self contained and "go build" needs no
+// node toolchain; the container image rebuilds it in its web stage.
 package webui
 
 import (
