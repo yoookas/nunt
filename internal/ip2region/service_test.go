@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -84,5 +85,55 @@ func TestConfigureRejectsBadFile(t *testing.T) {
 	}
 	if _, err := s.Probe(filepath.Join(dir, "missing.xdb")); err == nil {
 		t.Fatal("a missing file must be rejected")
+	}
+}
+
+// writeEmptyXDB writes a syntactically valid v2 IPv4 database with an empty
+// vector index: every lookup returns an empty region without touching disk.
+// It is enough to exercise the searcher pool and its concurrency.
+func writeEmptyXDB(t *testing.T) string {
+	t.Helper()
+	const headerInfo = 256
+	const vectorIndex = 256 * 256 * 8
+	data := make([]byte, headerInfo+vectorIndex+8)
+	data[0] = 2  // version
+	data[2] = 1  // index policy
+	data[16] = 4 // IPv4
+	data[18] = 4 // runtime pointer bytes
+	path := filepath.Join(t.TempDir(), "empty.xdb")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write xdb: %v", err)
+	}
+	return path
+}
+
+func TestConcurrentLookups(t *testing.T) {
+	path := writeEmptyXDB(t)
+	s := New()
+	if err := s.Configure(path); err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	if status := s.Status(); !status.Loaded || status.IPVersion != 4 {
+		t.Fatalf("status = %+v", status)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 64)
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				ip := net.IPv4(10, 0, byte(i), byte(j))
+				if _, err := s.Lookup(ip); err != nil {
+					errs <- err
+					return
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent lookup: %v", err)
 	}
 }

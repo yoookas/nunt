@@ -1,6 +1,22 @@
 import { createApp } from 'vue'
-import ArcoVue from '@arco-design/web-vue'
-import ArcoVueIcon from '@arco-design/web-vue/es/icon'
+import {
+  IconCloud,
+  IconDashboard,
+  IconDown,
+  IconFile,
+  IconFire,
+  IconFolder,
+  IconLink,
+  IconMoon,
+  IconPlus,
+  IconRefresh,
+  IconSafe,
+  IconSettings,
+  IconStorage,
+  IconSun,
+  IconSwap,
+  IconUser,
+} from '@arco-design/web-vue/es/icon'
 import '@arco-design/web-vue/dist/arco.css'
 
 import './styles.css'
@@ -11,8 +27,28 @@ import { setupTheme } from './theme'
 setupTheme()
 
 const app = createApp(App)
-app.use(ArcoVue)
-app.use(ArcoVueIcon)
+// Register only the icons the shell and the pages use; the full icon set is
+// several hundred components.
+for (const [name, icon] of Object.entries({
+  IconCloud,
+  IconDashboard,
+  IconDown,
+  IconFile,
+  IconFire,
+  IconFolder,
+  IconLink,
+  IconMoon,
+  IconPlus,
+  IconRefresh,
+  IconSafe,
+  IconSettings,
+  IconStorage,
+  IconSun,
+  IconSwap,
+  IconUser,
+})) {
+  app.component(name, icon)
+}
 app.use(router)
 
 // A 401 from any request means the session is gone: drop the local state and

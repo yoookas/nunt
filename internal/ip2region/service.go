@@ -13,6 +13,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lionsoul2014/ip2region/binding/golang/xdb"
@@ -42,12 +43,48 @@ type Status struct {
 	Error     string     `json:"error,omitempty"`
 }
 
-// Service owns the loaded database.
+// Service owns the loaded database. Lookups go through a pool of searchers
+// over one immutable content buffer: the upstream searcher keeps a mutable
+// counter, so each lookup borrows its own instance instead of serialising on a
+// process wide lock.
 type Service struct {
-	mu       sync.Mutex
-	searcher *xdb.Searcher
-	status   Status
-	mtime    time.Time
+	mu     sync.Mutex
+	data   atomic.Pointer[dataset]
+	status Status
+	mtime  time.Time
+}
+
+// dataset is one loaded database and its searcher pool.
+type dataset struct {
+	pool sync.Pool
+}
+
+func newDataset(version *xdb.Version, content []byte) (*dataset, error) {
+	// Validate the buffer once; pool entries are built from the same bytes and
+	// cannot fail after this point.
+	if _, err := xdb.NewWithBuffer(version, content); err != nil {
+		return nil, err
+	}
+	d := &dataset{}
+	d.pool.New = func() any {
+		searcher, err := xdb.NewWithBuffer(version, content)
+		if err != nil {
+			return nil
+		}
+		return searcher
+	}
+	return d, nil
+}
+
+// search borrows one searcher for a single lookup.
+func (d *dataset) search(ip []byte) (string, error) {
+	value := d.pool.Get()
+	searcher, ok := value.(*xdb.Searcher)
+	if !ok || searcher == nil {
+		return "", errors.New("ip2region searcher pool is empty")
+	}
+	defer d.pool.Put(searcher)
+	return searcher.Search(ip)
 }
 
 // New creates an empty service; call Configure to load a database.
@@ -58,8 +95,8 @@ func New() *Service { return &Service{} }
 func (s *Service) Configure(path string) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
+		s.data.Store(nil)
 		s.mu.Lock()
-		s.searcher = nil
 		s.status = Status{}
 		s.mtime = time.Time{}
 		s.mu.Unlock()
@@ -71,18 +108,18 @@ func (s *Service) Configure(path string) error {
 		return fmt.Errorf("ip2region database %s: %w", path, err)
 	}
 	s.mu.Lock()
-	same := s.searcher != nil && s.status.Path == path && s.mtime.Equal(info.ModTime())
+	same := s.data.Load() != nil && s.status.Path == path && s.mtime.Equal(info.ModTime())
 	s.mu.Unlock()
 	if same {
 		return nil
 	}
-	searcher, status, err := load(path, info)
+	data, status, err := load(path, info)
 	if err != nil {
 		s.setError(path, err)
 		return err
 	}
+	s.data.Store(data)
 	s.mu.Lock()
-	s.searcher = searcher
 	s.status = status
 	s.mtime = info.ModTime()
 	s.mu.Unlock()
@@ -126,12 +163,11 @@ func (s *Service) Lookup(ip net.IP) (Record, error) {
 	if v4 == nil {
 		return Record{}, nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.searcher == nil {
+	data := s.data.Load()
+	if data == nil {
 		return Record{}, ErrUnavailable
 	}
-	raw, err := s.searcher.Search([]byte(v4))
+	raw, err := data.search([]byte(v4))
 	if err != nil {
 		return Record{}, err
 	}
@@ -146,13 +182,13 @@ func (s *Service) Status() Status {
 }
 
 func (s *Service) setError(path string, err error) {
+	s.data.Store(nil)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.searcher = nil
 	s.status = Status{Path: path, Error: err.Error()}
 }
 
-func load(path string, info os.FileInfo) (*xdb.Searcher, Status, error) {
+func load(path string, info os.FileInfo) (*dataset, Status, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, Status{Path: path}, fmt.Errorf("read: %w", err)
@@ -167,7 +203,7 @@ func load(path string, info os.FileInfo) (*xdb.Searcher, Status, error) {
 	} else if header.IPVersion != xdb.IPv4VersionNo {
 		return nil, Status{Path: path}, fmt.Errorf("unsupported ip version %d", header.IPVersion)
 	}
-	searcher, err := xdb.NewWithBuffer(version, data)
+	loaded, err := newDataset(version, data)
 	if err != nil {
 		return nil, Status{Path: path}, fmt.Errorf("open: %w", err)
 	}
@@ -181,7 +217,7 @@ func load(path string, info os.FileInfo) (*xdb.Searcher, Status, error) {
 		created := time.Unix(int64(header.CreatedAt), 0).UTC()
 		status.CreatedAt = &created
 	}
-	return searcher, status, nil
+	return loaded, status, nil
 }
 
 // ParseRegion turns a raw ip2region row into a Record. Missing fields are
