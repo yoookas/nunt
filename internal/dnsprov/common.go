@@ -213,41 +213,6 @@ func rootDomain(domain string) string {
 }
 
 // normalizeType upper cases a record type.
-// mergeTXTRecords adds value to an existing TXT record set without dropping the
-// values that are already published: an ACME dns-01 validation keeps one TXT
-// per challenge and they have to coexist. The quoting style of the existing
-// records is preserved, because deSEC returns TXT records quoted while other
-// providers return them bare.
-func mergeTXTRecords(existing []string, value string) []string {
-	want := strings.TrimSpace(value)
-	quoted := false
-	for _, v := range existing {
-		if len(v) >= 2 && strings.HasPrefix(v, "\"") && strings.HasSuffix(v, "\"") {
-			quoted = true
-			break
-		}
-	}
-	out := make([]string, 0, len(existing)+1)
-	seen := false
-	for _, v := range existing {
-		trimmed := strings.TrimSpace(v)
-		if trimmed == "" {
-			continue
-		}
-		if strings.Trim(trimmed, "\"") == want {
-			seen = true
-		}
-		out = append(out, v)
-	}
-	if seen {
-		return out
-	}
-	if quoted {
-		want = strconv.Quote(want)
-	}
-	return append(out, want)
-}
-
 func normalizeType(t string) string {
 	out := strings.ToUpper(strings.TrimSpace(t))
 	if out == "" {

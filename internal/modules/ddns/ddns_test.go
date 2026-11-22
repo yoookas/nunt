@@ -125,7 +125,7 @@ func TestCredentialSealingAndMasking(t *testing.T) {
 
 	rule := model.DDNSRule{
 		ID:       "r1",
-		Provider: "cloudflare",
+		Provider: "alidns",
 		Creds:    map[string]string{"token": "plain-token", "account": "abc"},
 	}
 	if err := d.sealRule(&rule, nil); err != nil {
@@ -138,7 +138,7 @@ func TestCredentialSealingAndMasking(t *testing.T) {
 	// A masked value coming back from the UI must not overwrite the stored one.
 	update := model.DDNSRule{
 		ID:       "r1",
-		Provider: "cloudflare",
+		Provider: "alidns",
 		Creds:    map[string]string{"token": secret.Mask(rule.Creds["token"]), "account": "xyz"},
 	}
 	if err := d.sealRule(&update, &rule); err != nil {

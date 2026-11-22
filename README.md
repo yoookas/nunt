@@ -13,7 +13,7 @@
 | --- | --- |
 | **Web 服务** | 同一套监听器上按「监听地址 + 域名 + 路径」路由，支持 5 种规则类型：反向代理、重定向、静态托管、文件管理（FileBrowser）、WebDAV。支持 IP/UA 黑白名单、HTTP Basic 认证、多上游负载均衡（轮询/随机/IP 哈希）、路径重写、自定义请求/响应头、WebSocket、访问日志 |
 | **端口转发** | TCP / UDP / 同时转发，源地址 → 目标地址，支持 IPv6、源 IP 黑白名单、空闲超时、活跃与累计连接数、上下行流量统计、访问日志 |
-| **动态域名 DDNS** | 内置 Cloudflare、阿里云、DNSPod、Dynv6、DuckDNS、No-IP、FreeDNS、deSEC、Porkbun、NameSilo、GoDaddy、Namecheap、Vercel 与「自定义回调」；支持多子域名、A/AAAA、TTL、间隔或 cron 调度、公网 IP 探测（网卡 / URL / 静态）、变化才更新、失败通知 |
+| **动态域名 DDNS** | 内置阿里云 DNS、DNSPod（腾讯云）与「自定义回调」；支持多子域名、A/AAAA、TTL、间隔或 cron 调度、公网 IP 探测（网卡 / URL / 静态）、变化才更新、失败通知 |
 | **ACME 自动证书** | 基于 `golang.org/x/crypto/acme` 自研签发流程，支持 http-01 / dns-01 / tls-alpn-01，DNS-01 复用 DDNS 的提供商；**http-01 / tls-alpn-01 复用 web 的 :80 / :443 监听**（端口被自家规则占用也能签发），自动续期（默认剩余 30 天，上限 30 天），证书热加载、无需重启 |
 | **WebDAV** | 基于 `golang.org/x/net/webdav`，可挂载本地目录或远程 WebDAV，细粒度读写权限，支持 Windows 资源管理器 / macOS 访达 / rclone / RaiDrive 挂载 |
 | **文件管理** | 服务端渲染的文件浏览器：上传（拖拽 + 进度）、下载（Range、断点续传）、新建、重命名、删除、搜索、目录分享链接（可设有效期） |
@@ -274,7 +274,7 @@ CI 里的 `frontend` job 跑的就是同一组命令。）
 
 ## 与 Lucky 的关系
 
-本项目在功能取舍上参考了 [Lucky](https://github.com/gdy666/lucky) 的使用体验（模块划分、路由模型、DDNS 提供商范围），
+本项目在功能取舍上参考了 [Lucky](https://github.com/gdy666/lucky) 的使用体验（模块划分、路由模型），
 但代码、配置格式、界面与实现均为独立编写，并做了两点明确取舍：
 
 - **不提供** STUN 内网穿透、网络唤醒（WOL）、云盘挂载等模块（保持攻击面更小、依赖更少）；

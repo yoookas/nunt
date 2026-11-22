@@ -208,7 +208,7 @@ or set the access control to allow + IP list
 ### P2（上线后按需）
 
 - [ ] WAF 误报排除工作流（按规则 ID 禁用 + 文档）
-- [ ] 真实 CA / 真实 DNS 联调 —— **保持未勾**：ACME 未对真实 CA 完成过签发；`internal/dnsprov` 的 13 家提供商只有接口形状与单测（见第 7 节第 2、3 条）
+- [ ] 真实 CA / 真实 DNS 联调 —— **保持未勾**：ACME 未对真实 CA 完成过签发；`internal/dnsprov` 的两家国内提供商（阿里云、DNSPod）与自定义回调只有接口形状与单测（见第 7 节第 2、3 条）
 
 > 上面打勾的条目同样只代表「已实现 + 有测试」，不代表已在真实环境跑过。
 
@@ -239,7 +239,7 @@ or set the access control to allow + IP list
 
 1. **Docker 未实跑**：本机没有跑过 `docker compose up`；`.github/workflows/docker-smoke.yml` 已经写好（构建镜像 + host 网络启动 + 校验容器契约），并在 CI 上跑通过一次。
 2. **ACME 未对真实 CA 跑过**：没有在 Let's Encrypt（staging 或正式）/ZeroSSL/Buypass 上完成过真实签发；续期循环、失败重试、证书热加载都只有单元测试与本地自签验证。
-3. **DNS 提供商未真实联调**：`internal/dnsprov` 里的 13 家提供商（Cloudflare、阿里云、DNSPod、Dynv6、DuckDNS、No-IP、FreeDNS、deSEC、Porkbun、NameSilo、GoDaddy、Namecheap、Vercel）+ 自定义回调，全部只有接口形状与单元测试，没有用真实账号调过 API（DDNS 与 ACME dns-01 都依赖它们）。
+3. **DNS 提供商未真实联调**：`internal/dnsprov` 只保留了阿里云 DNS 与 DNSPod（腾讯云）两家国内提供商，外加自定义回调；它们目前只有接口形状与单元测试，没有用真实账号调过 API（DDNS 与 ACME dns-01 都依赖它们）。
 4. **没有 race / 压测 / soak**：没有跑过 `go test -race` 的长时间运行，没有并发压测，没有 24h soak；连接泄漏、goroutine 泄漏、限流参数是否合适都还是未知数。
 5. **前端未真机浏览器验证**：管理界面只做过静态资源可访问性检查（HTTP 200），没有在真实浏览器里逐页点过（尤其是文件管理上传/分享、WAF 规则编辑、SSE 日志这几处）。
 6. **管理面白名单未在真实公网验证**：`adminAllowIps` 的强制逻辑有单测覆盖，但没有在真实公网环境（含 CDN/第三方反代 + `trustProxy`）验证过取到的客户端 IP 是否就是期望值。

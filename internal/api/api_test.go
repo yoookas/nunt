@@ -240,7 +240,7 @@ func TestConfigExportMasksSecrets(t *testing.T) {
 			ID:       "rule-1",
 			Name:     "home",
 			Domain:   "example.com",
-			Provider: "cloudflare",
+			Provider: "alidns",
 			Creds:    map[string]string{"token": "plain-dns-token"},
 		})
 		return nil

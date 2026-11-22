@@ -104,7 +104,7 @@ func TestJobViewMasksCredentials(t *testing.T) {
 		Name:        "example",
 		Domains:     []string{"example.com", "www.example.com"},
 		Challenge:   challengeDNS,
-		DNSProvider: "cloudflare",
+		DNSProvider: "alidns",
 		DNSCreds:    map[string]string{"token": "enc:v1:secret"},
 	}
 	view := a.jobView(job)

@@ -241,7 +241,7 @@ func TestRequestValidate(t *testing.T) {
 	if err := wild.validate(nil); err == nil {
 		t.Fatal("dns-01 without a provider was accepted")
 	}
-	wild.dnsProvider = "cloudflare"
+	wild.dnsProvider = "alidns"
 	if err := wild.validate(nil); err != nil {
 		t.Fatalf("dns-01 with a provider: %v", err)
 	}
