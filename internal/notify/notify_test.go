@@ -93,3 +93,60 @@ func TestEmitDoesNotRetryAClientError(t *testing.T) {
 		t.Fatalf("attempts = %d, want exactly 1 for a 400", got)
 	}
 }
+
+// The test button follows the same retry policy as a real delivery.
+func TestSendTestRetriesTransientFailures(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) < 3 {
+			http.Error(w, "try later", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	cfg, _, err := config.Load(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	hub := logging.New("error", "")
+	t.Cleanup(hub.Close)
+	svc := New(cfg, hub.Logger())
+	svc.backoff = time.Millisecond
+
+	if err := svc.SendTest(model.Webhook{Name: "test", URL: server.URL}); err != nil {
+		t.Fatalf("send test: %v", err)
+	}
+	if got := attempts.Load(); got != 3 {
+		t.Fatalf("attempts = %d, want 3", got)
+	}
+}
+
+// A permanent client error is reported immediately.
+func TestSendTestReportsClientError(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		http.Error(w, "invalid", http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	cfg, _, err := config.Load(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	hub := logging.New("error", "")
+	t.Cleanup(hub.Close)
+	svc := New(cfg, hub.Logger())
+	svc.backoff = time.Millisecond
+
+	err = svc.SendTest(model.Webhook{Name: "test", URL: server.URL})
+	if err == nil {
+		t.Fatal("a 400 must be reported")
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("attempts = %d, want 1", got)
+	}
+}

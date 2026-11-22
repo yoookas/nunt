@@ -605,7 +605,23 @@ func asciiFallback(name string) string {
 // derives it from the query, while a share link passes the path it already
 // checked against the share root. Re-reading the query here would let a share
 // link archive the whole storage root by omitting the parameter.
+// maxZipTotalBytes bounds the uncompressed size of one archive; a variable so
+// tests can lower it. maxZipConcurrent bounds how many archives are built at
+// once, because every one of them holds a CPU and a storage reader.
+const maxZipConcurrent = 2
+
+var (
+	maxZipTotalBytes int64 = 4 << 30
+	zipSlots               = make(chan struct{}, maxZipConcurrent)
+)
+
 func (s *site) handleZip(w http.ResponseWriter, r *http.Request, clean string) {
+	select {
+	case zipSlots <- struct{}{}:
+		defer func() { <-zipSlots }()
+	case <-r.Context().Done():
+		return
+	}
 	entry, err := s.fs.Stat(r.Context(), clean)
 	if err != nil {
 		s.fail(w, "stat", err)
@@ -627,6 +643,7 @@ func (s *site) handleZip(w http.ResponseWriter, r *http.Request, clean string) {
 
 	zw := zip.NewWriter(w)
 	count := 0
+	total := int64(0)
 	var walk func(dir, prefix string) error
 	walk = func(dir, prefix string) error {
 		items, err := s.fs.List(r.Context(), dir, s.showHidden)
@@ -634,7 +651,7 @@ func (s *site) handleZip(w http.ResponseWriter, r *http.Request, clean string) {
 			return err
 		}
 		for _, item := range items {
-			if count >= maxZipEntries || r.Context().Err() != nil {
+			if count >= maxZipEntries || total >= maxZipTotalBytes || r.Context().Err() != nil {
 				return nil
 			}
 			name := path.Join(prefix, item.Name)
@@ -650,6 +667,12 @@ func (s *site) handleZip(w http.ResponseWriter, r *http.Request, clean string) {
 			if item.Size > maxZipFileSize {
 				continue
 			}
+			if item.Size > 0 && total+item.Size > maxZipTotalBytes {
+				// The caller asked for a bounded archive: stop instead of
+				// streaming an unbounded amount of data.
+				return nil
+			}
+			total += item.Size
 			header := &zip.FileHeader{Name: name, Method: zip.Deflate, Modified: item.ModTime}
 			fw, err := zw.CreateHeader(header)
 			if err != nil {

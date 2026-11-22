@@ -257,20 +257,45 @@ func (a *ACME) tick(ctx context.Context) {
 	a.refreshStats(cfg)
 }
 
-// checkDue renews every stored certificate that is close to expiry.
+// checkDue renews the stored certificates that are close to expiry. The orders
+// run concurrently but stay bounded, so a batch of expiring certificates no
+// longer waits for the previous one to finish within a single round.
 func (a *ACME) checkDue(ctx context.Context, cfg *model.Config) {
 	if a.deps.Certs == nil {
 		return
 	}
-	window := renewWindow(cfg)
-	for _, info := range a.deps.Certs.DueForRenew(window) {
-		if ctx.Err() != nil {
-			return
+	jobs := jobsDue(cfg, a.deps.Certs.DueForRenew(renewWindow(cfg)), time.Now())
+	if len(jobs) == 0 {
+		return
+	}
+
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, maxConcurrentIssues*2)
+dispatch:
+	for _, job := range jobs {
+		select {
+		case slots <- struct{}{}:
+		case <-ctx.Done():
+			break dispatch
 		}
-		if info.Source != source && info.JobID == "" {
-			// Certificates uploaded by hand are never touched.
-			continue
-		}
+		a.log.Info("certificate due for renewal", "job", job.Name, "domains", job.Domains)
+		a.SetDetail(fmt.Sprintf("renewing certificate for %s", job.Domains[0]))
+		wg.Add(1)
+		go func(job model.CertJob) {
+			defer wg.Done()
+			defer func() { <-slots }()
+			a.runJob(ctx, job, true)
+		}(job)
+	}
+	wg.Wait()
+}
+
+// jobsDue decides which of the certificates close to expiry actually have to be
+// renewed now, and with which job. It is separate from the scheduling so the
+// decision stays testable without a CA.
+func jobsDue(cfg *model.Config, infos []certs.Info, now time.Time) []model.CertJob {
+	out := make([]model.CertJob, 0, len(infos))
+	for _, info := range infos {
 		job, ok := renewalJob(cfg, info)
 		if !ok {
 			continue
@@ -283,14 +308,12 @@ func (a *ACME) checkDue(ctx context.Context, cfg *model.Config) {
 		if days > maxRenewDays {
 			days = maxRenewDays
 		}
-		if time.Until(info.NotAfter) > time.Duration(days)*24*time.Hour {
+		if info.NotAfter.Sub(now) > time.Duration(days)*24*time.Hour {
 			continue
 		}
-		a.log.Info("certificate due for renewal", "job", job.Name, "domains", info.Domains,
-			"notAfter", info.NotAfter.Format(time.RFC3339))
-		a.SetDetail(fmt.Sprintf("renewing certificate for %s", info.Domains[0]))
-		a.runJob(ctx, *job, true)
+		out = append(out, *job)
 	}
+	return out
 }
 
 // renewalJob returns the job that should renew a stored certificate. A

@@ -914,3 +914,26 @@ func TestUploadFailureKeepsTheExistingFile(t *testing.T) {
 		}
 	}
 }
+
+// One archive is bounded in size as well as in entry count: an endless tree
+// must not stream forever.
+func TestZipStopsAtTheByteBudget(t *testing.T) {
+	old := maxZipTotalBytes
+	maxZipTotalBytes = 10
+	t.Cleanup(func() { maxZipTotalBytes = old })
+
+	root := t.TempDir()
+	seedFile(t, root, "a.txt", "12345678")
+	seedFile(t, root, "b.txt", "12345678")
+	deps := newTestDeps(t)
+	h := newTestSite(t, deps, root, nil)
+
+	rec := do(t, h, http.MethodGet, "/files/_api/zip?path=/", nil, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("zip = %d %s", rec.Code, rec.Body.String())
+	}
+	names := zipEntryNames(t, rec.Body.Bytes())
+	if len(names) != 1 || names[0] != "a.txt" {
+		t.Fatalf("the archive went past its budget: %v", names)
+	}
+}

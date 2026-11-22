@@ -162,7 +162,9 @@ func (s *Service) attempt(ctx context.Context, method string, wh model.Webhook, 
 	return &StatusError{Code: resp.StatusCode}, resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500
 }
 
-// SendTest delivers a test payload and returns the delivery error, if any.
+// SendTest delivers a test payload and returns the delivery error, if any. It
+// uses the same retry policy as a real notification, so the button tells the
+// operator what a real event would experience.
 func (s *Service) SendTest(wh model.Webhook) error {
 	body, _ := json.Marshal(map[string]any{
 		"event":   EventTest,
@@ -170,29 +172,9 @@ func (s *Service) SendTest(wh model.Webhook) error {
 		"message": "If you can read this, the webhook works.",
 		"time":    time.Now().Format(time.RFC3339),
 	})
-	method := wh.Method
-	if method == "" {
-		method = http.MethodPost
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, method, wh.URL, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for k, v := range wh.Headers {
-		req.Header.Set(k, v)
-	}
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode >= 300 {
-		return &StatusError{Code: resp.StatusCode}
-	}
-	return nil
+	return s.deliver(ctx, wh, body)
 }
 
 // StatusError reports a non 2xx webhook response.

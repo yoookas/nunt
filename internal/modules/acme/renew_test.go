@@ -152,3 +152,27 @@ func TestIssueSlotsAreBounded(t *testing.T) {
 		t.Fatalf("the slot was not released: %v", err)
 	}
 }
+
+// Only certificates inside their own renewal window are scheduled, and manual
+// certificates never enter the queue.
+func TestJobsDueThreshold(t *testing.T) {
+	now := time.Now()
+	cfg := &model.Config{ACME: model.ACMEConfig{Jobs: []model.CertJob{
+		{ID: "j1", Enable: true, Domains: []string{"a.example.com"}, RenewDays: 30},
+	}}}
+	infos := []certs.Info{
+		{ID: "j1", Source: "acme", JobID: "j1", Domains: []string{"a.example.com"}, NotAfter: now.Add(10 * 24 * time.Hour)},
+		{ID: "j2", Source: "acme", JobID: "j1", Domains: []string{"b.example.com"}, NotAfter: now.Add(60 * 24 * time.Hour)},
+		{ID: "manual", Source: "manual", Domains: []string{"c.example.com"}, NotAfter: now.Add(time.Hour)},
+		{ID: "on-demand", Source: "acme", JobID: "on-demand-x", Domains: []string{"d.example.com"}, NotAfter: now.Add(5 * 24 * time.Hour)},
+	}
+	jobs := jobsDue(cfg, infos, now)
+	if len(jobs) != 2 {
+		t.Fatalf("jobs due = %d, want the configured and the on demand certificate", len(jobs))
+	}
+	for _, job := range jobs {
+		if job.ID == "manual" {
+			t.Fatal("a manual certificate was scheduled")
+		}
+	}
+}
