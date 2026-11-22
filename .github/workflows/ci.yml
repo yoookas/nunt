@@ -42,7 +42,7 @@ jobs:
 
   # Frontend job.
   #
-  # The admin interface is a Vue 3 + Arco Design application built with Vite.
+  # The admin interface is a React 19 + HeroUI application built with Vite.
   # Its output is committed under internal/webui/assets (so the binary keeps
   # embedding it and a plain "go build" needs no Node), which is why this job
   # also fails when rebuilding changes those files.

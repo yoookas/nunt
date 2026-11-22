@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---------------------------------------------------------------------------
-# web stage: build the Vue admin interface into internal/webui/assets
+# web stage: build the React admin interface into internal/webui/assets
 # ---------------------------------------------------------------------------
 FROM --platform=$BUILDPLATFORM node:24-alpine AS web
 

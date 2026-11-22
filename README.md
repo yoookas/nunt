@@ -1,7 +1,7 @@
 # nunt
 
 一个用 Go 编写的自托管边缘服务：**反向代理、重定向、静态托管、端口转发、动态域名（DDNS）、ACME 自动证书、Coraza WAF**，
-带一个 Vue 3 + Arco Design 的 Web 管理界面（构建产物嵌进二进制），支持 Docker Compose 一键部署。
+带一个 React 19 + HeroUI 的 Web 管理界面（构建产物嵌进二进制），支持 Docker Compose 一键部署。
 
 > 设计目标：单二进制、跨平台、默认安全、界面简洁；面向软路由 / NAS / 家庭服务器 / 小团队内网。
 
@@ -192,7 +192,7 @@ go run ./cmd/nunt -d ./data -log-level debug
 目录结构：
 
 ```
-frontend/           管理界面（Vue 3 + Arco Design + Vite，构建产物进 internal/webui/assets）
+frontend/           管理界面（React 19 + HeroUI + Tailwind 4 + Vite 8 + TypeScript，构建产物进 internal/webui/assets）
 cmd/nunt            入口
 internal/app        装配与生命周期
 internal/api        管理后台 REST API + SSE
@@ -209,7 +209,7 @@ internal/mounts     存储挂载（本地 / 远程 WebDAV）
 internal/security   密码、会话、限流
 internal/rest       路由与 JSON 工具
 internal/webui      管理界面构建产物（go:embed，源码在 frontend/）
-web 前端            frontend/（Vue 3 + Arco Design + Vite）
+web 前端            frontend/（React 19 + HeroUI + Tailwind 4 + Vite 8）
 ```
 
 模块开发约定见 [docs/CONTRACT.md](docs/CONTRACT.md)（模块接口、REST 约定、前端页面契约）；
@@ -217,15 +217,16 @@ web 前端            frontend/（Vue 3 + Arco Design + Vite）
 
 ### 前端
 
-管理界面是独立的 **Vue 3 + Arco Design Vue + Vite 8** 工程，源码在 `frontend/`，构建产物提交在
-`internal/webui/assets/` 并通过 `go:embed` 打进二进制——所以 `go build` 和最终镜像都不需要 Node；
+管理界面是独立的 **React 19 + HeroUI v3 + Tailwind CSS 4 + Vite 8 + TypeScript** 工程，源码在 `frontend/`，
+构建产物提交在 `internal/webui/assets/` 并通过 `go:embed` 打进二进制——所以 `go build` 和最终镜像都不需要 Node；
 镜像的 `web` 阶段会重新构建一次，保证镜像不会带过期前端。
 
 - 构建：`npm ci --prefix frontend && npm run build --prefix frontend`（或 `make web`），产物会整体重写
   `internal/webui/assets`；**改了前端必须重新构建并提交产物**，CI 会重跑构建并检查产物是否最新；
-- 开发：`cd frontend && npm run dev`，页面热更新；9 个页面 + 登录页都在 `frontend/src/views/`；
-- 约束：零外部请求（CSP `script-src 'self'`）、明暗主题用 `arco-theme` 切换、页面只用 Arco 组件与语义色变量。
-  详细约定见 [docs/CONTRACT.md 第 7 节](docs/CONTRACT.md)。
+- 开发：`cd frontend && npm run dev`，页面热更新；9 个页面 + 登录/改密都在 `frontend/src/views/`；
+- 约束：零外部请求（CSP `script-src 'self'`）、明暗主题用根元素 `.dark` class 切换、页面使用 HeroUI 组件、
+  Tailwind 语义色（`bg-background`/`text-foreground`/`border-border` 等）。详细约定见
+  [docs/CONTRACT.md 第 7 节](docs/CONTRACT.md)。
 
 ### 本地验证
 
@@ -260,7 +261,7 @@ go build -o nunt.exe ./cmd/nunt
 3. 压缩为 `.tar.gz`、生成 `SHA256SUMS`；
 4. 创建/更新 Release 并上传全部附件。**不登录、不推送任何镜像仓库。**
 
-`.github/workflows/ci.yml`：push / PR 时执行 `gofmt` 检查、`go vet`、`go test`、构建二进制与镜像（不推送），并跑**阻塞式**的 `govulncheck` 依赖漏洞扫描（依赖中存在可达的已知漏洞时 CI 直接失败）；另有独立的 `frontend` job 用 Node 构建 Vue 管理界面，并校验 `internal/webui/assets` 的提交产物与源码一致（过期即失败）。
+`.github/workflows/ci.yml`：push / PR 时执行 `gofmt` 检查、`go vet`、`go test`、构建二进制与镜像（不推送），并跑**阻塞式**的 `govulncheck` 依赖漏洞扫描（依赖中存在可达的已知漏洞时 CI 直接失败）；另有独立的 `frontend` job 用 Node 构建 React 管理界面，并校验 `internal/webui/assets` 的提交产物与源码一致（过期即失败）。
 `.github/workflows/docker-smoke.yml`：在真实 docker daemon 上构建镜像并校验容器契约（非 root 用户、低端口 capability、配置与密钥权限、管理 UI 可访问、用日志里的随机密码登录）。
 `.github/dependabot.yml`：gomod 每周、GitHub Actions 每月检查依赖更新（限制同时开启的 PR 数，minor/patch 自动分组）。
 

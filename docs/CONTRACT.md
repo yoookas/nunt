@@ -93,9 +93,9 @@ Lucky v1.10.8 源码（Go module 缓存里已下载好）：
 | D | `internal/modules/acme` | ACME 账号与订单（`golang.org/x/crypto/acme`）、http-01 / dns-01、证书入库、续期循环 |
 | E | `internal/mounts/webdav.go` | 远程 WebDAV 挂载后端（供静态托管的存储使用） |
 | F | `internal/modules/waf` | Coraza v3 引擎、CRS 内置规则、自定义规则、按规则开关、拦截统计与日志、管理接口 |
-| G/H | `frontend/` 与 `internal/webui/assets` | Vue 3 + Arco Design 管理界面（构建产物提交） |
+| G/H | `frontend/` 与 `internal/webui/assets` | React 19 + HeroUI 管理界面（构建产物提交） |
 
-## 7. 前端契约（Vue 3 + Arco Design + Vite）
+## 7. 前端契约（React 19 + HeroUI v3 + Tailwind 4 + Vite 8）
 
 前端是一个独立的 Vite 工程，位于 `frontend/`，构建产物提交在 `internal/webui/assets/`
 （Go 用 `go:embed all:assets` 打进二进制，所以 `go build` 和 Docker 镜像都不需要 Node；
@@ -103,47 +103,49 @@ Lucky v1.10.8 源码（Go module 缓存里已下载好）：
 
 ### 7.1 技术栈与硬约束
 
-- **Vue 3.5**（`<script setup>`，JavaScript）+ **Arco Design Vue 2.59** + **Vite 8**；
-- 只有一个入口：`frontend/src/main.js` → `App.vue` → 路由；
+- **React 19 + TypeScript**（函数组件 + hooks）+ **HeroUI v3** + **Tailwind CSS 4** + **Vite 8**；
+- 只有一个入口：`frontend/src/main.tsx` → `ThemeProvider` → `AuthProvider` → HashRouter；
 - 构建输出固定为 `internal/webui/assets/{index.html,static/*}`。**改了源码必须重新构建并提交产物**，
   CI 会重跑构建并检查 `git diff --exit-code internal/webui/assets`；
-- 运行时不允许外部请求：字体、图标、样式全部来自包内（CSP 保持 `script-src 'self'`，
-  `style-src 'self' 'unsafe-inline'` 用于 Arco 的内联样式）；
-- 主题：`<body arco-theme="dark|light">` 切换，持久化在 `localStorage['nunt.theme']`；
-  页面只使用 Arco 组件和 `var(--color-*)` 变量，不写死颜色。
+- 运行时不允许外部请求：字体、图标（`lucide-react`）、样式全部来自包内；CSP 保持
+  `script-src 'self'`、`style-src 'self' 'unsafe-inline'`（Tailwind/HeroUI 的少量内联样式）；
+- 主题：根元素 `.dark` class 切换，持久化在 `localStorage['nunt.theme']`；页面使用 HeroUI 组件与
+  Tailwind 语义色（`bg-background`、`text-foreground`、`text-muted`、`border-border` 等），不写死颜色。
 
 ### 7.2 目录
 
 ```
 frontend/
 ├── index.html
-├── vite.config.js          # outDir: ../internal/webui/assets，assetsDir: static
+├── vite.config.ts          # outDir: ../internal/webui/assets，assetsDir: static
+├── tsconfig.json
 └── src/
-    ├── main.js             # createApp、Arco、router、主题初始化
-    ├── api.js              # fetch 封装：JSON、CSRF、401 事件
-    ├── session.js          # 登录状态、bootstrap、改密
-    ├── theme.js            # 明暗主题
-    ├── menu.js             # 侧栏导航（路由名 + Arco 图标名）
-    ├── format.js           # 字节/时长/时间格式化
-    ├── layout/AppLayout.vue
-    └── views/*.vue         # 9 个页面 + Login + PasswordChange
+    ├── main.tsx            # createRoot、主题/会话 Provider、Router、Toast
+    ├── router.tsx          # HashRouter + 鉴权守卫 + 页面懒加载
+    ├── api.ts              # fetch 封装：JSON、CSRF、401 事件
+    ├── session.tsx         # 登录态 Context、bootstrap、改密
+    ├── theme.tsx           # 明暗主题 Context
+    ├── menu.tsx            # 侧栏导航（lucide 图标）
+    ├── ui.tsx              # 统一 UI 层（Page/DataTable/FormModal/输入组件/Toast）
+    ├── layout/AppLayout.tsx
+    └── views/*.tsx         # 9 个页面 + Login + PasswordChange
 ```
 
 ### 7.3 页面契约
 
-- 每个页面一个单文件组件，默认导出即可（路由用 `() => import('./views/xxx.vue')` 懒加载）；
-- 页面结构统一：`.page` → `.page-header`（`h2` + `.sub` + `.spacer` + 操作按钮）→ `a-card`；
-- 数据请求只用 `api.get/post/put/del`，错误用 `errorText(err)` 转成文案后 `Message.error`；
-- 写操作由 `api.js` 自动带上 `X-CSRF-Token`；401 会触发 `nunt:unauthorized` 事件回到登录页；
+- 每个页面一个函数组件（默认导出），路由用 `lazy(() => import('./views/Xxx'))`；
+- 页面结构统一：`Page` → `PageHeader`（标题 + `.page-sub` + 操作按钮）→ `Panel`/`DataTable`；
+- 数据请求只用 `api.get/post/put/del`，错误用 `errorText(err)` 后 `toast.danger`；
+- 写操作由 `api.ts` 自动带上 `X-CSRF-Token`；401 会触发 `nunt:unauthorized` 事件回到登录页；
 - 表单必须有 label，表格列必须有标题，按钮必须有可读文字（可访问性基线）。
 
 ### 7.4 构建与本地开发
 
 ```bash
 npm ci --prefix frontend          # 或 cd frontend && npm install
-npm run build --prefix frontend   # 重写 internal/webui/assets
-cd frontend && npm run dev        # 开发服务器，API 代理到 127.0.0.1:3113（按需在 vite.config.js 配置）
+npm run build --prefix frontend   # tsc --noEmit + vite build，重写 internal/webui/assets
+cd frontend && npm run dev        # 开发服务器，API 代理到 127.0.0.1:3113
 ```
 
 `make web` 等价于前两条命令。构建后用 `npm run smoke --prefix frontend` 跑 jsdom 冒烟：
-它加载**真实构建产物**，用假 API 把 10 个路由逐个挂载，任何未捕获异常都会让命令非零退出。
+它加载**真实构建产物**，用假 API 把 9 个路由逐个挂载，任何未捕获异常都会让命令非零退出。
