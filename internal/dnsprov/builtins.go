@@ -7,6 +7,6 @@ package dnsprov
 // the registry stays in sync with the build.
 func registerBuiltins(r *Registry) {
 	registerAliDNS(r)
-	registerDNSPod(r)
+	registerTencent(r)
 	registerCustom(r)
 }

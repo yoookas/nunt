@@ -39,7 +39,7 @@ func TestRegisterBuiltinsMeta(t *testing.T) {
 			}
 		}
 	}
-	for _, id := range []string{"alidns", "dnspod", "custom"} {
+	for _, id := range []string{"alidns", "tencent", "custom"} {
 		if !seen[id] {
 			t.Errorf("provider %q is not registered", id)
 		}
@@ -104,8 +104,8 @@ func TestValidateReportsMissingFields(t *testing.T) {
 	if err := Default().Validate("alidns", Credentials{}); err == nil {
 		t.Fatalf("alidns has required fields and must fail validation")
 	}
-	if _, ok := Default().Meta("dnspod"); !ok {
-		t.Fatalf("dnspod must be registered")
+	if _, ok := Default().Meta("tencent"); !ok {
+		t.Fatalf("tencent must be registered")
 	}
 	if err := Default().Validate("custom", Credentials{"url": "https://x.example"}); err != nil {
 		t.Fatalf("custom with url must validate: %v", err)
@@ -182,17 +182,6 @@ func TestAliyunCanonicalQuerySortsAndSkipsSignature(t *testing.T) {
 	got := canonicalAliyunQuery(query)
 	if got != "a=1&b=2&empty=" {
 		t.Errorf("canonicalAliyunQuery = %q", got)
-	}
-}
-
-func TestDNSPodFormEncoding(t *testing.T) {
-	provider, err := Default().New("dnspod", Credentials{"id": "123", "token": "abc"})
-	if err != nil {
-		t.Fatalf("dnspod: %v", err)
-	}
-	dnspod := provider.(*dnspodProvider)
-	if dnspod.loginToken != "123,abc" {
-		t.Errorf("login token = %q", dnspod.loginToken)
 	}
 }
 

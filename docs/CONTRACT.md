@@ -77,7 +77,7 @@ Lucky v1.10.8 源码（Go module 缓存里已下载好）：
 
     D:\Desktop\nunt\.gocache\mod\github.com\gdy666\lucky@v1.10.8
 
-- `module/ddns/providers/*.go`：各家 DNS API 的调用方式（cloudflare、alidns、dnspod、godaddy、porkbun、huawei、callback 等）
+- `internal/dnsprov/*.go`：各家 DNS API 的调用方式（阿里云、腾讯云、自定义回调）
 - `module/reverseproxy`、`module/portforward`、`module/sslcertficate`：反代、端口转发、证书申请的实现思路
 - `thirdlib/gdylib/*`：工具函数思路
 

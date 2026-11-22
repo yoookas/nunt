@@ -19,39 +19,6 @@ const KEY_OPTIONS = [
 
 const CHALLENGE_LABEL = { http: 'HTTP-01', dns: 'DNS-01', tls: 'TLS-ALPN-01' }
 
-// Only used when /api/v1/ddns/providers cannot be read; the real form always
-// comes from the provider metadata returned by the backend.
-const FALLBACK_PROVIDERS = [
-  {
-    id: 'alidns',
-    title: '阿里云解析 DNS',
-    fields: [
-      { key: 'accesskeyid', label: 'AccessKey ID', required: true, placeholder: 'LTAI...' },
-      { key: 'accesskeysecret', label: 'AccessKey Secret', secret: true, required: true, placeholder: 'AccessKey Secret' },
-    ],
-  },
-  {
-    id: 'dnspod',
-    title: 'DNSPod（腾讯云）',
-    fields: [
-      { key: 'id', label: '登录 Token ID', required: true, placeholder: '123456' },
-      { key: 'token', label: '登录 Token', secret: true, required: true, placeholder: 'API Token' },
-    ],
-  },
-  {
-    id: 'custom',
-    title: '自定义回调（Custom Callback）',
-    fields: [
-      { key: 'url', label: '请求 URL', required: true, placeholder: 'https://example.com/ddns?host={fqdn}&ip={ip}' },
-      { key: 'method', label: '请求方法', placeholder: 'POST' },
-      { key: 'headers', label: '请求头', placeholder: 'Authorization: Bearer xxx' },
-      { key: 'body', label: '请求体', placeholder: '{"host":"{fqdn}","ip":"{ip}"}' },
-      { key: 'user', label: 'BasicAuth 用户名', placeholder: '可选' },
-      { key: 'pass', label: 'BasicAuth 密码', secret: true, placeholder: '可选' },
-    ],
-  },
-]
-
 const jobs = ref([])
 const certs = ref([])
 const providers = ref([])
@@ -212,8 +179,9 @@ function certSourceLabel(source) {
 async function loadProviders() {
   try {
     providers.value = normalizeProviders(await api.get('/api/v1/ddns/providers'))
-  } catch {
-    providers.value = FALLBACK_PROVIDERS.map((item) => ({ ...item, fields: item.fields.map((field) => ({ ...field })) }))
+  } catch (err) {
+    providers.value = []
+    Message.error(`读取 DNS 提供商失败：${errorText(err)}`)
   }
 }
 
