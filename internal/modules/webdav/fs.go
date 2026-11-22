@@ -8,6 +8,8 @@ package webdav
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"io"
 	"log/slog"
@@ -325,18 +327,34 @@ type writeFile struct {
 	size   int64
 	err    error
 	closed bool
+
+	fs     vfs.FS
+	ctx    context.Context
+	temp   string
+	target string
+}
+
+// tempPathFor returns a hidden sibling path used while a PUT is in flight.
+func tempPathFor(p string) string {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return path.Join(path.Dir(p), "."+path.Base(p)+".part-"+hex.EncodeToString(b[:]))
 }
 
 func newWriteFile(ctx context.Context, a *adapter, p, name string) *writeFile {
+	// A PUT writes to a hidden temporary file and is renamed into place when it
+	// completes, so a failed or interrupted upload neither leaves a partial file
+	// nor destroys the file it was going to replace.
+	temp := tempPathFor(p)
 	pr, pw := io.Pipe()
 	result := make(chan putResult, 1)
 	go func() {
-		n, err := a.fs.Create(ctx, p, pr)
+		n, err := a.fs.Create(ctx, temp, pr)
 		// Closing the reader with the upload error unblocks a pending Write.
 		_ = pr.CloseWithError(err)
 		result <- putResult{written: n, err: err}
 	}()
-	return &writeFile{name: name, pw: pw, result: result}
+	return &writeFile{name: name, pw: pw, result: result, fs: a.fs, ctx: ctx, temp: temp, target: p}
 }
 
 func (f *writeFile) Write(p []byte) (int, error) {
@@ -382,6 +400,14 @@ func (f *writeFile) Close() error {
 
 	_ = f.pw.Close()
 	res := <-f.result
+	if res.err == nil {
+		if err := f.fs.Rename(f.ctx, f.temp, f.target); err != nil {
+			_ = f.fs.Remove(context.WithoutCancel(f.ctx), f.temp, true)
+			res.err = err
+		}
+	} else {
+		_ = f.fs.Remove(context.WithoutCancel(f.ctx), f.temp, true)
+	}
 
 	f.mu.Lock()
 	f.err = res.err

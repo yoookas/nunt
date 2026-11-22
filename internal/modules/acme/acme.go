@@ -38,6 +38,9 @@ const (
 	// maxRenewDays is the widest renewal window a job may ask for. A window
 	// wider than the lifetime of the certificate would renew it on every check.
 	maxRenewDays = 30
+	// onDemandJobPrefix marks the synthetic job id of a certificate issued for
+	// a route that has no configured certificate job.
+	onDemandJobPrefix = "on-demand-"
 	// checkInterval is how often the renewal loop wakes up.
 	checkInterval = 12 * time.Hour
 	// initialDelay staggers the first check after Start.
@@ -254,8 +257,8 @@ func (a *ACME) checkDue(ctx context.Context, cfg *model.Config) {
 			// Certificates uploaded by hand are never touched.
 			continue
 		}
-		job := findJob(cfg, info.JobID)
-		if job == nil || !job.Enable {
+		job, ok := renewalJob(cfg, info)
+		if !ok {
 			continue
 		}
 		// Re-check the threshold with the job's own renewDays value.
@@ -274,6 +277,27 @@ func (a *ACME) checkDue(ctx context.Context, cfg *model.Config) {
 		a.SetDetail(fmt.Sprintf("renewing certificate for %s", info.Domains[0]))
 		a.runJob(ctx, *job, true)
 	}
+}
+
+// renewalJob returns the job that should renew a stored certificate. A
+// certificate issued on demand (a route asked for it while it had no job) has no
+// configured job, so it is renewed with the defaults it was issued with.
+// Certificates uploaded by hand are never touched.
+func renewalJob(cfg *model.Config, info certs.Info) (*model.CertJob, bool) {
+	if job := findJob(cfg, info.JobID); job != nil {
+		return job, job.Enable
+	}
+	if info.Source != source || !strings.HasPrefix(info.JobID, onDemandJobPrefix) || len(info.Domains) == 0 {
+		return nil, false
+	}
+	return &model.CertJob{
+		ID:        info.JobID,
+		Name:      "on demand: " + info.Domains[0],
+		Enable:    true,
+		Domains:   append([]string{}, info.Domains...),
+		Challenge: defaultChallenge(),
+		RenewDays: defaultRenewDays,
+	}, true
 }
 
 // runJob issues one job synchronously and updates the backoff state. It is a
@@ -416,7 +440,7 @@ func (a *ACME) ensureOnce(ctx context.Context, names []string) error {
 	if !hasJob {
 		// No job covers these domains: build a one shot job from the defaults.
 		job = model.CertJob{
-			ID:        "on-demand-" + domainsKey(names),
+			ID:        onDemandJobPrefix + domainsKey(names),
 			Name:      "on demand: " + names[0],
 			Enable:    true,
 			Domains:   names,

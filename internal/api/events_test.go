@@ -9,7 +9,10 @@ import "testing"
 // disconnects while a log line is fanned out.
 func TestEventHubUnsubscribeLeavesChannelOpen(t *testing.T) {
 	h := newEventHub()
-	ch, cancel := h.subscribe()
+	ch, cancel, ok := h.subscribe()
+	if !ok {
+		t.Fatal("the first subscriber was refused")
+	}
 	cancel()
 
 	select {
@@ -24,5 +27,30 @@ func TestEventHubUnsubscribeLeavesChannelOpen(t *testing.T) {
 	h.Publish("log", map[string]any{"message": "after unsubscribe"})
 	if got := len(h.subs); got != 0 {
 		t.Fatalf("subscriptions after cancel = %d, want 0", got)
+	}
+}
+
+// Event streams hold a goroutine and a buffer each, so the hub refuses the
+// connection that would exceed the bound instead of piling up another one.
+func TestEventHubBoundsSubscribers(t *testing.T) {
+	h := newEventHub()
+	cancels := make([]func(), 0, maxSubscribers)
+	for i := 0; i < maxSubscribers; i++ {
+		_, cancel, ok := h.subscribe()
+		if !ok {
+			t.Fatalf("subscriber %d was refused below the limit", i)
+		}
+		cancels = append(cancels, cancel)
+	}
+	if _, _, ok := h.subscribe(); ok {
+		t.Fatal("the hub accepted a subscriber past the limit")
+	}
+
+	// A stream that goes away frees its slot.
+	cancels[0]()
+	if _, cancel, ok := h.subscribe(); !ok {
+		t.Fatal("the slot was not released when a subscriber left")
+	} else {
+		cancel()
 	}
 }

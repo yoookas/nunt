@@ -135,3 +135,33 @@ func TestReadOnlyBackend(t *testing.T) {
 		t.Fatalf("reads must still work: %v", err)
 	}
 }
+
+// Mkdir creates the whole chain, as the FS contract says ("parents included").
+func TestMkdirCreatesParents(t *testing.T) {
+	ctx := context.Background()
+	fs := newLocal(t)
+
+	if err := fs.Mkdir(ctx, "/a/b/c"); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	entry, err := fs.Stat(ctx, "/a/b/c")
+	if err != nil || !entry.Dir {
+		t.Fatalf("the directory was not created: %+v %v", entry, err)
+	}
+	// Creating it again stays a no-op.
+	if err := fs.Mkdir(ctx, "/a/b/c"); err != nil {
+		t.Fatalf("mkdir again: %v", err)
+	}
+}
+
+// A file occupying the path is not a directory, and Mkdir must say so.
+func TestMkdirOverAFileFails(t *testing.T) {
+	ctx := context.Background()
+	fs := newLocal(t)
+	if _, err := fs.Create(ctx, "/file.txt", strings.NewReader("x")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := fs.Mkdir(ctx, "/file.txt"); err == nil {
+		t.Fatal("Mkdir over a file must fail")
+	}
+}

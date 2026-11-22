@@ -107,11 +107,17 @@ func (s *site) handleUpload(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		// Write to a hidden temporary file first and rename it into place, so a
+		// failed upload never leaves a half written file and never destroys the
+		// file it was going to replace.
 		limited := &maxBytesReader{r: part, remaining: maxUploadSize}
-		written, err := s.fs.Create(r.Context(), target, limited)
+		temp := path.Join(dir, "."+name+".part-"+model.NewID())
+		written, err := s.fs.Create(r.Context(), temp, limited)
+		if err == nil {
+			err = s.fs.Rename(r.Context(), temp, target)
+		}
 		if err != nil {
-			// A failed upload must not leave a half written file behind.
-			_ = s.fs.Remove(context.WithoutCancel(r.Context()), target, true)
+			_ = s.fs.Remove(context.WithoutCancel(r.Context()), temp, true)
 			res := uploadResult{Name: name, Error: "写入失败"}
 			switch {
 			case errors.Is(err, errTooLarge):

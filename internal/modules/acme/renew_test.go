@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/crypto/acme"
 
+	"github.com/nunt/nunt/internal/certs"
 	"github.com/nunt/nunt/internal/model"
 )
 
@@ -78,5 +79,38 @@ func TestALPNChallengeConfigAnswersOnlyActiveChallenges(t *testing.T) {
 	a.alpnCerts.Delete("a.example.com")
 	if _, ok := a.ALPNChallengeConfig(hello); ok {
 		t.Fatal("a finished challenge was still offered")
+	}
+}
+
+// A certificate issued on demand has no configured job, but it must still be
+// renewed: its synthetic job id is recognised and renewed with the defaults it
+// was issued with. Certificates uploaded by hand stay untouched.
+func TestRenewalJobCoversOnDemandCertificates(t *testing.T) {
+	cfg := &model.Config{}
+	info := certs.Info{
+		Source:  "acme",
+		JobID:   onDemandJobPrefix + "example.com",
+		Domains: []string{"example.com", "www.example.com"},
+	}
+	job, ok := renewalJob(cfg, info)
+	if !ok {
+		t.Fatal("an on demand certificate is not renewed")
+	}
+	if job.ID != info.JobID || job.Challenge == "" || len(job.Domains) != 2 {
+		t.Fatalf("synthetic job = %+v", job)
+	}
+
+	if _, ok := renewalJob(cfg, certs.Info{Source: "manual"}); ok {
+		t.Fatal("a certificate uploaded by hand must not be renewed")
+	}
+
+	cfg.ACME.Jobs = []model.CertJob{{ID: "job-1", Enable: false, Domains: []string{"a.example.com"}}}
+	if _, ok := renewalJob(cfg, certs.Info{Source: "acme", JobID: "job-1"}); ok {
+		t.Fatal("a disabled job must not be renewed")
+	}
+	cfg.ACME.Jobs[0].Enable = true
+	job, ok = renewalJob(cfg, certs.Info{Source: "acme", JobID: "job-1"})
+	if !ok || job.ID != "job-1" {
+		t.Fatalf("configured job = %+v, %v", job, ok)
 	}
 }

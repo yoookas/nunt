@@ -258,15 +258,20 @@ func (l *Local) Mkdir(_ context.Context, p string) error {
 	if rel == "." {
 		return nil
 	}
-	if err := l.root.Mkdir(rel, 0o750); err != nil {
-		if errors.Is(err, fs.ErrExist) {
-			return nil
-		}
-		// create parents one by one
-		if err := l.mkdirParents(rel); err != nil {
-			return err
+	if err := l.root.Mkdir(rel, 0o750); err == nil {
+		return nil
+	} else if errors.Is(err, fs.ErrExist) {
+		if info, statErr := l.root.Stat(rel); statErr == nil && !info.IsDir() {
+			return wrapErr(err)
 		}
 		return nil
+	}
+	// The parent may be missing: create the chain and retry the leaf.
+	if err := l.mkdirParents(rel); err != nil {
+		return err
+	}
+	if err := l.root.Mkdir(rel, 0o750); err != nil && !errors.Is(err, fs.ErrExist) {
+		return wrapErr(err)
 	}
 	return nil
 }

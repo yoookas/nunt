@@ -871,3 +871,46 @@ func TestSharePageAPIRoutesResolve(t *testing.T) {
 		}
 	}
 }
+
+// A failed upload must not destroy the file it was going to replace: the bytes
+// go to a hidden temporary file and are renamed only after a complete write.
+func TestUploadFailureKeepsTheExistingFile(t *testing.T) {
+	root := t.TempDir()
+	seedFile(t, root, "keep.txt", "original")
+	deps := newTestDeps(t)
+	h := newTestSite(t, deps, root, nil)
+
+	// A multipart body whose file part is truncated: reading it fails halfway.
+	body := strings.Join([]string{
+		"--BOUNDARY",
+		`Content-Disposition: form-data; name="file"; filename="keep.txt"`,
+		"Content-Type: text/plain",
+		"",
+		"partial data",
+	}, "\r\n") // no closing boundary, so the part ends with an error
+
+	req := httptest.NewRequest(http.MethodPost, "/files/_api/upload?path=/&confirm=1", strings.NewReader(body))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=BOUNDARY")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a truncated upload", rec.Code)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "keep.txt"))
+	if err != nil {
+		t.Fatalf("read the existing file: %v", err)
+	}
+	if string(got) != "original" {
+		t.Fatalf("the failed upload replaced the file: %q", got)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".part-") {
+			t.Fatalf("temporary upload file left behind: %s", e.Name())
+		}
+	}
+}
