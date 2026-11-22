@@ -29,7 +29,7 @@ import (
 
 // Module tuning constants.
 const (
-	// moduleName is the module id used by the API and the task module.
+	// moduleName is the module id used by the API and the module registry.
 	moduleName = "acme"
 	// moduleTitle is the short human readable name.
 	moduleTitle = "Certificates"

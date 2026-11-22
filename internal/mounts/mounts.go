@@ -1,5 +1,5 @@
 // Package mounts turns the configured storage backends into vfs file systems
-// that the static server, the file browser and the WebDAV server can share.
+// that the static server and the WebDAV mount backend can share.
 package mounts
 
 import (

@@ -1,6 +1,6 @@
 // Command nunt is a self hosted edge service: reverse proxy, redirects,
-// static hosting, port forwarding, DDNS, ACME certificates, WebDAV, a file
-// browser and a Coraza based WAF behind one small web interface.
+// static hosting, port forwarding, DDNS, ACME certificates, IP filtering and a
+// Coraza based WAF behind one small web interface.
 package main
 
 import (

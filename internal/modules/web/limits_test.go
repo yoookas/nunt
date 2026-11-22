@@ -204,6 +204,7 @@ func TestModuleProxyRateLimit(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("enable the trusted proxy: %v", err)
 	}
+	w.Reload(w.deps.Cfg.Snapshot())
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		t.Fatal(err)

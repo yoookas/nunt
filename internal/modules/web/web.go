@@ -1,6 +1,6 @@
 // Package web implements the web service module: a shared HTTP/HTTPS front
 // end that routes requests by listen address, host and path to reverse proxy,
-// redirect, static file, file browser and WebDAV rules.
+// redirect and static file rules.
 //
 // The module owns every listener, applies the access control chain of a rule
 // (IP/User-Agent filter, basic authentication, WAF) and keeps a bounded access
@@ -179,10 +179,9 @@ func New(deps *module.Deps) *Web {
 	}
 	w.Init(deps, "web", "Web service")
 	w.cfg = cfg
-	// Reload is also called by the module registry and by the REST API; the
-	// subscription makes sure a configuration change applied elsewhere is
-	// picked up even when no explicit reload happens.
-	deps.Cfg.Subscribe(func(next *model.Config) { w.Reload(next) })
+	// Every configuration change is followed by exactly one Reload: the module
+	// API calls it directly, and the settings/import paths go through
+	// app.Reload. Subscribing here as well would rebuild every listener twice.
 	return w
 }
 

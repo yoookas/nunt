@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -34,7 +33,6 @@ type rule struct {
 	priority int
 	domains  []string
 	spec     *model.WebRule
-	ipNets   []*net.IPNet
 	filter   *ipfilter.Filter
 	tls      ruleTLS
 	// siteKey fingerprints the rule definition so an unchanged rule keeps its
@@ -119,11 +117,11 @@ func compileRule(r model.WebRule, index int) (*rule, error) {
 			out.limiter = newRateLimiter(p.RateLimitPerSec)
 		}
 	}
-	nets, err := netutil.ParseIPList(r.Access.IPs)
+	filter, err := ipfilter.Compile(r.Access, nil)
 	if err != nil {
 		return nil, err
 	}
-	out.ipNets = nets
+	out.filter = filter
 	if r.BasicAuth != nil && r.BasicAuth.Enable && len(r.BasicAuth.Users) == 0 {
 		return nil, errors.New("basic authentication is enabled without users")
 	}

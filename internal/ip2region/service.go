@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -248,11 +247,4 @@ func NormalizeProvince(value string) string {
 // after normalisation.
 func KnownProvince(value string) bool {
 	return provinceSet[NormalizeProvince(value)]
-}
-
-// SortedProvinces returns the list for a stable JSON response.
-func SortedProvinces() []string {
-	out := Provinces()
-	sort.Strings(out)
-	return out
 }

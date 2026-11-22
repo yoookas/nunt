@@ -92,7 +92,7 @@ type APIToken struct {
 }
 
 // ---------------------------------------------------------------------------
-// Web service (reverse proxy, redirect, static, file browser, webdav)
+// Web service (reverse proxy, redirect, static)
 // ---------------------------------------------------------------------------
 
 // WebConfig is the web service module configuration.
@@ -365,10 +365,6 @@ type WAFConfig struct {
 	BodyLimitKB       int      `json:"bodyLimitKb,omitempty"`
 	LogOnly           bool     `json:"logOnly,omitempty"`
 }
-
-// ---------------------------------------------------------------------------
-// Scheduled tasks & notifications
-// ---------------------------------------------------------------------------
 
 // NewID returns a short random identifier.
 func NewID() string {

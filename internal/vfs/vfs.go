@@ -1,5 +1,5 @@
 // Package vfs is the small file system abstraction shared by the static file
-// server, the file browser and the WebDAV server.
+// server and the storage mount backends.
 //
 // Every implementation must reject path traversal and must never escape its
 // configured root, which is why the local backend is built on os.Root.

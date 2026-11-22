@@ -27,12 +27,7 @@ func (w *Web) accessHandler(r *rule, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		trustProxy := w.trustProxy(w.cfg)
 		ip := netutil.ClientIP(req, trustProxy)
-		allowed, reason := true, ""
-		if r.filter != nil {
-			allowed, reason = r.filter.Allowed(ip)
-		} else {
-			allowed = netutil.IPAllowed(r.spec.Access.Mode, r.ipNets, ip)
-		}
+		allowed, reason := r.filter.Allowed(ip)
 		if !allowed {
 			w.logger().Warn("web: client rejected by ip filter", "rule", r.name, "mode", r.spec.Access.Mode, "ip", ipString(ip), "reason", reason)
 			http.Error(rw, "forbidden", http.StatusForbidden)
