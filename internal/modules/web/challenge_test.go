@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
 )
 
@@ -94,7 +95,12 @@ func TestTLSListenerAnswersALPNChallenge(t *testing.T) {
 		t.Fatalf("register the acme stand in: %v", err)
 	}
 	w := New(deps)
-	cfg := w.tlsSetup(newMatcher(":443", nil), &tls.Config{})
+	plan := &listenerPlan{addr: ":443", tls: listenerTLS{mode: model.TLSModeAuto}}
+	cfg := w.tlsSetup(
+		func() *matcher { return newMatcher(":443", nil, plan.tls) },
+		func() *listenerPlan { return plan },
+		&tls.Config{},
+	)
 
 	got, err := cfg.GetConfigForClient(&tls.ClientHelloInfo{
 		ServerName:      "a.example.com",

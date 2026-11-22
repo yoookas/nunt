@@ -67,10 +67,10 @@ func TestH2CClientIsAccepted(t *testing.T) {
 
 	addr := freeAddr(t)
 	rule := mkRule(t, "h2c-in", "h2c.example.com", "/", 0, model.WebTypeProxy)
-	rule.Listen = []string{addr}
 	rule.Proxy = &model.ProxyTarget{Targets: []string{upstream.URL}}
 
-	w := New(testDeps(t, testConfigStore(t, rule)))
+	store := testConfigStoreWithListener(t, testListener("l1", []string{addr}, model.TLSModeOff), rule)
+	w := New(testDeps(t, store))
 	if err := w.Start(context.Background()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -113,10 +113,10 @@ func TestH2CUpstream(t *testing.T) {
 
 	addr := freeAddr(t)
 	rule := mkRule(t, "h2c-out", "grpc.example.com", "/", 0, model.WebTypeProxy)
-	rule.Listen = []string{addr}
 	rule.Proxy = &model.ProxyTarget{Targets: []string{upstream.URL}, H2C: true}
 
-	w := New(testDeps(t, testConfigStore(t, rule)))
+	store := testConfigStoreWithListener(t, testListener("l1", []string{addr}, model.TLSModeOff), rule)
+	w := New(testDeps(t, store))
 	if err := w.Start(context.Background()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -153,11 +153,11 @@ func TestGRPCOverTLS(t *testing.T) {
 
 	addr := freeAddr(t)
 	rule := mkRule(t, "grpc", "grpc.example.com", "/", 0, model.WebTypeProxy)
-	rule.Listen = []string{addr}
 	rule.Proxy = &model.ProxyTarget{Targets: []string{upstream.URL}, InsecureTLS: true}
-	rule.TLS = model.WebTLS{Mode: model.TLSModeCustom, CertID: "grpc.example.com"}
 
-	store := testConfigStore(t, rule)
+	listener := testListener("l1", []string{addr}, model.TLSModeCustom)
+	listener.TLS.CertID = "grpc.example.com"
+	store := testConfigStoreWithListener(t, listener, rule)
 	deps := testDeps(t, store)
 	certPEM, keyPEM := selfSignedPair(t, "grpc.example.com")
 	if _, err := deps.Certs.Add([]string{"grpc.example.com"}, certPEM, keyPEM, "upload", "", "", false); err != nil {

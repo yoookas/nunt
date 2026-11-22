@@ -55,11 +55,10 @@ func TestWebSocketUpgradeIsProxied(t *testing.T) {
 
 	addr := freeAddr(t)
 	rule := mkRule(t, "ws", "ws.example.com", "/", 0, model.WebTypeProxy)
-	rule.Listen = []string{addr}
 	rule.Proxy = &model.ProxyTarget{Targets: []string{upstream.URL}, Balance: "roundrobin"}
 	rule.WAF = true
 
-	store := testConfigStore(t, rule)
+	store := testConfigStoreWithListener(t, testListener("l1", []string{addr}, model.TLSModeOff), rule)
 	box, err := secret.Open(filepath.Join(filepath.Dir(store.Path()), "secret.key"))
 	if err != nil {
 		t.Fatal(err)

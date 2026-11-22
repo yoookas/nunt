@@ -114,31 +114,40 @@ func betterRule(a *rule, b *rule) bool {
 type matcher struct {
 	addr  string
 	rules []*rule
-	// tlsRules is the subset of rules that terminate TLS on this address.
-	tlsRules []*rule
-	// tlsDomains preserves the configuration order and is used to request
-	// certificates from the ACME module.
+	tls   listenerTLS
+	// hosts maps literal domains of TLS routes to their rule.
+	hosts map[string]*rule
+	// wildcards holds the routes with a "*.domain" pattern.
+	wildcards []*rule
+	// tlsDomains is the certificate domain list of an automatic TLS listener.
 	tlsDomains []string
 }
 
-func newMatcher(addr string, rules []*rule) *matcher {
-	m := &matcher{addr: addr, rules: rules}
+func newMatcher(addr string, rules []*rule, tls listenerTLS) *matcher {
+	m := &matcher{addr: addr, rules: rules, tls: tls, hosts: map[string]*rule{}}
+	if tls.mode != model.TLSModeAuto {
+		return m
+	}
 	seen := map[string]bool{}
+	wildcardSeen := map[*rule]bool{}
 	for _, r := range rules {
-		if r.tls.mode != model.TLSModeAuto && r.tls.mode != model.TLSModeCustom {
-			continue
-		}
-		m.tlsRules = append(m.tlsRules, r)
-		if r.tls.mode != model.TLSModeAuto {
-			continue
-		}
-		for _, d := range r.domains {
-			d = netutil.HostOnly(d)
-			if d == "" || d == "*" || strings.HasPrefix(d, "~") || seen[d] {
+		for _, raw := range r.domains {
+			d := netutil.HostOnly(raw)
+			if d == "" || d == "*" || strings.HasPrefix(d, "~") {
 				continue
 			}
-			seen[d] = true
-			m.tlsDomains = append(m.tlsDomains, d)
+			if strings.HasPrefix(d, "*.") {
+				if !wildcardSeen[r] {
+					wildcardSeen[r] = true
+					m.wildcards = append(m.wildcards, r)
+				}
+			} else if _, ok := m.hosts[d]; !ok {
+				m.hosts[d] = r
+			}
+			if !seen[d] {
+				seen[d] = true
+				m.tlsDomains = append(m.tlsDomains, d)
+			}
 		}
 	}
 	return m
@@ -163,48 +172,6 @@ func (m *matcher) Match(host, reqPath string) *rule {
 		}
 	}
 	return best
-}
-
-// hosts returns every literal host covered by the rules of this listener. It
-// is used to decide which certificate a TLS handshake should present.
-func (m *matcher) hosts() map[string]*rule {
-	out := map[string]*rule{}
-	if m == nil {
-		return out
-	}
-	for _, r := range m.rules {
-		if r.tls.mode == model.TLSModeOff {
-			continue
-		}
-		for _, d := range r.domains {
-			d = netutil.HostOnly(d)
-			if d == "" || d == "*" || strings.HasPrefix(d, "~") || strings.Contains(d, "*") {
-				continue
-			}
-			if _, ok := out[d]; !ok {
-				out[d] = r
-			}
-		}
-	}
-	return out
-}
-
-// wildcardHosts returns the wildcard patterns of the TLS rules mapped to the
-// rules that declared them.
-func (m *matcher) wildcardHosts() []*rule {
-	var out []*rule
-	if m == nil {
-		return out
-	}
-	for _, r := range m.tlsRules {
-		for _, d := range r.domains {
-			if strings.HasPrefix(strings.TrimSpace(d), "*.") {
-				out = append(out, r)
-				break
-			}
-		}
-	}
-	return out
 }
 
 // wildcardMatches reports whether host matches a "*.example.com" pattern.

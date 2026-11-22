@@ -33,6 +33,12 @@ func TestConcurrentUpdatesDoNotLoseChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
+	if err := store.Update(func(c *model.Config) error {
+		c.Web.Listeners = []model.WebListener{{ID: "l1", Name: "http", Listen: []string{":18080"}}}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed listener: %v", err)
+	}
 	const n = 8
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
@@ -42,8 +48,9 @@ func TestConcurrentUpdatesDoNotLoseChanges(t *testing.T) {
 			if err := store.Update(func(c *model.Config) error {
 				c.Web.Rules = append(c.Web.Rules, model.WebRule{
 					ID: fmt.Sprintf("r-%d", i), Name: "x", Type: model.WebTypeProxy,
-					Listen: []string{":0"},
-					Proxy:  &model.ProxyTarget{Targets: []string{"http://127.0.0.1:8080"}},
+					ListenerID: "l1",
+					Path:       fmt.Sprintf("/r-%d", i),
+					Proxy:      &model.ProxyTarget{Targets: []string{"http://127.0.0.1:8080"}},
 				})
 				return nil
 			}); err != nil {

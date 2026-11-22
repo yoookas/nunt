@@ -23,7 +23,7 @@ const TYPE_COLOR = {
 }
 
 const TLS_OPTIONS = [
-  { value: 'off', label: '关闭（仅 HTTP）' },
+  { value: 'off', label: '关闭（纯 HTTP）' },
   { value: 'auto', label: '自动证书（ACME）' },
   { value: 'custom', label: '指定证书' },
 ]
@@ -120,8 +120,7 @@ function targetText(rule) {
     const stat = rule.static || {}
     return stat.mountId ? `挂载: ${stat.mountId}` : (stat.root || '-')
   }
-  const files = rule.files || {}
-  return files.mountId ? `挂载: ${files.mountId}${files.root ? ` ${files.root}` : ''}` : (files.root || '-')
+  return '-'
 }
 
 function statusColor(code) {
@@ -135,24 +134,119 @@ function statusColor(code) {
 
 /* ------------------------------------------------------------------ 列表 */
 
+const listeners = ref([])
 const rules = ref([])
 const loading = ref(false)
+const listenerLoading = ref(false)
+const listenerError = ref('')
+const routeError = ref('')
 const busyId = ref('')
+
+// 'all' shows every route; any other value is a listener id.
+const selectedListenerId = ref('all')
 const typeFilter = ref('all')
 const search = ref('')
+
+function listenerOf(listenerId) {
+  return listeners.value.find((item) => item.id === listenerId) || null
+}
+
+function listenerName(listenerId) {
+  const listener = listenerOf(listenerId)
+  return listener ? (listener.name || listener.id) : (listenerId || '未绑定')
+}
+
+function listenerRouteCount(listener) {
+  const count = Number(listener?.routeCount)
+  if (Number.isFinite(count)) return count
+  return rules.value.filter((rule) => rule.listenerId === listener?.id).length
+}
+
+function tlsModeOf(listener) {
+  return listener?.tls?.mode || 'off'
+}
+
+function tlsColor(mode) {
+  if (mode === 'auto') return 'green'
+  if (mode === 'custom') return 'arcoblue'
+  return 'gray'
+}
+
+function ruleTlsMode(rule) {
+  return tlsModeOf(listenerOf(rule?.listenerId))
+}
+
+function certOf(certId) {
+  if (!certId) return null
+  return certificates.value.find((cert) => cert.id === certId) || null
+}
+
+function certDomainsText(certId) {
+  if (!certId) return '未选择证书'
+  const cert = certOf(certId)
+  if (!cert) return `证书 ${certId}（未找到）`
+  const domains = Array.isArray(cert.domains) ? cert.domains : []
+  return domains.length ? domains.join(', ') : cert.id
+}
+
+function certTooltip(certId) {
+  const cert = certOf(certId)
+  if (!cert) return certId ? `证书 ${certId} 不在证书列表中` : '没有选择证书'
+  const parts = [`到期 ${fmtTime(cert.notAfter)}`]
+  if (cert.issuer) parts.push(`签发者 ${cert.issuer}`)
+  if (cert.expired) parts.push('已过期')
+  return parts.join(' · ')
+}
+
+const listenerColumns = [
+  { title: '名称', dataIndex: 'name', width: 190, slotName: 'name' },
+  { title: '监听地址', dataIndex: 'listen', width: 230, slotName: 'listen' },
+  { title: 'TLS', dataIndex: 'tls', width: 230, slotName: 'tls' },
+  { title: 'HSTS', dataIndex: 'hsts', width: 90, slotName: 'hsts' },
+  { title: '路由数', dataIndex: 'routeCount', width: 90, slotName: 'routeCount' },
+  { title: '备注', dataIndex: 'remark', ellipsis: true, tooltip: true, slotName: 'remark' },
+  { title: '操作', width: 230, fixed: 'right', slotName: 'actions' },
+]
+
+const routeColumns = computed(() => {
+  const columns = []
+  if (selectedListenerId.value === 'all') {
+    columns.push({ title: '监听器', dataIndex: 'listenerId', width: 170, slotName: 'listener' })
+  }
+  columns.push(
+    { title: '域名', dataIndex: 'domains', width: 190, slotName: 'domains' },
+    { title: '路径', dataIndex: 'path', width: 150, slotName: 'path' },
+    { title: '类型', dataIndex: 'type', width: 110, slotName: 'type' },
+    { title: '目标摘要', dataIndex: 'target', ellipsis: true, tooltip: true, slotName: 'target' },
+    { title: 'TLS', dataIndex: 'tls', width: 110, slotName: 'tls' },
+    { title: 'WAF', dataIndex: 'waf', width: 90, slotName: 'waf' },
+    { title: '状态', dataIndex: 'enable', width: 180, slotName: 'status' },
+    { title: '请求数', dataIndex: 'requests', width: 100, slotName: 'requests' },
+    { title: '操作', width: 210, fixed: 'right', slotName: 'actions' },
+  )
+  return columns
+})
 
 const filteredRules = computed(() => {
   const keyword = search.value.trim().toLowerCase()
   return rules.value.filter((rule) => {
+    if (selectedListenerId.value !== 'all' && rule.listenerId !== selectedListenerId.value) return false
     if (typeFilter.value !== 'all' && rule.type !== typeFilter.value) return false
     if (!keyword) return true
+    const proxy = rule.proxy || {}
+    const redirect = rule.redirect || {}
+    const stat = rule.static || {}
     const hay = [
       rule.name,
       rule.id,
       rule.path,
       rule.remark,
-      ...(Array.isArray(rule.listen) ? rule.listen : []),
+      listenerName(rule.listenerId),
       ...(Array.isArray(rule.domains) ? rule.domains : []),
+      ...(Array.isArray(proxy.targets) ? proxy.targets : []),
+      redirect.to,
+      stat.mountId,
+      stat.root,
     ]
       .filter(Boolean)
       .join(' ')
@@ -161,30 +255,58 @@ const filteredRules = computed(() => {
   })
 })
 
-const columns = [
-  { title: '名称', dataIndex: 'name', width: 200, slotName: 'name' },
-  { title: '类型', dataIndex: 'type', width: 110, slotName: 'type' },
-  { title: '监听', dataIndex: 'listen', width: 160, slotName: 'listen' },
-  { title: '域名', dataIndex: 'domains', width: 180, slotName: 'domains' },
-  { title: '目标', dataIndex: 'target', ellipsis: true, tooltip: true, slotName: 'target' },
-  { title: 'TLS', dataIndex: 'tls', width: 105, slotName: 'tls' },
-  { title: 'WAF', dataIndex: 'waf', width: 90, slotName: 'waf' },
-  { title: '状态', dataIndex: 'enable', width: 180, slotName: 'status' },
-  { title: '请求数', dataIndex: 'requests', width: 100, slotName: 'requests' },
-  { title: '操作', width: 180, fixed: 'right', slotName: 'actions' },
-]
+const routeEmptyText = computed(() => {
+  if (!listeners.value.length) return '还没有监听器，请先新建监听器'
+  if (!rules.value.length) return '还没有 Web 路由，点击右上角新建'
+  if (!filteredRules.value.length) {
+    return selectedListenerId.value === 'all' ? '没有匹配的路由' : '该监听器下没有匹配的路由'
+  }
+  return '暂无数据'
+})
 
-async function load() {
+async function loadListeners() {
+  listenerLoading.value = true
+  try {
+    const data = await api.get('/api/v1/web/listeners')
+    listeners.value = Array.isArray(data?.items) ? data.items : []
+    if (selectedListenerId.value !== 'all' && !listeners.value.some((item) => item.id === selectedListenerId.value)) {
+      selectedListenerId.value = 'all'
+    }
+    listenerError.value = ''
+  } catch (err) {
+    listenerError.value = errorText(err)
+    Message.error(errorText(err))
+  } finally {
+    listenerLoading.value = false
+  }
+}
+
+async function loadRules() {
   loading.value = true
   try {
     const data = await api.get('/api/v1/web/rules')
     rules.value = Array.isArray(data?.items) ? data.items : []
+    routeError.value = ''
   } catch (err) {
-    rules.value = []
+    routeError.value = errorText(err)
     Message.error(errorText(err))
   } finally {
     loading.value = false
   }
+}
+
+async function refreshAll() {
+  await Promise.all([loadListeners(), loadRules()])
+}
+
+async function selectListener(listener) {
+  if (!listener?.id) return
+  selectedListenerId.value = listener.id
+  if (!rules.value.length) await loadRules()
+}
+
+function listenerRowClass(record) {
+  return selectedListenerId.value === record.id ? 'listener-row-active' : ''
 }
 
 async function onToggle(rule, value) {
@@ -195,7 +317,7 @@ async function onToggle(rule, value) {
   try {
     const data = await api.post(`/api/v1/web/rules/${encodeURIComponent(rule.id)}/toggle`)
     Message.success(data?.enable ? '已启用' : '已停用')
-    await load()
+    await loadRules()
   } catch (err) {
     rule.enable = previous
     Message.error(errorText(err))
@@ -204,10 +326,10 @@ async function onToggle(rule, value) {
   }
 }
 
-function confirmDelete(rule) {
+function confirmDeleteRule(rule) {
   Modal.confirm({
-    title: '删除 Web 规则',
-    content: `确定删除规则「${rule.name || rule.id}」吗？该操作不可撤销。`,
+    title: '删除 Web 路由',
+    content: `确定删除路由「${rule.name || rule.id}」吗？该操作不可撤销。`,
     okText: '删除',
     cancelText: '取消',
     okButtonProps: { status: 'danger' },
@@ -215,8 +337,30 @@ function confirmDelete(rule) {
       try {
         await api.del(`/api/v1/web/rules/${encodeURIComponent(rule.id)}`)
         Message.success('已删除')
-        await load()
+        await Promise.all([loadListeners(), loadRules()])
       } catch (err) {
+        Message.error(errorText(err))
+      }
+    },
+  })
+}
+
+function confirmDeleteListener(listener) {
+  Modal.confirm({
+    title: '删除监听器',
+    content: `确定删除监听器「${listener.name || listener.id}」吗？该操作不可撤销。如果该监听器下还有路由，后端会拒绝删除并返回原因。`,
+    okText: '删除',
+    cancelText: '取消',
+    okButtonProps: { status: 'danger' },
+    onOk: async () => {
+      try {
+        await api.del(`/api/v1/web/listeners/${encodeURIComponent(listener.id)}`)
+        listenerError.value = ''
+        Message.success('已删除')
+        if (selectedListenerId.value === listener.id) selectedListenerId.value = 'all'
+        await Promise.all([loadListeners(), loadRules()])
+      } catch (err) {
+        listenerError.value = errorText(err)
         Message.error(errorText(err))
       }
     },
@@ -237,9 +381,19 @@ const mountOptions = computed(() => [
 ])
 
 const certOptions = computed(() =>
-  certificates.value.map((cert) => ({
-    value: cert.id,
-    label: `${(cert.domains || []).join(', ') || cert.id}${cert.expired ? '（已过期）' : ''}`,
+  certificates.value.map((cert) => {
+    const domains = (Array.isArray(cert.domains) ? cert.domains : []).join(', ') || cert.id
+    return {
+      value: cert.id,
+      label: `${domains}${cert.expired ? '（已过期）' : ''} · 到期 ${fmtTime(cert.notAfter)}`,
+    }
+  }),
+)
+
+const listenerOptions = computed(() =>
+  listeners.value.map((listener) => ({
+    value: listener.id,
+    label: `${listener.name || listener.id}（${(Array.isArray(listener.listen) ? listener.listen : []).join(', ')}）`,
   })),
 )
 
@@ -259,21 +413,99 @@ async function loadOptions() {
   }
 }
 
-/* ------------------------------------------------------------------ 表单 */
+/* ------------------------------------------------------------------ 监听器表单 */
+
+function blankListenerForm() {
+  return {
+    name: '',
+    listen: [],
+    tlsMode: 'off',
+    tlsCertId: '',
+    tlsHsts: false,
+    remark: '',
+  }
+}
+
+const listenerVisible = ref(false)
+const savingListener = ref(false)
+const editingListenerId = ref('')
+const listenerForm = reactive(blankListenerForm())
+
+function openCreateListener() {
+  editingListenerId.value = ''
+  Object.assign(listenerForm, blankListenerForm())
+  listenerVisible.value = true
+}
+
+function openEditListener(listener) {
+  editingListenerId.value = listener.id
+  const tls = listener.tls || {}
+  Object.assign(listenerForm, blankListenerForm(), {
+    name: listener.name || '',
+    listen: (Array.isArray(listener.listen) ? listener.listen : []).map((item) => String(item)),
+    tlsMode: tls.mode || 'off',
+    tlsCertId: tls.certId || '',
+    tlsHsts: !!tls.hsts,
+    remark: listener.remark || '',
+  })
+  listenerVisible.value = true
+}
+
+async function saveListener() {
+  const listen = (Array.isArray(listenerForm.listen) ? listenerForm.listen : [])
+    .map((item) => String(item ?? '').trim())
+    .filter((item) => item.length > 0)
+  if (!listen.length) {
+    Message.warning('请至少填写一个监听地址，例如 :443')
+    return
+  }
+  const tlsMode = TLS_LABEL[listenerForm.tlsMode] ? listenerForm.tlsMode : 'off'
+  if (tlsMode === 'custom' && !listenerForm.tlsCertId.trim()) {
+    Message.warning('指定证书模式必须选择一个证书')
+    return
+  }
+
+  const payload = {
+    name: listenerForm.name.trim(),
+    listen,
+    tls: {
+      mode: tlsMode,
+      certId: tlsMode === 'custom' ? listenerForm.tlsCertId.trim() : '',
+      hsts: tlsMode !== 'off' && !!listenerForm.tlsHsts,
+    },
+    remark: listenerForm.remark.trim(),
+  }
+
+  savingListener.value = true
+  try {
+    if (editingListenerId.value) {
+      await api.put(`/api/v1/web/listeners/${encodeURIComponent(editingListenerId.value)}`, payload)
+    } else {
+      await api.post('/api/v1/web/listeners', payload)
+    }
+    listenerError.value = ''
+    Message.success('保存成功')
+    listenerVisible.value = false
+    await Promise.all([loadListeners(), loadRules()])
+  } catch (err) {
+    Message.error(errorText(err))
+  } finally {
+    savingListener.value = false
+  }
+}
+
+/* ------------------------------------------------------------------ 路由表单 */
 
 function blankForm() {
   return {
     name: '',
     type: 'proxy',
     enable: true,
-    listen: '',
+    listenerId: '',
     domains: '',
     path: '/',
     priority: 0,
     remark: '',
-    tlsMode: 'off',
-    tlsCertId: '',
-    tlsHsts: false,
     waf: false,
     accessMode: 'off',
     accessIps: '',
@@ -314,6 +546,14 @@ const editingId = ref('')
 const existingAuthNames = ref([])
 const form = reactive(blankForm())
 
+function defaultListenerId() {
+  if (selectedListenerId.value !== 'all' && listenerOf(selectedListenerId.value)) {
+    return selectedListenerId.value
+  }
+  if (listeners.value.length === 1) return listeners.value[0].id
+  return ''
+}
+
 function addAuthUser() {
   form.authUsers.push({ username: '', password: '' })
 }
@@ -322,21 +562,23 @@ function removeAuthUser(index) {
   form.authUsers.splice(index, 1)
 }
 
-function openCreate() {
+function openCreateRoute() {
+  if (!listeners.value.length) {
+    Message.warning('请先新建一个监听器，路由需要绑定监听器')
+    return
+  }
   editingId.value = ''
   existingAuthNames.value = []
-  Object.assign(form, blankForm())
+  Object.assign(form, blankForm(), { listenerId: defaultListenerId() })
   formVisible.value = true
 }
 
-function openEdit(rule) {
-  const tls = rule.tls || {}
+function openEditRule(rule) {
   const access = rule.access || {}
   const auth = rule.basicAuth || {}
   const proxy = rule.proxy || {}
   const redirect = rule.redirect || {}
   const stat = rule.static || {}
-  const files = rule.files || {}
 
   editingId.value = rule.id
   existingAuthNames.value = (Array.isArray(auth.users) ? auth.users : []).map((user) => user.username)
@@ -345,14 +587,11 @@ function openEdit(rule) {
     name: rule.name || '',
     type: rule.type || 'proxy',
     enable: !!rule.enable,
-    listen: (Array.isArray(rule.listen) ? rule.listen : []).join('\n'),
+    listenerId: rule.listenerId || defaultListenerId(),
     domains: (Array.isArray(rule.domains) ? rule.domains : []).join('\n'),
     path: rule.path || '/',
     priority: num(rule.priority, 0),
     remark: rule.remark || '',
-    tlsMode: tls.mode || 'off',
-    tlsCertId: tls.certId || '',
-    tlsHsts: !!tls.hsts,
     waf: !!rule.waf,
     accessMode: access.mode || 'off',
     accessIps: (Array.isArray(access.ips) ? access.ips : []).join('\n'),
@@ -394,38 +633,28 @@ function openEdit(rule) {
 async function saveRule() {
   const name = form.name.trim()
   if (!name) {
-    Message.warning('请填写规则名称')
+    Message.warning('请填写路由名称')
     return
   }
-  const listen = splitList(form.listen)
-  if (!listen.length) {
-    Message.warning('请至少填写一个监听地址，例如 :443')
+  if (!form.listenerId || !listenerOf(form.listenerId)) {
+    Message.warning('请选择所属监听器')
     return
   }
   const domains = splitList(form.domains)
   const type = TYPE_LABEL[form.type] ? form.type : 'proxy'
 
-  if (form.tlsMode === 'custom' && !form.tlsCertId.trim()) {
-    Message.warning('指定证书模式必须选择一个证书')
-    return
-  }
-  if (form.tlsMode === 'auto' && !domains.some((domain) => domain !== '*' && !domain.startsWith('~'))) {
-    Message.warning('自动证书模式至少需要一个具体域名（不能只有通配符）')
-    return
-  }
-
   const proxyTargets = splitList(form.proxyTargets)
   if (type === 'proxy' && !proxyTargets.length) {
-    Message.warning('反向代理规则至少需要一个上游地址')
+    Message.warning('反向代理路由至少需要一个上游地址')
     return
   }
   if (type === 'redirect' && !form.redirectTo.trim()) {
-    Message.warning('重定向规则必须填写目标地址')
+    Message.warning('重定向路由必须填写目标地址')
     return
   }
   if (type === 'static') {
     if (!form.staticMountId.trim() && !form.staticRoot.trim()) {
-      Message.warning('静态托管规则必须填写存储挂载或本地目录')
+      Message.warning('静态托管路由必须填写存储挂载或本地目录')
       return
     }
   }
@@ -459,15 +688,10 @@ async function saveRule() {
     name,
     enable: !!form.enable,
     type,
-    listen,
+    listenerId: form.listenerId,
     domains,
     path: form.path.trim() || '/',
     priority: num(form.priority, 0),
-    tls: {
-      mode: form.tlsMode,
-      certId: form.tlsMode === 'custom' ? form.tlsCertId.trim() : '',
-      hsts: !!form.tlsHsts,
-    },
     waf: !!form.waf,
     access: {
       mode: form.accessMode,
@@ -489,7 +713,6 @@ async function saveRule() {
     proxy: null,
     redirect: null,
     static: null,
-    files: null,
     remark: form.remark.trim(),
   }
 
@@ -535,7 +758,7 @@ async function saveRule() {
     }
     Message.success('保存成功')
     formVisible.value = false
-    await load()
+    await Promise.all([loadListeners(), loadRules()])
   } catch (err) {
     Message.error(errorText(err))
   } finally {
@@ -610,7 +833,7 @@ watch(logVisible, (visible) => {
 onBeforeUnmount(stopLogTimer)
 
 onMounted(() => {
-  load()
+  refreshAll()
   loadOptions()
 })
 </script>
@@ -620,151 +843,312 @@ onMounted(() => {
     <div class="page-header">
       <div>
         <h2>Web 服务</h2>
-        <div class="sub">
-          管理反向代理、重定向、静态托管、文件管理与 WebDAV 规则，共 {{ rules.length }} 条
-        </div>
+        <div class="sub">监听器负责端口与 TLS，路由按域名/路径选择上游</div>
       </div>
       <div class="spacer" />
-      <a-button :loading="loading" @click="load">刷新</a-button>
-      <a-button type="primary" @click="openCreate">新建规则</a-button>
+      <a-button :loading="loading || listenerLoading" @click="refreshAll">刷新</a-button>
+      <a-button @click="openCreateListener">新建监听器</a-button>
+      <a-button type="primary" @click="openCreateRoute">新建路由</a-button>
     </div>
 
-    <a-card :bordered="false">
-      <div class="toolbar">
-        <a-radio-group v-model="typeFilter" type="button" size="small">
-          <a-radio value="all">全部</a-radio>
-          <a-radio v-for="item in TYPE_OPTIONS" :key="item.value" :value="item.value">
-            {{ item.label }}
-          </a-radio>
-        </a-radio-group>
-        <div class="spacer" />
-        <a-input
-          v-model="search"
-          allow-clear
-          placeholder="搜索名称 / 域名 / 监听 / 路径"
-          style="width: 260px"
-        />
-      </div>
+    <div class="stack">
+      <!-- 监听器 -->
+      <a-card :bordered="false">
+        <template #title>监听器</template>
+        <template #extra>
+          <span class="muted">共 {{ listeners.length }} 个监听器</span>
+        </template>
 
-      <a-table
-        :data="filteredRules"
-        :columns="columns"
-        :loading="loading"
-        :pagination="{ pageSize: 20, showTotal: true, showJumper: true }"
-        :scroll="{ x: 1400 }"
-        row-key="id"
-      >
-        <template #name="{ record }">
-          <div class="cell-title">
-            <span>{{ record.name || record.id }}</span>
+        <div v-if="listenerError" class="error-row">
+          <a-alert type="error" :content="listenerError" closable @close="listenerError = ''" style="flex: 1" />
+          <a-button size="small" @click="loadListeners">重试</a-button>
+        </div>
+
+        <a-table
+          :data="listeners"
+          :columns="listenerColumns"
+          :loading="listenerLoading"
+          :pagination="false"
+          :scroll="{ x: 1160 }"
+          :row-class="listenerRowClass"
+          row-key="id"
+          size="small"
+          @row-click="selectListener"
+        >
+          <template #name="{ record }">
+            <div class="cell-title">
+              <span>{{ record.name || record.id }}</span>
+              <a-tag v-if="selectedListenerId === record.id" size="small" color="arcoblue">当前</a-tag>
+            </div>
+            <div class="cell-sub">{{ record.id }}</div>
+          </template>
+
+          <template #listen="{ record }">
+            <div class="tag-list">
+              <a-tag
+                v-for="item in (record.listen || [])"
+                :key="item"
+                size="small"
+              >{{ item }}</a-tag>
+              <span v-if="!(record.listen || []).length" class="muted">-</span>
+            </div>
+          </template>
+
+          <template #tls="{ record }">
+            <div class="tls-cell">
+              <a-tag size="small" :color="tlsColor(record.tls && record.tls.mode)">
+                {{ TLS_LABEL[record.tls && record.tls.mode] || '关闭' }}
+              </a-tag>
+              <span
+                v-if="record.tls && record.tls.mode === 'custom'"
+                class="cell-sub cert-summary"
+                :title="certTooltip(record.tls.certId)"
+              >
+                {{ certDomainsText(record.tls.certId) }}
+              </span>
+            </div>
+          </template>
+
+          <template #hsts="{ record }">
             <a-tag
-              v-if="record.configError"
+              v-if="record.tls && record.tls.mode !== 'off' && record.tls.hsts"
               size="small"
-              color="red"
-              :title="record.configError"
-            >配置错误</a-tag>
-          </div>
-          <div class="cell-sub">{{ record.path || '/' }}</div>
-        </template>
+              color="green"
+            >开启</a-tag>
+            <span v-else class="muted">{{ record.tls && record.tls.mode === 'off' ? '—' : '关闭' }}</span>
+          </template>
 
-        <template #type="{ record }">
-          <a-tag :color="ruleTypeColor(record.type)" size="small">{{ ruleTypeLabel(record.type) }}</a-tag>
-        </template>
+          <template #routeCount="{ record }">
+            <span class="muted">{{ listenerRouteCount(record) }}</span>
+          </template>
 
-        <template #listen="{ record }">
-          <div class="tag-list">
-            <a-tag
-              v-for="item in (record.listen || []).slice(0, 2)"
-              :key="item"
-              size="small"
-            >{{ item }}</a-tag>
-            <span v-if="(record.listen || []).length > 2" class="muted">
-              +{{ record.listen.length - 2 }}
-            </span>
-            <span v-if="!(record.listen || []).length" class="muted">-</span>
-          </div>
-        </template>
+          <template #remark="{ record }">
+            <span v-if="record.remark">{{ record.remark }}</span>
+            <span v-else class="muted">-</span>
+          </template>
 
-        <template #domains="{ record }">
-          <div class="tag-list">
-            <a-tag
-              v-for="item in (record.domains || []).slice(0, 2)"
-              :key="item"
-              size="small"
-            >{{ item }}</a-tag>
-            <span v-if="(record.domains || []).length > 2" class="muted">
-              +{{ record.domains.length - 2 }}
-            </span>
-            <span v-if="!(record.domains || []).length" class="muted">全部</span>
-          </div>
-        </template>
+          <template #actions="{ record }">
+            <a-space>
+              <a-button size="mini" @click.stop="selectListener(record)">查看路由</a-button>
+              <a-button size="mini" @click.stop="openEditListener(record)">编辑</a-button>
+              <a-button size="mini" status="danger" @click.stop="confirmDeleteListener(record)">删除</a-button>
+            </a-space>
+          </template>
 
-        <template #target="{ record }">
-          <span class="mono cell-sub">{{ targetText(record) }}</span>
-        </template>
-
-        <template #tls="{ record }">
-          <a-tag
-            size="small"
-            :color="(record.tls && record.tls.mode && record.tls.mode !== 'off') ? 'green' : 'gray'"
-          >{{ TLS_LABEL[record.tls && record.tls.mode] || '关闭' }}</a-tag>
-        </template>
-
-        <template #waf="{ record }">
-          <a-tag v-if="record.waf" size="small" color="green">已开启</a-tag>
-          <span v-else class="muted">关闭</span>
-        </template>
-
-        <template #status="{ record }">
-          <div class="state-cell">
-            <a-switch
-              size="small"
-              :model-value="record.enable"
-              :loading="busyId === record.id"
-              @change="(value) => onToggle(record, value)"
-            />
-            <span class="muted">{{ record.enable ? '已启用' : '已停用' }}</span>
-            <a-tag v-if="record.active" size="small" color="green">运行中</a-tag>
-          </div>
-        </template>
-
-        <template #requests="{ record }">
-          <span class="muted">{{ record.requests || 0 }}</span>
-        </template>
-
-        <template #actions="{ record }">
-          <a-space>
-            <a-button size="mini" @click="openLogs(record)">日志</a-button>
-            <a-button size="mini" @click="openEdit(record)">编辑</a-button>
-            <a-button size="mini" status="danger" @click="confirmDelete(record)">删除</a-button>
-          </a-space>
-        </template>
-
-        <template #empty>
-          <a-empty :description="rules.length ? '没有匹配的规则' : '还没有 Web 规则，点击右上角新建'">
-            <template v-if="!rules.length" #default>
-              <div>还没有 Web 规则</div>
-              <a-button type="primary" size="small" style="margin-top: 8px" @click="openCreate">
-                新建规则
+          <template #empty>
+            <a-empty description="还没有监听器">
+              <a-button type="primary" size="small" style="margin-top: 8px" @click="openCreateListener">
+                新建监听器
               </a-button>
-            </template>
-          </a-empty>
-        </template>
-      </a-table>
-    </a-card>
+            </a-empty>
+          </template>
+        </a-table>
+      </a-card>
 
-    <!-- 新建 / 编辑规则 -->
+      <!-- 路由 -->
+      <a-card :bordered="false">
+        <template #title>路由</template>
+        <template #extra>
+          <div class="card-extra">
+            <span class="muted">当前监听器</span>
+            <a-select v-model="selectedListenerId" size="small" style="width: 230px">
+              <a-option value="all">全部监听器</a-option>
+              <a-option v-for="item in listeners" :key="item.id" :value="item.id">
+                {{ item.name || item.id }}
+              </a-option>
+            </a-select>
+          </div>
+        </template>
+
+        <div class="toolbar">
+          <a-select v-model="typeFilter" size="small" style="width: 150px">
+            <a-option value="all">全部类型</a-option>
+            <a-option v-for="item in TYPE_OPTIONS" :key="item.value" :value="item.value">
+              {{ item.label }}
+            </a-option>
+          </a-select>
+          <a-input
+            v-model="search"
+            size="small"
+            style="width: 280px"
+            allow-clear
+            placeholder="搜索域名 / 路径 / 上游"
+          />
+          <div class="spacer" />
+          <span class="muted">共 {{ rules.length }} 条，当前显示 {{ filteredRules.length }} 条</span>
+        </div>
+
+        <div v-if="routeError" class="error-row">
+          <a-alert type="error" :content="`加载路由失败：${routeError}`" style="flex: 1" />
+          <a-button size="small" @click="loadRules">重试</a-button>
+        </div>
+
+        <a-table
+          :data="filteredRules"
+          :columns="routeColumns"
+          :loading="loading"
+          :pagination="{ pageSize: 20, showTotal: true, showJumper: true }"
+          :scroll="{ x: 1500 }"
+          row-key="id"
+        >
+          <template #listener="{ record }">
+            <a-tag size="small">{{ listenerName(record.listenerId) }}</a-tag>
+          </template>
+
+          <template #domains="{ record }">
+            <div class="tag-list">
+              <a-tag
+                v-for="item in (record.domains || []).slice(0, 2)"
+                :key="item"
+                size="small"
+              >{{ item }}</a-tag>
+              <span v-if="(record.domains || []).length > 2" class="muted">
+                +{{ record.domains.length - 2 }}
+              </span>
+              <span v-if="!(record.domains || []).length" class="muted">全部</span>
+            </div>
+          </template>
+
+          <template #path="{ record }">
+            <div class="mono">{{ record.path || '/' }}</div>
+            <div class="cell-sub">{{ record.name || record.id }}</div>
+          </template>
+
+          <template #type="{ record }">
+            <a-tag :color="ruleTypeColor(record.type)" size="small">{{ ruleTypeLabel(record.type) }}</a-tag>
+          </template>
+
+          <template #target="{ record }">
+            <span class="mono cell-sub">{{ targetText(record) }}</span>
+          </template>
+
+          <template #tls="{ record }">
+            <a-tag size="small" :color="tlsColor(ruleTlsMode(record))">
+              {{ TLS_LABEL[ruleTlsMode(record)] || '关闭' }}
+            </a-tag>
+          </template>
+
+          <template #waf="{ record }">
+            <a-tag v-if="record.waf" size="small" color="green">已开启</a-tag>
+            <span v-else class="muted">关闭</span>
+          </template>
+
+          <template #status="{ record }">
+            <div class="state-cell">
+              <a-switch
+                size="small"
+                :model-value="record.enable"
+                :loading="busyId === record.id"
+                @change="(value) => onToggle(record, value)"
+              />
+              <span class="muted">{{ record.enable ? '已启用' : '已停用' }}</span>
+              <a-tag v-if="record.active" size="small" color="green">运行中</a-tag>
+            </div>
+          </template>
+
+          <template #requests="{ record }">
+            <span class="muted">{{ record.requests || 0 }}</span>
+          </template>
+
+          <template #actions="{ record }">
+            <a-space>
+              <a-button size="mini" @click="openEditRule(record)">编辑</a-button>
+              <a-button size="mini" @click="openLogs(record)">日志</a-button>
+              <a-button size="mini" status="danger" @click="confirmDeleteRule(record)">删除</a-button>
+            </a-space>
+          </template>
+
+          <template #empty>
+            <a-empty :description="routeEmptyText">
+              <a-button
+                v-if="listeners.length && !rules.length"
+                type="primary"
+                size="small"
+                style="margin-top: 8px"
+                @click="openCreateRoute"
+              >
+                新建路由
+              </a-button>
+            </a-empty>
+          </template>
+        </a-table>
+      </a-card>
+    </div>
+
+    <!-- 新建 / 编辑监听器 -->
+    <a-modal
+      v-model:visible="listenerVisible"
+      :width="620"
+      :mask-closable="false"
+      unmount-on-close
+      :title="editingListenerId ? '编辑监听器' : '新建监听器'"
+    >
+      <a-form :model="listenerForm" layout="vertical">
+        <div class="form-grid">
+          <a-form-item label="名称">
+            <a-input v-model="listenerForm.name" placeholder="例如 HTTPS 主站" allow-clear />
+            <div class="hint">留空时后端会使用第一个监听地址作为名称</div>
+          </a-form-item>
+          <a-form-item label="备注">
+            <a-input v-model="listenerForm.remark" placeholder="可选" allow-clear />
+          </a-form-item>
+          <a-form-item label="监听地址" required class="span-2">
+            <a-input-tag
+              v-model="listenerForm.listen"
+              allow-clear
+              placeholder="输入后回车，例如 :443、[::]:443"
+            />
+            <div class="hint">每行/每个标签一个地址，支持 :443、0.0.0.0:8080、[::]:443；同一地址不能属于两个监听器。</div>
+          </a-form-item>
+          <a-form-item label="TLS 模式" required>
+            <a-select v-model="listenerForm.tlsMode" :options="TLS_OPTIONS" />
+            <div class="hint">关闭 = 纯 HTTP；自动证书 = 按路由域名自动申请/续期；指定证书 = 该监听器下所有域名共用一张已上传证书。</div>
+          </a-form-item>
+          <a-form-item label="HSTS">
+            <a-switch v-model="listenerForm.tlsHsts" :disabled="listenerForm.tlsMode === 'off'" />
+            <div class="hint">仅 TLS 非关闭时可用，对 TLS 响应附加 Strict-Transport-Security</div>
+          </a-form-item>
+          <a-form-item v-if="listenerForm.tlsMode === 'custom'" label="指定证书" required class="span-2">
+            <a-select
+              v-model="listenerForm.tlsCertId"
+              :options="certOptions"
+              allow-search
+              placeholder="选择已上传的证书"
+            />
+            <div class="hint">证书来自「证书」页面；指定证书模式下，该监听器下的所有域名都使用这张证书。</div>
+          </a-form-item>
+        </div>
+      </a-form>
+
+      <template #footer>
+        <div class="drawer-footer">
+          <a-button @click="listenerVisible = false">取消</a-button>
+          <a-button type="primary" :loading="savingListener" @click="saveListener">保存</a-button>
+        </div>
+      </template>
+    </a-modal>
+
+    <!-- 新建 / 编辑路由 -->
     <a-drawer
       v-model:visible="formVisible"
       :width="760"
       unmount-on-close
-      :title="editingId ? '编辑 Web 规则' : '新建 Web 规则'"
+      :title="editingId ? '编辑 Web 路由' : '新建 Web 路由'"
     >
       <a-form :model="form" layout="vertical">
         <div class="section-title">基本信息</div>
         <div class="form-grid">
           <a-form-item label="名称" required>
             <a-input v-model="form.name" placeholder="例如 博客首页" allow-clear />
+          </a-form-item>
+          <a-form-item label="所属监听器" required>
+            <a-select
+              v-model="form.listenerId"
+              :options="listenerOptions"
+              allow-search
+              placeholder="选择监听器"
+            />
+            <div class="hint">端口与 TLS 由所属监听器统一配置，路由不再单独设置</div>
           </a-form-item>
           <a-form-item label="类型" required>
             <a-select v-model="form.type" :options="TYPE_OPTIONS" />
@@ -777,13 +1161,9 @@ onMounted(() => {
             <a-input-number v-model="form.priority" :min="0" style="width: 100%" />
             <div class="hint">数字越小越优先</div>
           </a-form-item>
-          <a-form-item label="监听地址" required class="span-2">
-            <a-textarea
-              v-model="form.listen"
-              :auto-size="{ minRows: 3, maxRows: 6 }"
-              placeholder="每行一个，例如 :443 或 0.0.0.0:8080"
-            />
-            <div class="hint">每行一个监听地址，支持 :443、0.0.0.0:8080、[::]:443</div>
+          <a-form-item label="启用">
+            <a-switch v-model="form.enable" />
+            <div class="hint">停用后路由保留配置但不再对外服务</div>
           </a-form-item>
           <a-form-item label="域名" class="span-2">
             <a-textarea
@@ -793,41 +1173,8 @@ onMounted(() => {
             />
             <div class="hint">留空表示匹配任意 Host，支持 *.example.com 通配</div>
           </a-form-item>
-          <a-form-item label="启用">
-            <a-switch v-model="form.enable" />
-            <div class="hint">停用后规则保留配置但不再对外服务</div>
-          </a-form-item>
-          <a-form-item label="备注">
+          <a-form-item label="备注" class="span-2">
             <a-input v-model="form.remark" placeholder="可选" allow-clear />
-          </a-form-item>
-        </div>
-
-        <div class="section-title">TLS</div>
-        <div class="form-grid">
-          <a-form-item label="TLS 模式">
-            <a-select v-model="form.tlsMode" :options="TLS_OPTIONS" />
-          </a-form-item>
-          <a-form-item v-if="form.tlsMode === 'custom'" label="证书" required>
-            <a-select
-              v-model="form.tlsCertId"
-              :options="certOptions"
-              allow-create
-              allow-search
-              placeholder="选择或输入证书 ID"
-            />
-            <div class="hint">证书来自「证书」页面，可手动填写证书 ID</div>
-          </a-form-item>
-          <a-form-item label="HSTS">
-            <a-switch v-model="form.tlsHsts" />
-            <div class="hint">对 TLS 请求附加 Strict-Transport-Security</div>
-          </a-form-item>
-        </div>
-
-        <div class="section-title">WAF</div>
-        <div class="form-grid">
-          <a-form-item label="WAF 检查">
-            <a-switch v-model="form.waf" />
-            <div class="hint">关闭后该路由完全不经过 WAF</div>
           </a-form-item>
         </div>
 
@@ -1011,6 +1358,14 @@ onMounted(() => {
             </div>
           </a-form-item>
         </div>
+
+        <div class="section-title">WAF</div>
+        <div class="form-grid">
+          <a-form-item label="WAF 检查">
+            <a-switch v-model="form.waf" />
+            <div class="hint">关闭后该路由完全不经过 WAF</div>
+          </a-form-item>
+        </div>
       </a-form>
 
       <template #footer>
@@ -1127,6 +1482,34 @@ onMounted(() => {
   white-space: nowrap;
 }
 
+.tls-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cert-summary {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-extra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.error-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
 .auth-list {
   display: flex;
   flex-direction: column;
@@ -1141,16 +1524,6 @@ onMounted(() => {
   gap: 8px;
 }
 
-.notice {
-  padding: 8px 12px;
-  border: 1px solid var(--color-border-2);
-  border-radius: var(--border-radius-small, 4px);
-  background: var(--color-fill-2);
-  color: var(--color-text-2);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
 .drawer-footer {
   display: flex;
   justify-content: flex-end;
@@ -1162,5 +1535,9 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+}
+
+:deep(.listener-row-active) > td {
+  background: var(--color-fill-2);
 }
 </style>

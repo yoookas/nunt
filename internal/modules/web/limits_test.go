@@ -29,9 +29,9 @@ import (
 
 // newTestModule starts the web module on the loopback interface with the given
 // rules and stops it when the test ends.
-func newTestModule(t *testing.T, rules ...model.WebRule) *Web {
+func newTestModule(t *testing.T, listener model.WebListener, rules ...model.WebRule) *Web {
 	t.Helper()
-	store := testConfigStore(t, rules...)
+	store := testConfigStoreWithListener(t, listener, rules...)
 	box, err := secret.Open(filepath.Join(filepath.Dir(store.Path()), "secret.key"))
 	if err != nil {
 		t.Fatalf("secret: %v", err)
@@ -157,9 +157,8 @@ func TestModuleProxyRateLimit(t *testing.T) {
 
 	addr := freeAddr(t)
 	rule := mkRule(t, "limited", "example.com", "/", 0, model.WebTypeProxy)
-	rule.Listen = []string{addr}
 	rule.Proxy = &model.ProxyTarget{Targets: []string{backend.URL}, RateLimitPerSec: 2}
-	w := newTestModule(t, rule)
+	w := newTestModule(t, testListener("l1", []string{addr}, model.TLSModeOff), rule)
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	url := "http://127.0.0.1" + addr + "/"
@@ -239,9 +238,8 @@ func TestModuleProxyBodyLimit(t *testing.T) {
 
 	addr := freeAddr(t)
 	rule := mkRule(t, "body", "example.com", "/", 0, model.WebTypeProxy)
-	rule.Listen = []string{addr}
 	rule.Proxy = &model.ProxyTarget{Targets: []string{backend.URL}, MaxBodyBytes: 64}
-	w := newTestModule(t, rule)
+	w := newTestModule(t, testListener("l1", []string{addr}, model.TLSModeOff), rule)
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	url := "http://127.0.0.1" + addr + "/"
@@ -303,10 +301,13 @@ func TestToggleReportsValidationFailure(t *testing.T) {
 	seed := model.Config{
 		Version: config.CurrentVersion,
 		Users:   []model.User{{ID: "u1", Username: "admin", Role: "admin", Enabled: true}},
-		Web: model.WebConfig{Rules: []model.WebRule{{
-			ID: "rule-broken", Name: "broken", Enable: false, Type: model.WebTypeStatic,
-			Listen: []string{":8080"}, Path: "/broken",
-		}}},
+		Web: model.WebConfig{
+			Listeners: []model.WebListener{{ID: "l1", Name: "http", Listen: []string{":8080"}}},
+			Rules: []model.WebRule{{
+				ID: "rule-broken", Name: "broken", Enable: false, Type: model.WebTypeStatic,
+				ListenerID: "l1", Path: "/broken",
+			}},
+		},
 	}
 	data, err := json.Marshal(seed)
 	if err != nil {

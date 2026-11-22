@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/netutil"
 )
@@ -16,15 +17,14 @@ const acmeTimeout = 3 * time.Minute
 // acmeRetryDelay is the pause between two attempts for the same host set.
 const acmeRetryDelay = 10 * time.Minute
 
-// tlsSetup installs the per rule certificate selection on a TLS listener and
-// reports the rules that need a certificate.
-func (w *Web) tlsSetup(m *matcher, cfg *tls.Config) *tls.Config {
+// tlsSetup installs certificate selection on a TLS listener. The matcher and
+// the plan are looked up per handshake, so adding a domain or changing the
+// pinned certificate takes effect without restarting the socket.
+func (w *Web) tlsSetup(nextMatcher func() *matcher, nextPlan func() *listenerPlan, cfg *tls.Config) *tls.Config {
 	out := cfg.Clone()
-	hosts := m.hosts()
-	wildcards := m.wildcardHosts()
 	previousConfig := out.GetConfigForClient
 	// A tls-alpn-01 handshake carries the acme-tls/1 protocol and must be
-	// answered with the challenge certificate, not with a rule certificate, so
+	// answered with the challenge certificate, not with a route certificate, so
 	// the ACME module gets the first look at every ClientHello.
 	out.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
 		if challenge, ok := w.alpnChallengeConfig(hello); ok {
@@ -35,16 +35,25 @@ func (w *Web) tlsSetup(m *matcher, cfg *tls.Config) *tls.Config {
 		}
 		return nil, nil
 	}
+
 	fallback := out.GetCertificate
 	out.GetCertificate = func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		// The TLS mode of the listener can change without rebinding the socket,
+		// so the decision is made per handshake from the current plan.
+		if plan := nextPlan(); plan != nil && plan.tls.mode == model.TLSModeCustom {
+			return w.customCertificate(plan)
+		}
+		m := nextMatcher()
+		if m == nil {
+			return nil, fmt.Errorf("web: no configuration for this listener")
+		}
 		host := hostOnly(hello.ServerName)
-		if r, ok := hosts[host]; ok {
-			cert, err := w.certificateFor(r)
-			if err == nil && cert != nil {
+		if r, ok := m.hosts[host]; ok {
+			if cert, err := w.certificateFor(r); err == nil && cert != nil {
 				return cert, nil
 			}
 		}
-		for _, r := range wildcards {
+		for _, r := range m.wildcards {
 			if !ruleHasWildcard(r, host) {
 				continue
 			}
@@ -60,6 +69,17 @@ func (w *Web) tlsSetup(m *matcher, cfg *tls.Config) *tls.Config {
 	return out
 }
 
+// customCertificate returns the certificate pinned by the listener.
+func (w *Web) customCertificate(plan *listenerPlan) (*tls.Certificate, error) {
+	if w.deps.Certs == nil {
+		return nil, fmt.Errorf("web: certificate store is unavailable")
+	}
+	if plan == nil || len(plan.tls.certDomains) == 0 {
+		return nil, fmt.Errorf("web: the listener has no certificate")
+	}
+	return w.deps.Certs.GetCertificate(&tls.ClientHelloInfo{ServerName: plan.tls.certDomains[0]})
+}
+
 // certificateFor loads the certificate of one rule from the certificate store.
 func (w *Web) certificateFor(r *rule) (*tls.Certificate, error) {
 	// The certificate store keeps the parsed certificate and swaps it on
@@ -68,7 +88,7 @@ func (w *Web) certificateFor(r *rule) (*tls.Certificate, error) {
 	if w.deps.Certs == nil {
 		return nil, fmt.Errorf("web: certificate store is unavailable")
 	}
-	domains := r.tls.certDomains
+	domains := r.certDomains
 	if len(domains) == 0 {
 		return nil, fmt.Errorf("web: rule %q has no certificate domain", r.name)
 	}
@@ -89,8 +109,22 @@ func ruleHasWildcard(r *rule, host string) bool {
 // ensureCertificates asks the ACME module for the missing certificates of a
 // listener. It never blocks a request: the work happens in the background with
 // its own timeout and failures are only logged.
-func (w *Web) ensureCertificates(m *matcher) {
-	if w.deps.Registry == nil || len(m.tlsDomains) == 0 {
+func (w *Web) ensureCertificates(plan *listenerPlan) {
+	if plan == nil || plan.tls.mode != model.TLSModeAuto || w.deps.Registry == nil {
+		return
+	}
+	seen := map[string]bool{}
+	domains := make([]string, 0, len(plan.rules))
+	for _, r := range plan.rules {
+		for _, d := range r.certDomains {
+			if seen[d] {
+				continue
+			}
+			seen[d] = true
+			domains = append(domains, d)
+		}
+	}
+	if len(domains) == 0 {
 		return
 	}
 	mod, ok := w.deps.Registry.Get("acme")
@@ -102,8 +136,8 @@ func (w *Web) ensureCertificates(m *matcher) {
 		w.logger().Debug("web: the acme module does not provide certificates")
 		return
 	}
-	missing := make([]string, 0, len(m.tlsDomains))
-	for _, d := range m.tlsDomains {
+	missing := make([]string, 0, len(domains))
+	for _, d := range domains {
 		if w.deps.Certs != nil && w.deps.Certs.Has(d) {
 			continue
 		}
@@ -131,33 +165,6 @@ func (w *Web) ensureCertificates(m *matcher) {
 			w.SetError(fmt.Errorf("certificate for %s: %w", domains[0], last))
 		}
 	}(missing)
-}
-
-// scheduleCertificate ensures the certificate of a rule that is created after
-// the listener has been built.
-func (w *Web) scheduleCertificate(r *rule, domains []string) {
-	if len(domains) == 0 || w.deps.Registry == nil {
-		return
-	}
-	mod, ok := w.deps.Registry.Get("acme")
-	if !ok {
-		return
-	}
-	provider, ok := mod.(module.CertProvider)
-	if !ok || provider.HasCertificate(domains) {
-		return
-	}
-	w.wg.Add(1)
-	go func() {
-		defer w.wg.Done()
-		ctx, cancel := context.WithTimeout(w.baseContext(), acmeTimeout)
-		defer cancel()
-		if err := provider.EnsureCertificate(ctx, domains); err != nil {
-			w.logger().Warn("web: cannot obtain a certificate", "domains", domains, "error", err)
-			return
-		}
-		w.logger().Info("web: certificate ready", "domains", domains)
-	}()
 }
 
 // hostOnly normalises a ServerName value.

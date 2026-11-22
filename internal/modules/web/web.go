@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -347,25 +348,19 @@ func (w *Web) apply(ctx context.Context, cfg *model.Config) error {
 		return ctx.Err()
 	}
 
-	compiled, errs := w.compileRules(cfg)
+	compiled, plans, errs := w.compileWeb(cfg)
 	var ruleErr error
 	if len(errs) > 0 {
-		w.logger().Warn("web: some rules were skipped", "count", len(errs), "first", errs[0])
-		ruleErr = fmt.Errorf("%d web rule(s) are invalid, first: %w", len(errs), errs[0])
+		w.logger().Warn("web: some routes were skipped", "count", len(errs), "first", errs[0])
+		ruleErr = fmt.Errorf("%d web route(s) are invalid, first: %w", len(errs), errs[0])
 	}
-	w.resolveCustomCertificates(compiled)
+	w.resolveCustomCertificates(plans)
 
-	groups := groupRules(compiled)
-	wanted := map[string][]*rule{}
-	for addr, rules := range groups {
-		if len(rules) == 0 {
-			continue
+	wanted := map[string]*listenerPlan{}
+	for addr, plan := range plans {
+		if len(plan.rules) > 0 {
+			wanted[addr] = plan
 		}
-		if _, err := netutil.NormalizeListen(addr); err != nil {
-			w.logger().Warn("web: invalid listen address", "addr", addr, "error", err)
-			continue
-		}
-		wanted[addr] = rules
 	}
 
 	w.mu.Lock()
@@ -420,42 +415,39 @@ func (w *Web) apply(ctx context.Context, cfg *model.Config) error {
 	sort.Strings(addrs)
 	var firstErr error
 	for _, addr := range addrs {
-		rules := wanted[addr]
-		needsTLS := false
-		for _, r := range rules {
-			if r.tls.mode != model.TLSModeOff {
-				needsTLS = true
-				break
-			}
-		}
-		m := newMatcher(addr, rules)
-		for _, r := range rules {
+		plan := wanted[addr]
+		tlsOn := plan.tls.mode != model.TLSModeOff
+		for _, r := range plan.rules {
 			if r.site != nil {
 				continue
 			}
 			site, err := w.buildSite(r, cfg)
 			if err != nil {
-				w.logger().Error("web: cannot prepare a rule", "rule", r.name, "error", err)
+				w.logger().Error("web: cannot prepare a route", "route", r.name, "error", err)
 				if firstErr == nil {
-					firstErr = fmt.Errorf("rule %q: %w", r.name, err)
+					firstErr = fmt.Errorf("route %q: %w", r.name, err)
 				}
 				continue
 			}
 			r.site = site
 		}
-		for _, r := range rules {
+		for _, r := range plan.rules {
 			w.mu.Lock()
 			w.storeSite(r)
 			w.mu.Unlock()
 		}
 
+		m := newMatcher(addr, plan.rules, plan.tls)
 		w.mu.Lock()
 		l := w.bindings[addr]
+		oldTLS := w.tlsAddrs[addr]
 		w.mu.Unlock()
 		if l != nil {
 			l.router.setMatcher(m)
-			if needsTLS && !w.tlsAddrs[addr] {
-				// TLS was enabled for an existing socket: restart it.
+			l.router.setPlan(plan)
+			if tlsOn != oldTLS {
+				// The listener switched between plain and TLS: the socket has to
+				// be rebound.
 				l.close()
 				w.mu.Lock()
 				delete(w.bindings, addr)
@@ -463,13 +455,13 @@ func (w *Web) apply(ctx context.Context, cfg *model.Config) error {
 				l = nil
 			} else {
 				w.mu.Lock()
-				w.tlsAddrs[addr] = needsTLS
+				w.tlsAddrs[addr] = tlsOn
 				w.mu.Unlock()
 			}
 		}
 		if l == nil {
 			nl := w.newListener(ctx, addr)
-			if err := nl.start(m, needsTLS); err != nil {
+			if err := nl.start(plan); err != nil {
 				w.logger().Error("web: cannot start listener", "addr", addr, "error", err)
 				if firstErr == nil {
 					firstErr = err
@@ -481,10 +473,10 @@ func (w *Web) apply(ctx context.Context, cfg *model.Config) error {
 			}
 			w.mu.Lock()
 			w.bindings[addr] = nl
-			w.tlsAddrs[addr] = needsTLS
+			w.tlsAddrs[addr] = tlsOn
 			w.mu.Unlock()
 		}
-		w.ensureCertificates(m)
+		w.ensureCertificates(plan)
 	}
 
 	// Release the cached proxies of rules that are gone or whose upstream
@@ -516,7 +508,7 @@ func (w *Web) ensureFallbackLocked(ctx context.Context) *listener {
 		return w.fallback
 	}
 	l := w.newListener(ctx, ":0")
-	m := newMatcher("", nil)
+	m := newMatcher("", nil, listenerTLS{})
 	l.router.setMatcher(m)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -532,8 +524,32 @@ func (w *Web) ensureFallbackLocked(ctx context.Context) *listener {
 	return l
 }
 
-// compileRules turns the enabled rules of a configuration into runtime rules.
-func (w *Web) compileRules(cfg *model.Config) ([]*rule, []error) {
+// compileWeb turns listeners and routes into one plan per listen address.
+func (w *Web) compileWeb(cfg *model.Config) ([]*rule, map[string]*listenerPlan, []error) {
+	plans := map[string]*listenerPlan{}
+	byListener := map[string][]*listenerPlan{}
+	for _, l := range cfg.Web.Listeners {
+		tls := listenerTLS{
+			mode:   normalizeTLSMode(l.TLS.Mode),
+			certID: strings.TrimSpace(l.TLS.CertID),
+			hsts:   l.TLS.HSTS,
+		}
+		seen := map[string]bool{}
+		for _, addr := range l.Listen {
+			norm, err := netutil.NormalizeListen(addr)
+			if err != nil {
+				continue
+			}
+			if seen[norm] {
+				continue
+			}
+			seen[norm] = true
+			p := &listenerPlan{addr: norm, tls: tls}
+			plans[norm] = p
+			byListener[l.ID] = append(byListener[l.ID], p)
+		}
+	}
+
 	compiled := make([]*rule, 0, len(cfg.Web.Rules))
 	var errs []error
 	for i, raw := range cfg.Web.Rules {
@@ -542,18 +558,41 @@ func (w *Web) compileRules(cfg *model.Config) ([]*rule, []error) {
 		}
 		r, err := compileRule(raw, i)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("rule %q: %w", displayRuleName(raw), err))
+			errs = append(errs, fmt.Errorf("route %q: %w", displayRuleName(raw), err))
 			continue
 		}
 		filter, err := ipfilter.Compile(raw.Access, w.deps.Geo)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("rule %q: %w", displayRuleName(raw), err))
+			errs = append(errs, fmt.Errorf("route %q: %w", displayRuleName(raw), err))
 			continue
 		}
 		r.filter = filter
+
+		list := byListener[raw.ListenerID]
+		if len(list) == 0 {
+			errs = append(errs, fmt.Errorf("route %q: listener %q has no usable listen address", displayRuleName(raw), raw.ListenerID))
+			continue
+		}
+		r.listenerID = raw.ListenerID
+		if list[0].tls.mode == model.TLSModeAuto {
+			for _, d := range r.domains {
+				if d == "*" || strings.HasPrefix(d, "~") {
+					continue
+				}
+				r.certDomains = append(r.certDomains, d)
+			}
+			if len(r.certDomains) == 0 {
+				errs = append(errs, fmt.Errorf("route %q: automatic TLS needs at least one concrete domain", displayRuleName(raw)))
+				continue
+			}
+		}
+		r.hsts = list[0].tls.hsts
+		for _, p := range list {
+			p.rules = append(p.rules, r)
+		}
 		compiled = append(compiled, r)
 	}
-	return compiled, errs
+	return compiled, plans, errs
 }
 
 // collectSitesLocked gathers the resources of every live rule. The caller

@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -11,30 +10,23 @@ import (
 
 	"github.com/nunt/nunt/internal/ipfilter"
 	"github.com/nunt/nunt/internal/model"
-	"github.com/nunt/nunt/internal/netutil"
 )
-
-// ruleTLS carries the resolved TLS settings of a rule.
-type ruleTLS struct {
-	mode   string
-	certID string
-	hsts   bool
-	// certDomains is the certificate the rule asks the store for.
-	certDomains []string
-}
 
 // rule is the compiled form of a model.WebRule. Instances are shared between
 // concurrent requests, so they are immutable after construction.
 type rule struct {
-	id       string
-	name     string
-	index    int
-	path     string
-	priority int
-	domains  []string
-	spec     *model.WebRule
-	filter   *ipfilter.Filter
-	tls      ruleTLS
+	id         string
+	name       string
+	index      int
+	path       string
+	priority   int
+	domains    []string
+	spec       *model.WebRule
+	filter     *ipfilter.Filter
+	listenerID string
+	// hsts and certDomains are copied from the owning listener at compile time.
+	hsts        bool
+	certDomains []string
 	// siteKey fingerprints the rule definition so an unchanged rule keeps its
 	// handler (and the storage that handler may have opened) across reloads.
 	siteKey string
@@ -62,19 +54,6 @@ func compileRule(r model.WebRule, index int) (*rule, error) {
 		domains:  normalizeDomains(r.Domains),
 		spec:     &r,
 		siteKey:  siteFingerprint(&r),
-		tls: ruleTLS{
-			mode:   normalizeTLSMode(r.TLS.Mode),
-			certID: strings.TrimSpace(r.TLS.CertID),
-			hsts:   r.TLS.HSTS,
-		},
-	}
-	if len(r.Listen) == 0 {
-		return nil, fmt.Errorf("at least one listen address is required")
-	}
-	for _, addr := range r.Listen {
-		if _, err := netutil.NormalizeListen(addr); err != nil {
-			return nil, err
-		}
 	}
 	switch out.spec.Type {
 	case model.WebTypeProxy:
@@ -87,22 +66,6 @@ func compileRule(r model.WebRule, index int) (*rule, error) {
 	case model.WebTypeRedirect:
 		if out.spec.Redirect == nil || strings.TrimSpace(out.spec.Redirect.To) == "" {
 			return nil, errors.New("a redirect target is required")
-		}
-	}
-	switch out.tls.mode {
-	case model.TLSModeCustom:
-		if out.tls.certID == "" {
-			return nil, errors.New("a certificate must be selected for the custom TLS mode")
-		}
-	case model.TLSModeAuto:
-		for _, d := range out.domains {
-			if d == "*" || strings.HasPrefix(d, "~") {
-				continue
-			}
-			out.tls.certDomains = append(out.tls.certDomains, d)
-		}
-		if len(out.tls.certDomains) == 0 {
-			return nil, errors.New("automatic certificates need at least one concrete domain")
 		}
 	}
 	if p := out.spec.Proxy; p != nil {
@@ -197,6 +160,7 @@ type router struct {
 	// the mutex protected pointer.
 	mu      sync.RWMutex
 	matcher *matcher
+	plan    *listenerPlan
 	addr    string
 }
 
@@ -214,6 +178,18 @@ func (rt *router) currentMatcher() *matcher {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
 	return rt.matcher
+}
+
+func (rt *router) setPlan(p *listenerPlan) {
+	rt.mu.Lock()
+	rt.plan = p
+	rt.mu.Unlock()
+}
+
+func (rt *router) currentPlan() *listenerPlan {
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	return rt.plan
 }
 
 // ServeHTTP resolves the rule and runs the middleware chain.
@@ -260,10 +236,14 @@ func (rt *router) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	ctx := withRule(req.Context(), r)
 	req = req.WithContext(ctx)
 
-	// The chain is built inner to outer: basic auth, WAF, access control, rate
-	// limit and finally HSTS. Execution therefore runs the rate limit before
-	// the password check (a flood must not burn the Argon2 hashing budget) and
-	// the access control before the WAF (a denied address costs no inspection).
+	// HSTS belongs to the listener but is emitted on the matched route.
+	if r.hsts && isTLSRequest(req) {
+		rec.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+	}
+	// The chain is built inner to outer: basic auth, WAF, access control and
+	// rate limit. Execution therefore runs the rate limit before the password
+	// check (a flood must not burn the Argon2 hashing budget) and the access
+	// control before the WAF (a denied address costs no inspection).
 	handler := r.site.handler
 	if r.spec.BasicAuth != nil && r.spec.BasicAuth.Enable {
 		handler = rt.web.basicAuthHandler(r, handler)
@@ -272,9 +252,6 @@ func (rt *router) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	handler = rt.web.accessHandler(r, handler)
 	if r.limiter != nil {
 		handler = rt.web.rateLimitHandler(r, handler)
-	}
-	if r.tls.hsts && isTLSRequest(req) {
-		handler = rt.web.hstsHandler(r, handler)
 	}
 	handler.ServeHTTP(rec, req)
 }

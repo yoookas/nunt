@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nunt/nunt/internal/model"
+	"github.com/nunt/nunt/internal/netutil"
 	"github.com/nunt/nunt/internal/rest"
 	"github.com/nunt/nunt/internal/security"
 )
@@ -25,6 +27,11 @@ type ruleView struct {
 // registerAPI mounts the endpoints of the web service.
 func (w *Web) registerAPI(mux *rest.Mux) {
 	g := mux.Group("/api/v1/web")
+	g.Get("/listeners", w.handleListListeners)
+	g.Post("/listeners", w.handleCreateListener)
+	g.Put("/listeners/{id}", w.handleUpdateListener)
+	g.Delete("/listeners/{id}", w.handleDeleteListener)
+
 	g.Get("/rules", w.handleListRules)
 	g.Post("/rules", w.handleCreateRule)
 	g.Put("/rules/{id}", w.handleUpdateRule)
@@ -33,6 +40,191 @@ func (w *Web) registerAPI(mux *rest.Mux) {
 	g.Get("/logs", w.handleLogs)
 	g.Post("/reload", w.handleReload)
 }
+
+// ---------------------------------------------------------------------------
+// listeners
+// ---------------------------------------------------------------------------
+
+// listenerView decorates a stored listener with the number of routes using it.
+type listenerView struct {
+	model.WebListener
+	RouteCount int `json:"routeCount"`
+}
+
+func (w *Web) listenerView(l model.WebListener, cfg *model.Config) listenerView {
+	out := listenerView{WebListener: l}
+	if cfg != nil {
+		for _, r := range cfg.Web.Rules {
+			if r.ListenerID == l.ID {
+				out.RouteCount++
+			}
+		}
+	}
+	return out
+}
+
+func (w *Web) handleListListeners(rw http.ResponseWriter, req *http.Request) {
+	cfg := w.snapshot()
+	items := []listenerView{}
+	if cfg != nil {
+		items = make([]listenerView, 0, len(cfg.Web.Listeners))
+		for _, l := range cfg.Web.Listeners {
+			items = append(items, w.listenerView(l, cfg))
+		}
+	}
+	rest.OK(rw, map[string]any{"items": items})
+}
+
+// prepareListener normalises a listener received from the API.
+func prepareListener(l *model.WebListener) error {
+	l.Name = strings.TrimSpace(l.Name)
+	l.Remark = strings.TrimSpace(l.Remark)
+	l.TLS.Mode = normalizeTLSMode(l.TLS.Mode)
+	l.TLS.CertID = strings.TrimSpace(l.TLS.CertID)
+	if len(l.Listen) == 0 {
+		return fmt.Errorf("at least one listen address is required")
+	}
+	for i := range l.Listen {
+		l.Listen[i] = strings.TrimSpace(l.Listen[i])
+		if _, err := netutil.NormalizeListen(l.Listen[i]); err != nil {
+			return err
+		}
+	}
+	if l.TLS.Mode == model.TLSModeCustom && l.TLS.CertID == "" {
+		return fmt.Errorf("custom TLS needs a certificate")
+	}
+	if l.Name == "" {
+		l.Name = l.Listen[0]
+	}
+	return nil
+}
+
+func (w *Web) handleCreateListener(rw http.ResponseWriter, req *http.Request) {
+	if !requireAdmin(rw, req) {
+		return
+	}
+	var body model.WebListener
+	if err := rest.Decode(rw, req, &body); err != nil {
+		rest.Fail(rw, http.StatusBadRequest, "%s", err.Error())
+		return
+	}
+	body.ID = model.NewID()
+	if err := prepareListener(&body); err != nil {
+		rest.Fail(rw, http.StatusBadRequest, "%s", err.Error())
+		return
+	}
+	now := time.Now()
+	body.CreatedAt = now
+	body.UpdatedAt = now
+	if err := w.saveConfig(func(c *model.Config) error {
+		c.Web.Listeners = append(c.Web.Listeners, body)
+		return nil
+	}); err != nil {
+		rest.Fail(rw, http.StatusBadRequest, "cannot save the listener: %s", err)
+		return
+	}
+	rest.OK(rw, w.listenerView(body, w.snapshot()))
+}
+
+func (w *Web) handleUpdateListener(rw http.ResponseWriter, req *http.Request) {
+	if !requireAdmin(rw, req) {
+		return
+	}
+	id := strings.TrimSpace(req.PathValue("id"))
+	var body model.WebListener
+	if err := rest.Decode(rw, req, &body); err != nil {
+		rest.Fail(rw, http.StatusBadRequest, "%s", err.Error())
+		return
+	}
+	if err := prepareListener(&body); err != nil {
+		rest.Fail(rw, http.StatusBadRequest, "%s", err.Error())
+		return
+	}
+	body.ID = id
+	body.UpdatedAt = time.Now()
+	found := false
+	if err := w.saveConfig(func(c *model.Config) error {
+		for i := range c.Web.Listeners {
+			if c.Web.Listeners[i].ID != id {
+				continue
+			}
+			body.CreatedAt = c.Web.Listeners[i].CreatedAt
+			c.Web.Listeners[i] = body
+			found = true
+			return nil
+		}
+		return errListenerNotFound
+	}); err != nil {
+		if !found {
+			rest.Fail(rw, http.StatusNotFound, "listener not found")
+			return
+		}
+		rest.Fail(rw, http.StatusBadRequest, "cannot save the listener: %s", err)
+		return
+	}
+	rest.OK(rw, w.listenerView(body, w.snapshot()))
+}
+
+func (w *Web) handleDeleteListener(rw http.ResponseWriter, req *http.Request) {
+	if !requireAdmin(rw, req) {
+		return
+	}
+	id := strings.TrimSpace(req.PathValue("id"))
+	cfg := w.snapshot()
+	if cfg != nil {
+		for _, r := range cfg.Web.Rules {
+			if r.ListenerID == id {
+				rest.Fail(rw, http.StatusBadRequest, "该监听器下还有路由，请先删除或移动这些路由")
+				return
+			}
+		}
+	}
+	found := false
+	if err := w.saveConfig(func(c *model.Config) error {
+		out := c.Web.Listeners[:0]
+		for _, l := range c.Web.Listeners {
+			if l.ID == id {
+				found = true
+				continue
+			}
+			out = append(out, l)
+		}
+		c.Web.Listeners = out
+		if !found {
+			return errListenerNotFound
+		}
+		return nil
+	}); err != nil {
+		if !found {
+			rest.Fail(rw, http.StatusNotFound, "listener not found")
+			return
+		}
+		rest.Fail(rw, http.StatusBadRequest, "cannot delete the listener: %s", err)
+		return
+	}
+	rest.NoContent(rw)
+}
+
+// resolveListenerID returns the listener a route belongs to. An empty id is
+// accepted when the configuration has exactly one listener.
+func (w *Web) resolveListenerID(id string) (string, bool) {
+	cfg := w.snapshot()
+	if cfg == nil {
+		return "", false
+	}
+	id = strings.TrimSpace(id)
+	if id == "" && len(cfg.Web.Listeners) == 1 {
+		return cfg.Web.Listeners[0].ID, true
+	}
+	for _, l := range cfg.Web.Listeners {
+		if l.ID == id {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+var errListenerNotFound = errors.New("listener not found")
 
 // ---------------------------------------------------------------------------
 // rules
@@ -86,6 +278,12 @@ func (w *Web) handleCreateRule(rw http.ResponseWriter, req *http.Request) {
 		rest.Fail(rw, http.StatusBadRequest, "%s", err.Error())
 		return
 	}
+	listenerID, ok := w.resolveListenerID(body.ListenerID)
+	if !ok {
+		rest.Fail(rw, http.StatusBadRequest, "请选择有效的监听器")
+		return
+	}
+	body.ListenerID = listenerID
 	now := time.Now()
 	body.CreatedAt = now
 	body.UpdatedAt = now
@@ -131,6 +329,12 @@ func (w *Web) handleUpdateRule(rw http.ResponseWriter, req *http.Request) {
 		rest.Fail(rw, http.StatusBadRequest, "%s", err.Error())
 		return
 	}
+	listenerID, ok := w.resolveListenerID(body.ListenerID)
+	if !ok {
+		rest.Fail(rw, http.StatusBadRequest, "请选择有效的监听器")
+		return
+	}
+	body.ListenerID = listenerID
 	body.ID = id
 	if body.CreatedAt.IsZero() {
 		body.CreatedAt = existing.CreatedAt
@@ -212,8 +416,8 @@ func (w *Web) handleToggleRule(rw http.ResponseWriter, req *http.Request) {
 	rest.OK(rw, map[string]any{"id": id, "enable": enabled})
 }
 
-// saveRule persists a change and applies it to the running listeners.
-func (w *Web) saveRule(mutate func(*model.Config) error) error {
+// saveConfig persists a change and applies it to the running listeners.
+func (w *Web) saveConfig(mutate func(*model.Config) error) error {
 	if err := w.deps.Cfg.Update(mutate); err != nil {
 		return err
 	}
@@ -221,10 +425,16 @@ func (w *Web) saveRule(mutate func(*model.Config) error) error {
 	return nil
 }
 
+// saveRule persists a rule change and applies it to the running listeners.
+func (w *Web) saveRule(mutate func(*model.Config) error) error {
+	return w.saveConfig(mutate)
+}
+
 // prepareRule normalises and validates a rule received from the API. The
 // previous version, when present, keeps the stored basic auth hashes.
 func prepareRule(r *model.WebRule, previous *model.WebRule) error {
 	r.Name = strings.TrimSpace(r.Name)
+	r.ListenerID = strings.TrimSpace(r.ListenerID)
 	r.Path = model.NormalizePath(r.Path)
 	if r.ID == "" {
 		r.ID = model.NewID()
@@ -232,15 +442,11 @@ func prepareRule(r *model.WebRule, previous *model.WebRule) error {
 	if r.Type == "" {
 		r.Type = model.WebTypeProxy
 	}
-	r.TLS.Mode = normalizeTLSMode(r.TLS.Mode)
 	if r.Access.Mode == "" {
 		r.Access.Mode = model.AccessOff
 	}
 	if r.Access.UAMode == "" {
 		r.Access.UAMode = model.AccessOff
-	}
-	for i := range r.Listen {
-		r.Listen[i] = strings.TrimSpace(r.Listen[i])
 	}
 	if r.Proxy != nil {
 		for i := range r.Proxy.Targets {

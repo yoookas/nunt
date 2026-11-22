@@ -97,32 +97,47 @@ type APIToken struct {
 
 // WebConfig is the web service module configuration.
 type WebConfig struct {
-	Rules     []WebRule `json:"rules"`
-	AccessLog bool      `json:"accessLog"`
-	LogKeep   int       `json:"logKeep"`
-	RealIP    bool      `json:"realIp"`
+	// Listeners own the sockets and TLS settings; routes attach to them by ID.
+	Listeners []WebListener `json:"listeners"`
+	Rules     []WebRule     `json:"rules"`
+	AccessLog bool          `json:"accessLog"`
+	LogKeep   int           `json:"logKeep"`
+	RealIP    bool          `json:"realIp"`
+}
+
+// WebListener is one set of sockets and its TLS configuration. Every route
+// below it shares the same listen addresses and TLS mode.
+type WebListener struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Listen    []string  `json:"listen"`
+	TLS       WebTLS    `json:"tls"`
+	Remark    string    `json:"remark,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // WebRule routes one logical site/route.
 type WebRule struct {
-	ID        string       `json:"id"`
-	Name      string       `json:"name"`
-	Enable    bool         `json:"enable"`
-	Type      string       `json:"type"`
-	Listen    []string     `json:"listen"`
-	Domains   []string     `json:"domains,omitempty"`
-	Path      string       `json:"path"`
-	Priority  int          `json:"priority"`
-	TLS       WebTLS       `json:"tls"`
-	WAF       bool         `json:"waf"`
-	Access    Access       `json:"access"`
-	BasicAuth *BasicAuth   `json:"basicAuth,omitempty"`
-	Proxy     *ProxyTarget `json:"proxy,omitempty"`
-	Redirect  *RedirectTgt `json:"redirect,omitempty"`
-	Static    *StaticTgt   `json:"static,omitempty"`
-	Remark    string       `json:"remark,omitempty"`
-	CreatedAt time.Time    `json:"createdAt"`
-	UpdatedAt time.Time    `json:"updatedAt"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Enable bool   `json:"enable"`
+	Type   string `json:"type"`
+	// ListenerID selects the WebListener that owns the sockets and TLS
+	// settings of this route.
+	ListenerID string       `json:"listenerId"`
+	Domains    []string     `json:"domains,omitempty"`
+	Path       string       `json:"path"`
+	Priority   int          `json:"priority"`
+	WAF        bool         `json:"waf"`
+	Access     Access       `json:"access"`
+	BasicAuth  *BasicAuth   `json:"basicAuth,omitempty"`
+	Proxy      *ProxyTarget `json:"proxy,omitempty"`
+	Redirect   *RedirectTgt `json:"redirect,omitempty"`
+	Static     *StaticTgt   `json:"static,omitempty"`
+	Remark     string       `json:"remark,omitempty"`
+	CreatedAt  time.Time    `json:"createdAt"`
+	UpdatedAt  time.Time    `json:"updatedAt"`
 }
 
 // WebTLS describes how a rule terminates TLS.

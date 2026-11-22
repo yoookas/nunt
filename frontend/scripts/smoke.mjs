@@ -97,6 +97,24 @@ function fixture(path) {
   if (path === '/api/v1/waf/logs') return []
   if (path === '/api/v1/web/logs' || path === '/api/v1/forward/logs') return { entries: [] }
   if (path === '/api/v1/storage/mounts') return []
+  if (path === '/api/v1/web/listeners') {
+    return {
+      items: [{
+        id: 'l1', name: 'http', listen: [':8080'],
+        tls: { mode: 'off', hsts: false }, remark: '', routeCount: 1,
+      }],
+    }
+  }
+  if (path === '/api/v1/web/rules') {
+    return {
+      items: [{
+        id: 'r1', name: 'site', enable: true, type: 'proxy', listenerId: 'l1',
+        domains: ['a.test'], path: '/', priority: 0, waf: false,
+        access: { mode: 'off', uaMode: 'off' },
+        proxy: { targets: ['http://127.0.0.1:9000'] }, requests: 0,
+      }],
+    }
+  }
   if (path === '/api/v1/modules') return [
     { name: 'task', title: '计划任务', running: true, stats: { allowShell: false } },
   ]

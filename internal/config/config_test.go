@@ -53,16 +53,17 @@ func TestUpdatePersistsAndNotifies(t *testing.T) {
 	store.Subscribe(func(*model.Config) { notified++ })
 
 	rule := model.WebRule{
-		Name:   "site",
-		Enable: true,
-		Type:   model.WebTypeRedirect,
-		Listen: []string{":8080"},
-		Path:   "ui",
+		Name:       "site",
+		Enable:     true,
+		Type:       model.WebTypeRedirect,
+		ListenerID: "l1",
+		Path:       "ui",
 		Redirect: &model.RedirectTgt{
 			To: "https://example.com",
 		},
 	}
 	if err := store.Update(func(c *model.Config) error {
+		c.Web.Listeners = []model.WebListener{{ID: "l1", Name: "http", Listen: []string{":8080"}}}
 		c.Web.Rules = append(c.Web.Rules, rule)
 		return nil
 	}); err != nil {
@@ -101,11 +102,12 @@ func TestUpdateRejectsInvalidConfiguration(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 	err = store.Update(func(c *model.Config) error {
+		c.Web.Listeners = []model.WebListener{{ID: "l1", Name: "http", Listen: []string{":8081"}}}
 		c.Web.Rules = append(c.Web.Rules, model.WebRule{
-			Name:   "broken",
-			Enable: true,
-			Type:   model.WebTypeProxy,
-			Listen: []string{":8081"},
+			Name:       "broken",
+			Enable:     true,
+			Type:       model.WebTypeProxy,
+			ListenerID: "l1",
 		})
 		return nil
 	})

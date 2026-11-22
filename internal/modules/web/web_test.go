@@ -29,13 +29,13 @@ import (
 func mkRule(t *testing.T, name, host, path string, priority int, typ string) model.WebRule {
 	t.Helper()
 	r := model.WebRule{
-		ID:       name,
-		Name:     name,
-		Enable:   true,
-		Type:     typ,
-		Listen:   []string{":8080"},
-		Path:     path,
-		Priority: priority,
+		ID:         name,
+		Name:       name,
+		Enable:     true,
+		Type:       typ,
+		ListenerID: "l1",
+		Path:       path,
+		Priority:   priority,
 	}
 	if host != "" {
 		r.Domains = []string{host}
@@ -64,7 +64,7 @@ func TestMatcherPrefersLongestPathAndPriority(t *testing.T) {
 		}
 		rules = append(rules, compiled)
 	}
-	m := newMatcher(":8080", rules)
+	m := newMatcher(":8080", rules, listenerTLS{})
 
 	cases := []struct {
 		host string
@@ -100,7 +100,7 @@ func TestMatchDomainWildcardAndPort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	m := newMatcher(":8080", []*rule{compiled})
+	m := newMatcher(":8080", []*rule{compiled}, listenerTLS{})
 	if m.Match("a.example.com", "/") == nil {
 		t.Fatal("wildcard domain should match a sub domain")
 	}
@@ -112,34 +112,35 @@ func TestMatchDomainWildcardAndPort(t *testing.T) {
 	}
 }
 
-func TestGroupRulesNormalizesListen(t *testing.T) {
+func TestCompileWebLinksRoutesToTheirListener(t *testing.T) {
 	raw := mkRule(t, "root", "example.com", "/", 0, model.WebTypeRedirect)
-	raw.Listen = []string{"0.0.0.0:8080", ":8080", "127.0.0.1:9090"}
-	compiled, err := compileRule(raw, 0)
-	if err != nil {
-		t.Fatalf("compile: %v", err)
+	cfg := &model.Config{Web: model.WebConfig{
+		Listeners: []model.WebListener{
+			{ID: "l1", Name: "http", Listen: []string{"0.0.0.0:8080", ":8080"}},
+			{ID: "l2", Name: "other", Listen: []string{"127.0.0.1:9090"}},
+		},
+		Rules: []model.WebRule{raw},
+	}}
+	w := &Web{deps: &module.Deps{}}
+	compiled, plans, errs := w.compileWeb(cfg)
+	if len(errs) != 0 {
+		t.Fatalf("compileWeb: %v", errs)
 	}
-	groups := groupRules([]*rule{compiled})
-	if len(groups) != 2 {
-		t.Fatalf("expected 2 listen groups, got %d: %v", len(groups), groups)
+	if len(compiled) != 1 || len(plans["127.0.0.1:9090"].rules) != 0 {
+		t.Fatalf("compiled=%d plans=%v", len(compiled), plans)
 	}
-	if len(groups["0.0.0.0:8080"]) != 1 || len(groups["127.0.0.1:9090"]) != 1 {
-		t.Fatalf("unexpected grouping: %v", groups)
+	for addr, plan := range plans {
+		if addr == "127.0.0.1:9090" {
+			continue
+		}
+		if len(plan.rules) != 1 || plan.rules[0].listenerID != "l1" {
+			t.Fatalf("plan %s has %d rules", addr, len(plan.rules))
+		}
 	}
 }
 
 func TestCompileRejectsInvalidRule(t *testing.T) {
 	bad := mkRule(t, "bad", "example.com", "/", 0, model.WebTypeProxy)
-	bad.Listen = nil
-	if _, err := compileRule(bad, 0); err == nil {
-		t.Fatal("a rule without listen addresses must be rejected")
-	}
-	bad = mkRule(t, "bad", "example.com", "/", 0, model.WebTypeProxy)
-	bad.Listen = []string{"not-an-address"}
-	if _, err := compileRule(bad, 0); err == nil {
-		t.Fatal("an invalid listen address must be rejected")
-	}
-	bad = mkRule(t, "bad", "example.com", "/", 0, model.WebTypeProxy)
 	bad.Proxy.Targets = []string{"ftp://example.com"}
 	if _, err := compileRule(bad, 0); err == nil {
 		t.Fatal("an unsupported proxy scheme must be rejected")
@@ -852,20 +853,34 @@ func TestStaticConditionalRequest(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // testConfigStore builds a configuration store in a temporary directory.
+// testListener builds a listener for the module tests.
+func testListener(id string, listen []string, tlsMode string) model.WebListener {
+	return model.WebListener{ID: id, Name: id, Listen: listen, TLS: model.WebTLS{Mode: tlsMode}}
+}
+
 func testConfigStore(t *testing.T, rules ...model.WebRule) *config.Store {
+	t.Helper()
+	return testConfigStoreWithListener(t, testListener("l1", []string{":8080"}, model.TLSModeOff), rules...)
+}
+
+func testConfigStoreWithListener(t *testing.T, listener model.WebListener, rules ...model.WebRule) *config.Store {
 	t.Helper()
 	dir := t.TempDir()
 	store, _, err := config.Load(filepath.Join(dir, "config.json"))
 	if err != nil {
 		t.Fatalf("config: %v", err)
 	}
-	if len(rules) > 0 {
-		if err := store.Update(func(c *model.Config) error {
-			c.Web.Rules = rules
-			return nil
-		}); err != nil {
-			t.Fatalf("update config: %v", err)
+	for i := range rules {
+		if rules[i].ListenerID == "" {
+			rules[i].ListenerID = listener.ID
 		}
+	}
+	if err := store.Update(func(c *model.Config) error {
+		c.Web.Listeners = []model.WebListener{listener}
+		c.Web.Rules = rules
+		return nil
+	}); err != nil {
+		t.Fatalf("update config: %v", err)
 	}
 	return store
 }
@@ -896,13 +911,12 @@ func TestModuleStartServesAndStopCloses(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	raw := mkRule(t, "static", "example.com", "/", 0, model.WebTypeStatic)
-	raw.Listen = []string{addr}
 	raw.Static = &model.StaticTgt{Root: root, Listing: true}
 	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("hello"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	store := testConfigStore(t, raw)
+	store := testConfigStoreWithListener(t, testListener("l1", []string{addr}, model.TLSModeOff), raw)
 	box, err := secret.Open(filepath.Join(filepath.Dir(store.Path()), "secret.key"))
 	if err != nil {
 		t.Fatal(err)
@@ -1003,10 +1017,9 @@ func TestModuleReloadReplacesListeners(t *testing.T) {
 	first := freeAddr(t)
 	second := freeAddr(t)
 	rule := mkRule(t, "static", "example.com", "/", 0, model.WebTypeStatic)
-	rule.Listen = []string{first}
 	rule.Static = &model.StaticTgt{Root: t.TempDir()}
 
-	store := testConfigStore(t, rule)
+	store := testConfigStoreWithListener(t, testListener("l1", []string{first}, model.TLSModeOff), rule)
 	box, err := secret.Open(filepath.Join(filepath.Dir(store.Path()), "secret.key"))
 	if err != nil {
 		t.Fatal(err)
@@ -1027,10 +1040,8 @@ func TestModuleReloadReplacesListeners(t *testing.T) {
 		t.Fatalf("listeners = %v, want [%s]", got, first)
 	}
 
-	moved := rule
-	moved.Listen = []string{second}
 	if err := store.Update(func(c *model.Config) error {
-		c.Web.Rules = []model.WebRule{moved}
+		c.Web.Listeners = []model.WebListener{testListener("l1", []string{second}, model.TLSModeOff)}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -1048,7 +1059,7 @@ func TestModuleReloadReplacesListeners(t *testing.T) {
 	_ = ln.Close()
 
 	// Disabling the rule removes every listener.
-	disabled := moved
+	disabled := rule
 	disabled.Enable = false
 	if err := store.Update(func(c *model.Config) error {
 		c.Web.Rules = []model.WebRule{disabled}
@@ -1082,7 +1093,6 @@ func TestModuleRuleValidation(t *testing.T) {
 
 	// A rule with an unusable proxy target is skipped, not fatal.
 	bad := mkRule(t, "bad", "example.com", "/", 0, model.WebTypeProxy)
-	bad.Listen = []string{freeAddr(t)}
 	bad.Proxy = &model.ProxyTarget{Targets: []string{"ftp://nope"}}
 	if err := store.Update(func(c *model.Config) error {
 		c.Web.Rules = []model.WebRule{bad}

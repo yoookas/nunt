@@ -67,7 +67,7 @@
 5. 打开 **WAF 管理面保护**（`waf.enable=true` 且 `waf.adminProtect=true`），让后台接口本身也过 CRS；
 6. `system.adminAllowIps` 作为**应用内**的第二道闸（见下）。
 
-另可选：`web.rules[].tls.hsts=true`，以及定期检查登录日志。
+另可选：`web.listeners[].tls.hsts=true`，以及定期检查登录日志。
 
 ### `system.adminAllowIps` 的实际行为（写文档时的代码事实）
 
@@ -87,8 +87,8 @@
 
 ### 3.1 只开必要的监听与路由
 
-- `web.rules[].listen` 只写需要的地址与端口；能用 `127.0.0.1:8080`（前面有别的反代）就不要写 `:80`。
-- `web.rules[].domains` 尽量写具体域名；泛域名（`*.example.com`）会把这个监听上的所有子域都吃进来，只有确实需要时再用。
+- `web.listeners[].listen` 只写需要的地址与端口；能用 `127.0.0.1:8080`（前面有别的反代）就不要写 `:80`。
+- `web.rules[].domains` 尽量写具体域名；泛域名（`*.example.com`）会把这个监听上的所有子域都吃进来，只有确实需要时再用；同监听器内域名+路径必须唯一。
 - `web.rules[].path` 用精确路径，避免整站都被一条规则接走。
 - 不用的规则**删掉**，不要只把 `enable` 改成 `false` 留在配置里（配置本身就是攻击面与误操作面）。
 - 静态托管不要随手打开目录列表（`static.listing`）：列表会把不打算公开的文件名、备份文件、`.git` 之类暴露出去。

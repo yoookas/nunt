@@ -10,6 +10,7 @@ import (
 func geoConfig(rules ...model.WebRule) *model.Config {
 	cfg := Default()
 	cfg.Users = []model.User{{ID: "u1", Username: "admin", Role: "admin", Enabled: true}}
+	cfg.Web.Listeners = []model.WebListener{{ID: "l1", Name: "http", Listen: []string{":8080"}}}
 	cfg.Web.Rules = rules
 	return cfg
 }
@@ -17,7 +18,7 @@ func geoConfig(rules ...model.WebRule) *model.Config {
 func geoWebRule(mode string, mutate func(*model.WebRule)) model.WebRule {
 	r := model.WebRule{
 		ID: "rule-geo", Name: "geo", Enable: true, Type: model.WebTypeProxy,
-		Listen: []string{":8080"}, Path: "/geo",
+		ListenerID: "l1", Path: "/geo",
 		Proxy:  &model.ProxyTarget{Targets: []string{"http://127.0.0.1:9000"}},
 		Access: model.Access{Mode: mode, Countries: []string{"中国"}},
 	}

@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/nunt/nunt/internal/dnsprov"
 	"github.com/nunt/nunt/internal/ip2region"
 	"github.com/nunt/nunt/internal/model"
+	"github.com/nunt/nunt/internal/netutil"
 )
 
 // Default concurrency caps of a stored port forward rule. Zero disables a cap,
@@ -65,17 +67,35 @@ func Normalize(c *model.Config) {
 		c.ACME.KeyType = "ec256"
 	}
 
+	for i := range c.Web.Listeners {
+		l := &c.Web.Listeners[i]
+		if l.ID == "" {
+			l.ID = model.NewID()
+		}
+		l.Name = strings.TrimSpace(l.Name)
+		if l.TLS.Mode == "" {
+			l.TLS.Mode = model.TLSModeOff
+		}
+		l.TLS.Mode = normalizeWebTLSMode(l.TLS.Mode)
+		l.TLS.CertID = strings.TrimSpace(l.TLS.CertID)
+		for j := range l.Listen {
+			l.Listen[j] = strings.TrimSpace(l.Listen[j])
+		}
+	}
 	for i := range c.Web.Rules {
 		r := &c.Web.Rules[i]
 		if r.ID == "" {
 			r.ID = model.NewID()
 		}
+		r.ListenerID = strings.TrimSpace(r.ListenerID)
+		// A config with exactly one listener does not have to repeat its id on
+		// every route.
+		if r.ListenerID == "" && len(c.Web.Listeners) == 1 {
+			r.ListenerID = c.Web.Listeners[0].ID
+		}
 		r.Path = model.NormalizePath(r.Path)
 		if r.Type == "" {
 			r.Type = model.WebTypeProxy
-		}
-		if r.TLS.Mode == "" {
-			r.TLS.Mode = model.TLSModeOff
 		}
 		if r.Access.Mode == "" {
 			r.Access.Mode = model.AccessOff
@@ -84,9 +104,6 @@ func Normalize(c *model.Config) {
 			r.Access.UAMode = model.AccessOff
 		}
 		normalizeGeoAccess(&r.Access)
-		for j := range r.Listen {
-			r.Listen[j] = strings.TrimSpace(r.Listen[j])
-		}
 		if r.Proxy != nil && r.Proxy.Balance == "" {
 			r.Proxy.Balance = "roundrobin"
 		}
@@ -168,9 +185,15 @@ func Validate(c *model.Config) error {
 	if len(c.Users) == 0 {
 		return fmt.Errorf("at least one administrator account is required")
 	}
+	listeners, err := validateWebListeners(c.Web.Listeners)
+	if err != nil {
+		return err
+	}
+	seenRoutes := map[string]string{}
 	for _, r := range c.Web.Rules {
-		if len(r.Listen) == 0 {
-			return fmt.Errorf("web rule %q: at least one listen address is required", displayName(r.Name, r.ID))
+		listener, ok := listeners[r.ListenerID]
+		if !ok {
+			return fmt.Errorf("web rule %q: unknown listener %q", displayName(r.Name, r.ID), r.ListenerID)
 		}
 		if r.Proxy != nil {
 			if r.Proxy.RateLimitPerSec < 0 {
@@ -180,10 +203,16 @@ func Validate(c *model.Config) error {
 				return fmt.Errorf("web rule %q: maxBodyBytes must not be negative", displayName(r.Name, r.ID))
 			}
 		}
-		for _, l := range r.Listen {
-			if _, _, err := net.SplitHostPort(l); err != nil {
-				return fmt.Errorf("web rule %q: invalid listen address %q", displayName(r.Name, r.ID), l)
+		if r.Enable {
+			key := r.ListenerID + "\x00" + routeFingerprint(r)
+			if other, dup := seenRoutes[key]; dup {
+				return fmt.Errorf("web rule %q: the same domains and path are already served by rule %q on listener %q",
+					displayName(r.Name, r.ID), other, listener.Name)
 			}
+			seenRoutes[key] = displayName(r.Name, r.ID)
+		}
+		if r.Enable && listener.TLS.Mode == model.TLSModeAuto && !hasConcreteDomain(r.Domains) {
+			return fmt.Errorf("web rule %q: automatic TLS needs at least one concrete domain", displayName(r.Name, r.ID))
 		}
 		if err := validateGeoAccess(r.Access, r.Enable, c.System.IP2RegionDB); err != nil {
 			return fmt.Errorf("web rule %q: %w", displayName(r.Name, r.ID), err)
@@ -261,6 +290,87 @@ func Validate(c *model.Config) error {
 		}
 	}
 	return nil
+}
+
+// normalizeWebTLSMode canonicalises a listener TLS mode.
+func normalizeWebTLSMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case model.TLSModeAuto:
+		return model.TLSModeAuto
+	case model.TLSModeCustom:
+		return model.TLSModeCustom
+	default:
+		return model.TLSModeOff
+	}
+}
+
+// validateWebListeners checks the listener level: unique ids, valid and unique
+// socket addresses, and a usable TLS configuration.
+func validateWebListeners(list []model.WebListener) (map[string]model.WebListener, error) {
+	out := make(map[string]model.WebListener, len(list))
+	for i, l := range list {
+		name := displayName(l.Name, l.ID)
+		if strings.TrimSpace(l.ID) == "" {
+			return nil, fmt.Errorf("web listener %q: an id is required", name)
+		}
+		if _, dup := out[l.ID]; dup {
+			return nil, fmt.Errorf("web listener %q: duplicate id %q", name, l.ID)
+		}
+		if len(l.Listen) == 0 {
+			return nil, fmt.Errorf("web listener %q: at least one listen address is required", name)
+		}
+		for _, addr := range l.Listen {
+			if _, err := netutil.NormalizeListen(addr); err != nil {
+				return nil, fmt.Errorf("web listener %q: %w", name, err)
+			}
+			for j := 0; j < i; j++ {
+				for _, other := range list[j].Listen {
+					if netutil.SameListen(addr, other) {
+						return nil, fmt.Errorf("web listener %q: %s is already used by listener %q",
+							name, addr, displayName(list[j].Name, list[j].ID))
+					}
+				}
+			}
+		}
+		switch l.TLS.Mode {
+		case "", model.TLSModeOff, model.TLSModeAuto:
+		case model.TLSModeCustom:
+			if strings.TrimSpace(l.TLS.CertID) == "" {
+				return nil, fmt.Errorf("web listener %q: the custom TLS mode needs a certificate", name)
+			}
+		default:
+			return nil, fmt.Errorf("web listener %q: unknown TLS mode %q", name, l.TLS.Mode)
+		}
+		out[l.ID] = l
+	}
+	return out, nil
+}
+
+// routeFingerprint identifies the (domains, path) pair that must be unique per
+// listener: two routes with the same pair could never both be reached.
+func routeFingerprint(r model.WebRule) string {
+	domains := make([]string, 0, len(r.Domains))
+	for _, d := range r.Domains {
+		d = strings.ToLower(strings.TrimSpace(d))
+		if d != "" {
+			domains = append(domains, d)
+		}
+	}
+	sort.Strings(domains)
+	return strings.Join(domains, ",") + "\x00" + model.NormalizePath(r.Path)
+}
+
+// hasConcreteDomain reports whether an automatic certificate can be requested
+// for at least one of the domains.
+func hasConcreteDomain(domains []string) bool {
+	for _, d := range domains {
+		d = strings.TrimSpace(d)
+		if d == "" || d == "*" || strings.HasPrefix(d, "~") {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // normalizeGeoAccess trims and canonicalises the country/province lists so the

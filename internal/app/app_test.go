@@ -97,19 +97,21 @@ func TestEndToEnd(t *testing.T) {
 		Web: model.WebConfig{
 			AccessLog: true,
 			LogKeep:   50,
+			Listeners: []model.WebListener{{
+				ID: "l1", Name: "http", Listen: []string{fmt.Sprintf("127.0.0.1:%d", webPort)},
+			}},
 			Rules: []model.WebRule{{
-				ID:     "web1",
-				Name:   "static site",
-				Enable: true,
-				Type:   model.WebTypeStatic,
-				Listen: []string{fmt.Sprintf("127.0.0.1:%d", webPort)},
-				Path:   "/",
+				ID:         "web1",
+				Name:       "static site",
+				Enable:     true,
+				Type:       model.WebTypeStatic,
+				ListenerID: "l1",
+				Path:       "/",
 				Static: &model.StaticTgt{
 					Root:    wwwDir,
 					Index:   []string{"index.html"},
 					Listing: true,
 				},
-				TLS:    model.WebTLS{Mode: model.TLSModeOff},
 				Access: model.Access{Mode: model.AccessOff, UAMode: model.AccessOff},
 			}},
 		},

@@ -16,7 +16,6 @@ import (
 	"golang.org/x/net/http2/h2c"
 
 	"github.com/nunt/nunt/internal/model"
-	"github.com/nunt/nunt/internal/netutil"
 )
 
 // Listener timeouts. ReadTimeout stays generous enough for slow mobile
@@ -66,6 +65,22 @@ type listener struct {
 	closed  bool
 }
 
+// listenerTLS is the TLS configuration shared by every route of a listener.
+type listenerTLS struct {
+	mode   string
+	certID string
+	hsts   bool
+	// certDomains is the SAN list of a pinned custom certificate.
+	certDomains []string
+}
+
+// listenerPlan is one socket to bind plus the routes served on it.
+type listenerPlan struct {
+	addr  string
+	tls   listenerTLS
+	rules []*rule
+}
+
 // newListener prepares the server of one address.
 func (w *Web) newListener(ctx context.Context, addr string) *listener {
 	baseCtx, cancel := context.WithCancel(ctx)
@@ -96,48 +111,38 @@ func (w *Web) newListener(ctx context.Context, addr string) *listener {
 	}
 }
 
-// start binds the sockets. When tlsRules is true the address also gets a TLS
-// socket, so a rule with TLS enabled can share the port with plain HTTP rules.
-func (l *listener) start(m *matcher, tlsRules bool) error {
+// start binds the socket of one listener plan. TLS is a property of the
+// listener, so the address is either plain or TLS, never both.
+func (l *listener) start(plan *listenerPlan) error {
+	m := newMatcher(plan.addr, plan.rules, plan.tls)
 	l.router.setMatcher(m)
+	l.router.setPlan(plan)
 
-	// A TCP address can only be bound once (Go does not set SO_REUSEPORT), so
-	// the plain socket is only opened when at least one rule on this address
-	// does not terminate TLS. Opening both would make the TLS bind fail and
-	// silently downgrade an HTTPS port to HTTP.
-	plainNeeded := len(m.tlsRules) < len(m.rules)
-	if plainNeeded {
-		plain, err := listenWithRetry(l.addr)
+	if plan.tls.mode == model.TLSModeOff {
+		ln, err := listenWithRetry(l.addr)
 		if err != nil {
 			l.cancel()
 			return fmt.Errorf("listen on %s: %w", l.addr, err)
 		}
 		l.mu.Lock()
-		l.plain = plain
+		l.plain = ln
 		l.mu.Unlock()
-		go l.serve(plain, "http")
+		go l.serve(ln, "http")
+		l.web.logger().Info("web: listener ready", "addr", l.addr, "tls", false, "routes", len(plan.rules))
+		return nil
 	}
 
-	if !tlsRules {
-		if !plainNeeded {
-			l.cancel()
-			return fmt.Errorf("listen on %s: no rule can be served", l.addr)
-		}
-		return nil
-	}
-	tlsCfg := l.web.tlsConfig(m)
-	secure, err := listenWithRetry(l.addr)
+	tlsCfg := l.web.tlsConfig(l.router.currentMatcher, l.router.currentPlan)
+	ln, err := listenWithRetry(l.addr)
 	if err != nil {
-		// The TLS socket is a bonus: the plain socket keeps serving.
-		l.web.log.Error("web: cannot listen for TLS", "addr", l.addr, "error", err)
-		l.web.SetError(fmt.Errorf("listen for TLS on %s: %w", l.addr, err))
-		return nil
+		l.cancel()
+		return fmt.Errorf("listen on %s: %w", l.addr, err)
 	}
 	l.mu.Lock()
-	l.secure = secure
+	l.secure = ln
 	l.mu.Unlock()
-	go l.serve(tls.NewListener(secure, tlsCfg), "https")
-	l.web.log.Info("web: listener ready", "addr", l.addr, "tls", true, "rules", len(m.rules))
+	go l.serve(tls.NewListener(ln, tlsCfg), "https")
+	l.web.logger().Info("web: listener ready", "addr", l.addr, "tls", true, "routes", len(plan.rules))
 	return nil
 }
 
@@ -215,73 +220,33 @@ func isClosedError(err error) bool {
 	return errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection")
 }
 
-// tlsConfig builds the TLS configuration of a listener, including per rule
-// certificate selection.
-func (w *Web) tlsConfig(m *matcher) *tls.Config {
+// tlsConfig builds the TLS configuration of a listener. The certificate map is
+// read through the router so route changes apply without restarting the socket.
+func (w *Web) tlsConfig(nextMatcher func() *matcher, nextPlan func() *listenerPlan) *tls.Config {
 	base := &tls.Config{MinVersion: tls.VersionTLS12}
 	if w.deps.Certs != nil {
 		base = w.deps.Certs.TLSConfig()
 	}
-	return w.tlsSetup(m, base)
+	return w.tlsSetup(nextMatcher, nextPlan, base)
 }
 
-// resolveCustomCertificates loads the certificates referenced by rules that
-// pin one explicitly. Failures are reported through the rule status instead of
-// stopping the listener.
-func (w *Web) resolveCustomCertificates(rules []*rule) {
-	for _, r := range rules {
-		if r.tls.mode != model.TLSModeCustom || w.deps.Certs == nil {
+// resolveCustomCertificates loads the certificate referenced by each listener
+// that pins one explicitly. A missing certificate is reported and leaves the
+// listener without a usable certificate instead of stopping the process.
+func (w *Web) resolveCustomCertificates(plans map[string]*listenerPlan) {
+	for _, plan := range plans {
+		if plan.tls.mode != model.TLSModeCustom || w.deps.Certs == nil {
 			continue
 		}
-		info, ok := w.deps.Certs.Get(r.tls.certID)
+		info, ok := w.deps.Certs.Get(plan.tls.certID)
 		if !ok {
-			w.logger().Error("web: certificate not found", "rule", r.name, "certificate", r.tls.certID)
-			w.SetError(fmt.Errorf("rule %q: certificate %q does not exist", r.name, r.tls.certID))
+			w.logger().Error("web: certificate not found", "listener", plan.addr, "certificate", plan.tls.certID)
+			w.SetError(fmt.Errorf("listener %q: certificate %q does not exist", plan.addr, plan.tls.certID))
 			continue
 		}
-		r.tls.certDomains = append([]string{}, info.Domains...)
-		if len(r.tls.certDomains) == 0 {
-			r.tls.certDomains = []string{info.ID}
+		plan.tls.certDomains = append([]string{}, info.Domains...)
+		if len(plan.tls.certDomains) == 0 {
+			plan.tls.certDomains = []string{info.ID}
 		}
 	}
-}
-
-// groupRules splits the enabled rules by listen address. Addresses that
-// resolve to the same socket (":80", "0.0.0.0:80", "[::]:80") share one
-// listener; the first spelling in the configuration names the group.
-func groupRules(rules []*rule) map[string][]*rule {
-	out := map[string][]*rule{}
-	for _, r := range rules {
-		for _, addr := range r.spec.Listen {
-			normalized, err := netutil.NormalizeListen(addr)
-			if err != nil {
-				continue
-			}
-			key, list := findListenGroup(out, normalized)
-			if containsRule(list, r) {
-				continue
-			}
-			out[key] = append(list, r)
-		}
-	}
-	return out
-}
-
-// findListenGroup returns the existing group of an address and its rules.
-func findListenGroup(groups map[string][]*rule, addr string) (string, []*rule) {
-	for key, list := range groups {
-		if key == addr || netutil.SameListen(key, addr) {
-			return key, list
-		}
-	}
-	return addr, nil
-}
-
-func containsRule(list []*rule, r *rule) bool {
-	for _, item := range list {
-		if item == r {
-			return true
-		}
-	}
-	return false
 }
