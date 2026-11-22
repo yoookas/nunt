@@ -506,7 +506,6 @@ func (a *ACME) ensureOnce(ctx context.Context, names []string) error {
 			Enable:    true,
 			Domains:   names,
 			Challenge: defaultChallenge(),
-			CA:        cfg.ACME.CA,
 			KeyType:   cfg.ACME.KeyType,
 			RenewDays: defaultRenewDays,
 			CreatedAt: time.Now(),
@@ -570,7 +569,6 @@ func (a *ACME) refreshStats(cfg *model.Config) {
 	stats := map[string]any{
 		"jobs":        len(cfg.ACME.Jobs),
 		"enabledJobs": 0,
-		"ca":          cfg.ACME.CA,
 		"challenge":   defaultChallenge(),
 	}
 	for _, j := range cfg.ACME.Jobs {

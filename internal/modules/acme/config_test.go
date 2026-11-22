@@ -51,52 +51,31 @@ func TestGetConfigDefaults(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if view.CA != "letsencrypt" || view.KeyType != "ec256" {
+	if view.KeyType != "ec256" || view.Email != "" {
 		t.Fatalf("defaults = %+v", view)
 	}
-	if len(view.Authorities) != 3 || len(view.KeyTypes) != 4 {
-		t.Fatalf("catalogs = %d authorities, %d key types", len(view.Authorities), len(view.KeyTypes))
+	if len(view.KeyTypes) != 4 {
+		t.Fatalf("key types = %d", len(view.KeyTypes))
 	}
 }
 
 func TestUpdateConfigSavesAndReturnsTheView(t *testing.T) {
 	a := newConfigModule(t)
-	body := `{"email":"ops@example.com","ca":"letsencrypt-staging","keyType":"rsa2048"}`
+	body := `{"email":"ops@example.com","keyType":"rsa2048"}`
 	rec := callConfig(t, a, http.MethodPut, body)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT config = %d: %s", rec.Code, rec.Body.String())
 	}
 	cfg := a.deps.Cfg.Snapshot()
-	if cfg.ACME.Email != "ops@example.com" || cfg.ACME.CA != "letsencrypt-staging" || cfg.ACME.KeyType != "rsa2048" {
+	if cfg.ACME.Email != "ops@example.com" || cfg.ACME.KeyType != "rsa2048" {
 		t.Fatalf("stored config = %+v", cfg.ACME)
 	}
 	var view acmeConfigView
 	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if view.CA != "letsencrypt-staging" || view.Email != "ops@example.com" {
+	if view.KeyType != "rsa2048" || view.Email != "ops@example.com" {
 		t.Fatalf("response view = %+v", view)
-	}
-}
-
-func TestUpdateConfigCustomDirectory(t *testing.T) {
-	a := newConfigModule(t)
-	rec := callConfig(t, a, http.MethodPut, `{"ca":"custom","caCustomUrl":"https://acme.example.com/directory"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("custom CA = %d: %s", rec.Code, rec.Body.String())
-	}
-	cfg := a.deps.Cfg.Snapshot()
-	if cfg.ACME.CA != "custom" || cfg.ACME.CACustomURL != "https://acme.example.com/directory" {
-		t.Fatalf("stored config = %+v", cfg.ACME)
-	}
-	// An empty CA and key type fall back to the defaults.
-	rec = callConfig(t, a, http.MethodPut, `{"ca":"","keyType":""}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("default PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-	cfg = a.deps.Cfg.Snapshot()
-	if cfg.ACME.CA != "letsencrypt" || cfg.ACME.KeyType != "ec256" {
-		t.Fatalf("defaults after save = %+v", cfg.ACME)
 	}
 }
 

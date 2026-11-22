@@ -59,9 +59,6 @@ func Normalize(c *model.Config) {
 	if c.WAF.BodyLimitKB <= 0 {
 		c.WAF.BodyLimitKB = 128
 	}
-	if c.ACME.CA == "" {
-		c.ACME.CA = "letsencrypt"
-	}
 	if c.ACME.KeyType == "" {
 		c.ACME.KeyType = "ec256"
 	}

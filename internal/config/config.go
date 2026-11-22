@@ -195,7 +195,6 @@ func Default() *model.Config {
 		},
 		Forward: model.ForwardConfig{AccessLog: true},
 		ACME: model.ACMEConfig{
-			CA:      "letsencrypt",
 			KeyType: "ec256",
 		},
 		WAF: model.WAFConfig{

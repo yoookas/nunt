@@ -30,7 +30,6 @@ type certJobUpdate struct {
 	Enable       bool              `json:"enable"`
 	Domains      []string          `json:"domains"`
 	KeyType      string            `json:"keyType"`
-	CA           string            `json:"ca"`
 	Challenge    string            `json:"challenge"`
 	DNSProvider  string            `json:"dnsProvider"`
 	DNSCreds     map[string]string `json:"dnsCreds"`
@@ -115,14 +114,11 @@ func (a *ACME) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		items = append(items, a.jobView(job))
 	}
 	rest.OK(w, map[string]any{
-		"items":       items,
-		"ca":          cfg.ACME.CA,
-		"caCustom":    cfg.ACME.CACustomURL,
-		"email":       cfg.ACME.Email,
-		"keyType":     cfg.ACME.KeyType,
-		"challenge":   defaultChallenge(),
-		"authorities": caCatalog(),
-		"keyTypes":    keyCatalog(),
+		"items":     items,
+		"email":     cfg.ACME.Email,
+		"keyType":   cfg.ACME.KeyType,
+		"challenge": defaultChallenge(),
+		"keyTypes":  keyCatalog(),
 	})
 }
 
@@ -273,18 +269,6 @@ func (a *ACME) buildJob(req certJobUpdate, existing *model.CertJob) (*model.Cert
 	if err != nil {
 		return nil, err
 	}
-	ca, err := normalizeCA(req.CA)
-	if err != nil {
-		return nil, err
-	}
-	if ca == "custom" {
-		// The custom directory URL lives in the instance wide settings; a job
-		// that selects the custom CA is useless without it.
-		cfg := a.deps.Cfg.Snapshot()
-		if _, err := directoryURL(&model.ACMEConfig{CA: "custom", CACustomURL: cfg.ACME.CACustomURL}); err != nil {
-			return nil, fmt.Errorf("自定义 CA 需要先在 ACME 设置里填写目录 URL：%s", err)
-		}
-	}
 	provider := strings.TrimSpace(req.DNSProvider)
 	resolvers := normalizeResolvers(req.DNSResolvers)
 	if challenge == challengeDNS {
@@ -312,7 +296,6 @@ func (a *ACME) buildJob(req certJobUpdate, existing *model.CertJob) (*model.Cert
 		Enable:       req.Enable,
 		Domains:      domains,
 		KeyType:      keyType,
-		CA:           ca,
 		Challenge:    challenge,
 		DNSProvider:  provider,
 		DNSResolvers: resolvers,
@@ -545,38 +528,26 @@ func (a *ACME) handleProviders(w http.ResponseWriter, r *http.Request) {
 // acmeConfigView is the instance wide account configuration plus the option
 // catalogs the UI needs to render the form.
 type acmeConfigView struct {
-	Email       string              `json:"email"`
-	CA          string              `json:"ca"`
-	CACustomURL string              `json:"caCustomUrl"`
-	KeyType     string              `json:"keyType"`
-	Authorities []map[string]string `json:"authorities"`
-	KeyTypes    []map[string]string `json:"keyTypes"`
+	Email    string              `json:"email"`
+	KeyType  string              `json:"keyType"`
+	KeyTypes []map[string]string `json:"keyTypes"`
 }
 
 // acmeConfigUpdate is the writable subset of acmeConfigView.
 type acmeConfigUpdate struct {
-	Email       string `json:"email"`
-	CA          string `json:"ca"`
-	CACustomURL string `json:"caCustomUrl"`
-	KeyType     string `json:"keyType"`
+	Email   string `json:"email"`
+	KeyType string `json:"keyType"`
 }
 
 func configView(cfg *model.ACMEConfig) acmeConfigView {
-	ca := strings.ToLower(strings.TrimSpace(cfg.CA))
-	if ca == "" {
-		ca = "letsencrypt"
-	}
 	keyType := strings.ToLower(strings.TrimSpace(cfg.KeyType))
 	if keyType == "" {
 		keyType = keyEC256
 	}
 	return acmeConfigView{
-		Email:       cfg.Email,
-		CA:          ca,
-		CACustomURL: cfg.CACustomURL,
-		KeyType:     keyType,
-		Authorities: caCatalog(),
-		KeyTypes:    keyCatalog(),
+		Email:    cfg.Email,
+		KeyType:  keyType,
+		KeyTypes: keyCatalog(),
 	}
 }
 
@@ -601,16 +572,6 @@ func (a *ACME) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	ca := strings.ToLower(strings.TrimSpace(req.CA))
-	if ca == "" {
-		ca = "letsencrypt"
-	}
-	custom := strings.TrimSpace(req.CACustomURL)
-	// directoryURL validates both the CA name and the custom directory URL.
-	if _, err := directoryURL(&model.ACMEConfig{CA: ca, CACustomURL: custom}); err != nil {
-		rest.Fail(w, http.StatusBadRequest, "%s", err)
-		return
-	}
 	keyType, err := normalizeKeyType(req.KeyType)
 	if err != nil {
 		rest.Fail(w, http.StatusBadRequest, "%s", err)
@@ -618,8 +579,6 @@ func (a *ACME) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := a.deps.Cfg.Update(func(c *model.Config) error {
 		c.ACME.Email = email
-		c.ACME.CA = ca
-		c.ACME.CACustomURL = custom
 		c.ACME.KeyType = keyType
 		return nil
 	}); err != nil {
@@ -633,7 +592,7 @@ func (a *ACME) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 func (a *ACME) handleStatus(w http.ResponseWriter, r *http.Request) {
 	a.refreshStats(nil)
 	status := a.Status()
-	rest.OK(w, map[string]any{"status": status, "challenges": challengeCatalog(), "authorities": caCatalog()})
+	rest.OK(w, map[string]any{"status": status, "challenges": challengeCatalog()})
 }
 
 // challengeCatalog lists the supported challenge types for the UI.

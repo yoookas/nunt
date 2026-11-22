@@ -143,8 +143,8 @@
    - 跑够覆盖业务周期的时间（至少一个完整的工作日 + 一次批量任务/报表窗口）；
    - 在 WAF 页看命中日志，把误报的规则 ID 加进 `waf.disabledRules`，必要时降低 `waf.paranoiaLevel`；
    - 误报清零（或降到可接受）后再切 `waf.logOnly=false` + `waf.mode="block"`。
-2. **证书先在 staging CA 上跑通**：`acme.ca` 选 `letsencrypt-staging`（或 `custom` + `acme.caCustomUrl` 指向测试目录），确认 http-01 / dns-01 流程、入库、热加载都正常，再切回 `letsencrypt` 正式 CA。
-   - 注意 ACME 有速率限制，调试期反复签发用 staging，别把正式 CA 的配额打满。
+2. **证书先用测试域名跑通**：用一个不影响业务的子域（如 `test.example.com`）确认 http-01 / dns-01 流程、入库、热加载都正常，再给正式域名签发。
+   - 当前版本只连 Let's Encrypt 正式目录，没有 staging 可切；ACME 有严格的签发频率限制，调试期不要对同一域名反复试错。
 3. **业务流量先小范围**：先切一个低风险域名/路径，观察 30–60 分钟（错误率、5xx、WAF 拦截量、连接数），再逐步扩大。
 4. **管理面收紧放在最后一步之前**：确认隧道或白名单可用**之后**再改 `adminListen`/`adminAllowIps`——顺序反了会把自己关在门外（此时只能上机改 `config.json` 并重启）。
 
@@ -160,7 +160,7 @@
       （`internal/api/allowlist.go`，行为见第 2 节）；「只监听回环」是部署动作，勾选后仍须自己把 `adminListen` 改掉并从外网确认端口不可达（判据见第 6 节）
 - [x] 端口转发加每规则最大连接数 + 每 IP 连接上限 —— **代码已实现并有测试**（`maxConns` 默认 1024、`maxConnsPerIP` 默认 64、UDP 会话上限 1024）
 - [x] 反向代理加每规则速率限制 + 请求体上限 —— **代码已实现并有测试**（`proxy.rateLimitPerSec` / `proxy.maxBodyBytes`）
-- [ ] ACME 对真实 CA（先 staging 再正式）实测签发 + 续期 + 热加载 —— **保持未勾**：代码在，真实 CA 没跑过（见第 7 节第 2 条）
+- [ ] ACME 对真实 CA（Let's Encrypt）实测签发 + 续期 + 热加载 —— **保持未勾**：代码在，真实 CA 没跑过（见第 7 节第 2 条）
 - [x] CI 加 govulncheck + Dependabot —— **已实现**：阻塞式 `govulncheck` job + `.github/dependabot.yml`（见第 3.5 节）
 - [x] 容器契约在 CI 的真实 docker daemon 上验证通过 —— **已验证**：`docker-smoke.yml` 于 2026-10-15 首次全绿，覆盖镜像构建、
       以 uid 1000 运行、`setcap` 允许绑定低端口、`/data` 下 `config.json`/`secret.key` 权限 600、Dockerfile 的 HEALTHCHECK 变为
@@ -193,7 +193,7 @@
 | AdminAllowIPs 强制执行 | 把 `adminAllowIps` 设成非本机网段 → 立刻 403（登录页与静态资源同样 403）；`/healthz` 仍 200；概览里的 `adminAllowList.blocked` 增长；再把 `adminListen` 改为 `127.0.0.1:3113`，从外网 `nmap`/`curl` 确认端口不可达 |
 | 端口转发并发上限 | 用 `maxConns`/`maxConnsPerIP` 设小值（如 5 / 2），多开连接观察：超出被拒并落访问日志；连接释放后能恢复；UDP 规则超过 1024 会话被丢弃并记日志 |
 | 反代速率/体积极限 | `proxy.rateLimitPerSec` 设小值后用 `ab`/`hey` 打，确认超限返回限流响应且不误伤正常速率；`proxy.maxBodyBytes` 设 1MiB 后上传 2MiB 被拒、1MiB 通过 |
-| ACME 真实 CA | staging 上完成一次完整签发 + 到期前自动续期 + 不重启热加载（浏览器证书指纹变化）；再在正式 CA 上重复一次 |
+| ACME 真实 CA | 在 Let's Encrypt 上完成一次完整签发 + 到期前自动续期 + 不重启热加载（浏览器证书指纹变化）；测试域名与正式域名各跑一次 |
 | govulncheck + Dependabot | CI 上 `govulncheck` job 真实跑过一次并绿；故意引入一个已知漏洞版本时 job 变红；仓库 Insights → Dependency graph 能看到 Dependabot 的 PR |
 | 真实 Docker（compose up） | `docker compose -f docker-compose.yml up -d --build` 在目标主机上跑通一次；`docker-smoke.yml` 在 CI 上真实执行过一次并绿 |
 | CDN + 回源白名单 | 直接访问源站 IP 被拒（非 CDN 回源段）；经 CDN 正常；日志里看到真实客户端 IP；安全组/防火墙规则可复现导出 |
@@ -208,7 +208,7 @@
 以下都是「代码在，但没在真实条件下验过」，在勾选清单之前请先补上：
 
 1. **Docker 未实跑**：本机没有跑过 `docker compose up`；`.github/workflows/docker-smoke.yml` 已经写好（构建镜像 + host 网络启动 + 校验容器契约），并在 CI 上跑通过一次。
-2. **ACME 未对真实 CA 跑过**：没有在 Let's Encrypt（staging 或正式）上完成过真实签发；续期循环、失败重试、证书热加载都只有单元测试与本地自签验证。
+2. **ACME 未对真实 CA 跑过**：没有在 Let's Encrypt 上完成过真实签发；续期循环、失败重试、证书热加载都只有单元测试与本地自签验证。
 3. **DNS 提供商未真实联调**：`internal/dnsprov` 只保留了阿里云 DNS 与腾讯云 DNSPod 两家国内提供商，外加自定义回调；它们目前只有接口形状与单元测试，没有用真实账号调过 API（DDNS 与 ACME dns-01 都依赖它们）。
 4. **没有 race / 压测 / soak**：没有跑过 `go test -race` 的长时间运行，没有并发压测，没有 24h soak；连接泄漏、goroutine 泄漏、限流参数是否合适都还是未知数。
 5. **前端未真机浏览器验证**：管理界面只做过静态资源可访问性检查（HTTP 200），没有在真实浏览器里逐页点过（尤其是 WAF 规则编辑、SSE 日志这几处）。
@@ -220,4 +220,4 @@
 
 ## 8. 附：一句话版本
 
-> 管理面进隧道（或反代 + TLS + BasicAuth + 白名单 + adminProtect）；只开必要路由；端口转发配 ACL 与并发上限；反代配速率与体积上限；WAF 先 LogOnly 再 block；证书先 staging 再正式；上线后按 P0 → P1 → P2 逐条验证，**没验证过的就当它不存在**。
+> 管理面进隧道（或反代 + TLS + BasicAuth + 白名单 + adminProtect）；只开必要路由；端口转发配 ACL 与并发上限；反代配速率与体积上限；WAF 先 LogOnly 再 block；证书先用测试域名跑通再上正式域名；上线后按 P0 → P1 → P2 逐条验证，**没验证过的就当它不存在**。

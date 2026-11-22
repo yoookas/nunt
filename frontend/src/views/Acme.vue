@@ -22,8 +22,7 @@ const CHALLENGE_LABEL = { http: 'HTTP-01', dns: 'DNS-01', tls: 'TLS-ALPN-01' }
 const jobs = ref([])
 const certs = ref([])
 const providers = ref([])
-const acmeConfig = reactive({ email: '', ca: 'letsencrypt', caCustomUrl: '', keyType: 'ec256' })
-const authorities = ref([])
+const acmeConfig = reactive({ email: '', keyType: 'ec256' })
 const configModal = ref(false)
 const configSaving = ref(false)
 const loading = ref(true)
@@ -38,7 +37,6 @@ const jobForm = reactive({
   enable: true,
   domainsText: '',
   keyType: 'ec256',
-  ca: '',
   challenge: 'http',
   dnsProvider: '',
   dnsCreds: {},
@@ -65,7 +63,6 @@ const jobTitle = computed(() => (editing.value ? '编辑证书任务' : '新建�
 const jobColumns = [
   { title: '域名', dataIndex: 'domainsJoined', slotName: 'domains', ellipsis: true, tooltip: true },
   { title: '挑战方式', dataIndex: 'challenge', slotName: 'challenge', width: 120 },
-  { title: 'CA', dataIndex: 'ca', slotName: 'ca', width: 160, ellipsis: true, tooltip: true },
   { title: 'DNS 提供商', dataIndex: 'dnsProvider', slotName: 'provider', width: 160, ellipsis: true, tooltip: true },
   { title: '续期天数', dataIndex: 'renewDays', slotName: 'renewDays', width: 100 },
   { title: '启用', dataIndex: 'enable', slotName: 'enable', width: 90 },
@@ -176,17 +173,6 @@ function certTone(record) {
   return 'green'
 }
 
-function caLabel(id) {
-  if (!id) return '全局'
-  const found = authorities.value.find((item) => item.id === id)
-  return found ? found.title : id
-}
-
-function downloadCertificate(record) {
-  if (!record || !record.id) return
-  window.open(`/api/v1/acme/certificates/${encodeURIComponent(record.id)}/download`, '_blank', 'noopener')
-}
-
 function certSourceLabel(source) {
   if (!source) return '-'
   if (source === 'upload') return '上传'
@@ -194,28 +180,11 @@ function certSourceLabel(source) {
   return String(source)
 }
 
-const caOptions = computed(() =>
-  authorities.value.map((item) => ({ value: item.id, label: item.title || item.id })),
-)
-
-const jobCaOptions = computed(() => [
-  { value: '', label: `跟随全局（${caTitle.value}）` },
-  ...caOptions.value,
-])
-
-const caTitle = computed(() => {
-  const found = authorities.value.find((item) => item.id === acmeConfig.ca)
-  return found ? found.title : acmeConfig.ca || '-'
-})
-
 async function loadConfig() {
   try {
     const data = await api.get('/api/v1/acme/config')
     acmeConfig.email = data?.email || ''
-    acmeConfig.ca = data?.ca || 'letsencrypt'
-    acmeConfig.caCustomUrl = data?.caCustomUrl || ''
     acmeConfig.keyType = data?.keyType || 'ec256'
-    authorities.value = Array.isArray(data?.authorities) ? data.authorities : []
   } catch (err) {
     Message.error(`读取 ACME 设置失败：${errorText(err)}`)
   }
@@ -231,17 +200,10 @@ async function saveConfig() {
     Message.warning('联系邮箱格式不正确')
     return false
   }
-  const custom = acmeConfig.caCustomUrl.trim()
-  if (acmeConfig.ca === 'custom' && !/^https?:\/\//i.test(custom)) {
-    Message.warning('自定义 CA 需要 http(s) 目录地址')
-    return false
-  }
   configSaving.value = true
   try {
     await api.put('/api/v1/acme/config', {
       email,
-      ca: acmeConfig.ca,
-      caCustomUrl: custom,
       keyType: acmeConfig.keyType,
     })
     Message.success('ACME 设置已保存')
@@ -310,7 +272,6 @@ function openJobForm(job) {
   jobForm.enable = base.enable !== false
   jobForm.domainsText = (Array.isArray(base.domains) ? base.domains : []).join('\n')
   jobForm.keyType = normalizeKeyType(base.keyType)
-  jobForm.ca = base.ca || ''
   jobForm.challenge = normalizeChallenge(base.challenge)
   jobForm.dnsProvider = base.dnsProvider || ''
   jobForm.dnsCreds = { ...(base.dnsCreds || {}) }
@@ -355,7 +316,6 @@ async function saveJob() {
     enable: !!jobForm.enable,
     domains,
     keyType: normalizeKeyType(jobForm.keyType),
-    ca: jobForm.ca,
     challenge: normalizeChallenge(jobForm.challenge),
     dnsProvider: jobForm.challenge === 'dns' ? jobForm.dnsProvider : '',
     dnsCreds: creds,
@@ -550,7 +510,7 @@ onUnmounted(() => {
       <div>
         <h2>证书</h2>
         <div class="sub">
-          共 {{ jobs.length }} 个证书任务、{{ certs.length }} 张证书；CA：{{ caTitle }}<span v-if="acmeConfig.email"> · {{ acmeConfig.email }}</span>
+          共 {{ jobs.length }} 个证书任务、{{ certs.length }} 张证书；CA：Let's Encrypt<span v-if="acmeConfig.email"> · {{ acmeConfig.email }}</span>
         </div>
       </div>
       <div class="spacer" />
@@ -572,7 +532,7 @@ onUnmounted(() => {
             :columns="jobColumns"
             :pagination="false"
             row-key="id"
-            :scroll="{ x: 1140 }"
+            :scroll="{ x: 980 }"
             size="small"
           >
             <template #domains="{ record }">
@@ -583,9 +543,6 @@ onUnmounted(() => {
             </template>
             <template #challenge="{ record }">
               <a-tag>{{ challengeLabel(record.challenge) }}</a-tag>
-            </template>
-            <template #ca="{ record }">
-              <a-tag :color="record.ca ? 'arcoblue' : 'gray'">{{ caLabel(record.ca) }}</a-tag>
             </template>
             <template #provider="{ record }">
               <span v-if="normalizeChallenge(record.challenge) === 'dns'" class="mono">
@@ -694,20 +651,12 @@ onUnmounted(() => {
         </a-form-item>
 
         <a-row :gutter="16">
-          <a-col :span="8">
+          <a-col :span="12">
             <a-form-item label="挑战方式">
               <a-select v-model="jobForm.challenge" :options="CHALLENGE_OPTIONS" @change="ensureCredFields" />
             </a-form-item>
           </a-col>
-          <a-col :span="8">
-            <a-form-item label="证书颁发机构">
-              <a-select v-model="jobForm.ca" :options="jobCaOptions" />
-              <template #extra>
-                <span class="muted">任务可以单独选 CA；账户按 CA 分开注册</span>
-              </template>
-            </a-form-item>
-          </a-col>
-          <a-col :span="8">
+          <a-col :span="12">
             <a-form-item label="密钥类型">
               <a-select v-model="jobForm.keyType" :options="KEY_OPTIONS" />
             </a-form-item>
@@ -859,13 +808,6 @@ onUnmounted(() => {
         <a-form-item label="联系邮箱">
           <a-input v-model="acmeConfig.email" placeholder="ops@example.com（可选）" allow-clear />
           <template #extra>注册 ACME 账户时提交；所有证书任务共用一个账户</template>
-        </a-form-item>
-        <a-form-item label="证书颁发机构（CA）">
-          <a-select v-model="acmeConfig.ca" :options="caOptions" />
-          <template #extra>切换 CA 后，下次签发才会使用新的目录；已有证书不受影响</template>
-        </a-form-item>
-        <a-form-item v-if="acmeConfig.ca === 'custom'" label="自定义目录 URL">
-          <a-input v-model="acmeConfig.caCustomUrl" placeholder="https://acme.example.com/directory" allow-clear />
         </a-form-item>
         <a-form-item label="默认密钥类型">
           <a-select v-model="acmeConfig.keyType" :options="KEY_OPTIONS" />

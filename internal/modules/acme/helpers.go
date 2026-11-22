@@ -32,77 +32,8 @@ const (
 	wireTLSALPN01 = "tls-alpn-01"
 )
 
-// caDirectories maps the configured CA name to its ACME directory URL. A
-// custom CA is configured with ACME.CACustomURL instead.
-var caDirectories = map[string]string{
-	"letsencrypt":         "https://acme-v02.api.letsencrypt.org/directory",
-	"letsencrypt-staging": "https://acme-staging-v02.api.letsencrypt.org/directory",
-}
-
-// caCatalog lists the selectable certificate authorities in a stable order.
-func caCatalog() []map[string]string {
-	ids := []string{"letsencrypt", "letsencrypt-staging", "custom"}
-	out := make([]map[string]string, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, map[string]string{"id": id, "title": caTitle(id), "directory": caDirectories[id]})
-	}
-	return out
-}
-
-// caTitle returns a human readable name for the CA selector.
-func caTitle(id string) string {
-	switch id {
-	case "letsencrypt":
-		return "Let's Encrypt"
-	case "letsencrypt-staging":
-		return "Let's Encrypt (staging)"
-	case "custom":
-		return "Custom ACME directory"
-	default:
-		return id
-	}
-}
-
-// directoryURL resolves the ACME directory URL for a configuration.
-func directoryURL(cfg *model.ACMEConfig) (string, error) {
-	if cfg == nil {
-		return "", fmt.Errorf("acme configuration is missing")
-	}
-	name := strings.ToLower(strings.TrimSpace(cfg.CA))
-	switch name {
-	case "", "letsencrypt":
-		return caDirectories["letsencrypt"], nil
-	case "custom":
-		url := strings.TrimSpace(cfg.CACustomURL)
-		if url == "" {
-			return "", fmt.Errorf("the custom CA requires a directory url")
-		}
-		if !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "http://") {
-			return "", fmt.Errorf("custom CA url %q must be an absolute http(s) url", url)
-		}
-		return url, nil
-	}
-	if url, ok := caDirectories[name]; ok {
-		return url, nil
-	}
-	return "", fmt.Errorf("unknown certificate authority %q", cfg.CA)
-}
-
-// normalizeCA validates a certificate authority selector. An empty value means
-// "use the instance default".
-func normalizeCA(v string) (string, error) {
-	ca := strings.ToLower(strings.TrimSpace(v))
-	if ca == "" {
-		return "", nil
-	}
-	if ca == "custom" {
-		return ca, nil
-	}
-	if _, ok := caDirectories[ca]; !ok {
-		return "", fmt.Errorf("unknown certificate authority %q", v)
-	}
-	return ca, nil
-}
+// letsencryptDirectory is the only ACME directory this build talks to.
+const letsencryptDirectory = "https://acme-v02.api.letsencrypt.org/directory"
 
 // normalizeChallenge returns the canonical (stored) form of a challenge
 // selector. Both the short form used by the configuration and the RFC 8555
