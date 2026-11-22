@@ -1,7 +1,9 @@
 package acme
 
 import (
+	"context"
 	"crypto/tls"
+	"errors"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -112,5 +114,41 @@ func TestRenewalJobCoversOnDemandCertificates(t *testing.T) {
 	job, ok = renewalJob(cfg, certs.Info{Source: "acme", JobID: "job-1"})
 	if !ok || job.ID != "job-1" {
 		t.Fatalf("configured job = %+v, %v", job, ok)
+	}
+}
+
+// A job that keeps failing must not notify on every retry: the first failure
+// is announced, then at most once per failureNotifyInterval.
+func TestRecordFailureThrottlesNotifications(t *testing.T) {
+	a := &ACME{attempts: map[string]*attempt{}}
+	if !a.recordFailure("job-1", errors.New("boom")) {
+		t.Fatal("the first failure was not announced")
+	}
+	if a.recordFailure("job-1", errors.New("boom")) {
+		t.Fatal("the second failure was announced again")
+	}
+	a.schedMu.Lock()
+	a.attempts["job-1"].notified = time.Now().Add(-failureNotifyInterval - time.Minute)
+	a.schedMu.Unlock()
+	if !a.recordFailure("job-1", errors.New("boom")) {
+		t.Fatal("a failure after the interval was not announced")
+	}
+}
+
+// The number of concurrent orders is bounded, so a batch of due certificates
+// cannot all hit the CA at once.
+func TestIssueSlotsAreBounded(t *testing.T) {
+	a := &ACME{issueSem: make(chan struct{}, 1)}
+	if err := a.acquireIssue(context.Background()); err != nil {
+		t.Fatalf("first slot: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := a.acquireIssue(ctx); err == nil {
+		t.Fatal("a second order was admitted past the bound")
+	}
+	a.releaseIssue()
+	if err := a.acquireIssue(context.Background()); err != nil {
+		t.Fatalf("the slot was not released: %v", err)
 	}
 }

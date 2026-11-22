@@ -28,10 +28,14 @@ const DefaultAdminListen = ":3113"
 
 // Store is a concurrency safe holder of the configuration.
 type Store struct {
-	mu   sync.RWMutex
-	cfg  *model.Config
-	path string
-	subs []func(*model.Config)
+	mu sync.RWMutex
+	// writeMu serialises writers. Update validates and writes the file outside
+	// mu so readers are never blocked by disk I/O; writeMu is what keeps two
+	// concurrent updates from losing each other's changes.
+	writeMu sync.Mutex
+	cfg     *model.Config
+	path    string
+	subs    []func(*model.Config)
 }
 
 // Load reads the configuration from path, creating it with defaults (and a
@@ -91,9 +95,12 @@ func (s *Store) File() string { return filepath.Base(s.path) }
 // Snapshot returns a deep copy of the configuration. Callers may keep and
 // modify it freely; changes only become visible through Update.
 func (s *Store) Snapshot() *model.Config {
+	// The stored pointer is replaced, never mutated in place, so it can be
+	// cloned outside the lock: readers are not blocked by the JSON round trip.
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return clone(s.cfg)
+	cfg := s.cfg
+	s.mu.RUnlock()
+	return clone(cfg)
 }
 
 func clone(c *model.Config) *model.Config {
@@ -109,36 +116,46 @@ func clone(c *model.Config) *model.Config {
 // Update applies fn to the live configuration, persists the result and
 // notifies subscribers. When fn returns an error nothing is written.
 func (s *Store) Update(fn func(*model.Config) error) error {
-	s.mu.Lock()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	s.mu.RLock()
 	next := clone(s.cfg)
+	s.mu.RUnlock()
+
 	if err := fn(next); err != nil {
-		s.mu.Unlock()
 		return err
 	}
 	next.Version = CurrentVersion
 	Normalize(next)
 	if err := Validate(next); err != nil {
-		s.mu.Unlock()
 		return err
 	}
+	// The file is written without holding mu: readers keep serving the previous
+	// configuration until the new one is durable, and they are never stalled by
+	// the disk.
 	if err := store.WriteJSONAtomic(s.path, next, 0o600); err != nil {
-		s.mu.Unlock()
 		return err
 	}
+
+	s.mu.Lock()
 	s.cfg = next
 	subs := make([]func(*model.Config), len(s.subs))
 	copy(subs, s.subs)
 	s.mu.Unlock()
 
-	snapshot := clone(next)
-	for _, fn := range subs {
-		fn(snapshot)
+	for _, sub := range subs {
+		// Every subscriber gets its own copy: one that keeps or mutates the
+		// snapshot cannot influence another.
+		sub(clone(next))
 	}
 	return nil
 }
 
-// Subscribe registers a callback invoked (outside the lock) after every
-// successful update.
+// Subscribe registers a callback invoked after every successful update. The
+// callbacks run in registration order and outside mu, but while the writer lock
+// is held, so a subscriber must never call Update itself (that would block on
+// the same writer) and must not keep the snapshot it receives.
 func (s *Store) Subscribe(fn func(*model.Config)) {
 	s.mu.Lock()
 	s.subs = append(s.subs, fn)
