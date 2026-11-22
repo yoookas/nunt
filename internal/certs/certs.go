@@ -42,9 +42,12 @@ type entry struct {
 
 // Store holds every certificate known to the service.
 type Store struct {
-	dir   string
-	mu    sync.RWMutex
-	items map[string]*entry
+	dir string
+	// mu guards the in-memory index; writeMu serialises the directory swap so
+	// two Add calls for the same id can never interleave their renames.
+	mu      sync.RWMutex
+	writeMu sync.Mutex
+	items   map[string]*entry
 }
 
 // Open loads (or creates) the certificate directory.
@@ -61,12 +64,29 @@ func Open(dir string) (*Store, error) {
 		if !e.IsDir() {
 			continue
 		}
+		// Leftovers of an interrupted swap (or of a crash) are removed: they
+		// are never a valid certificate and must not be loaded.
+		if strings.HasPrefix(e.Name(), ".") {
+			_ = os.RemoveAll(filepath.Join(dir, e.Name()))
+			continue
+		}
 		if err := s.load(e.Name()); err != nil {
 			// A broken certificate must not stop the service.
 			continue
 		}
 	}
 	return s, nil
+}
+
+// syncDir flushes a directory entry so a renamed certificate survives a crash.
+// It is best effort: some platforms refuse to sync a directory.
+func syncDir(path string) {
+	d, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	_ = d.Sync()
+	_ = d.Close()
 }
 
 // Dir returns the certificate directory.
@@ -143,18 +163,49 @@ func (s *Store) Add(domains []string, certPEM, keyPEM []byte, source, jobID stri
 		KeyType:   keyTypeOf(leaf),
 	}
 	dir := filepath.Join(s.dir, id)
-	if err := store.EnsureDir(dir, 0o700); err != nil {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	// Build the new certificate in a temporary directory and swap it in with
+	// renames. A crash therefore leaves either the old pair or the new pair,
+	// never a certificate next to the key of another one.
+	tmp, err := os.MkdirTemp(s.dir, ".tmp-")
+	if err != nil {
 		return Info{}, err
 	}
-	if err := store.WriteFileAtomic(filepath.Join(dir, "cert.pem"), certPEM, 0o600); err != nil {
+	defer func() { _ = os.RemoveAll(tmp) }()
+	if err := store.WriteFileAtomic(filepath.Join(tmp, "cert.pem"), certPEM, 0o600); err != nil {
 		return Info{}, err
 	}
-	if err := store.WriteFileAtomic(filepath.Join(dir, "key.pem"), keyPEM, 0o600); err != nil {
+	if err := store.WriteFileAtomic(filepath.Join(tmp, "key.pem"), keyPEM, 0o600); err != nil {
 		return Info{}, err
 	}
-	if err := store.WriteJSONAtomic(filepath.Join(dir, "meta.json"), info, 0o600); err != nil {
+	if err := store.WriteJSONAtomic(filepath.Join(tmp, "meta.json"), info, 0o600); err != nil {
 		return Info{}, err
 	}
+	syncDir(tmp)
+
+	backup := ""
+	if _, statErr := os.Stat(dir); statErr == nil {
+		backup = filepath.Join(s.dir, ".old-"+id)
+		if err := os.RemoveAll(backup); err != nil {
+			return Info{}, err
+		}
+		if err := os.Rename(dir, backup); err != nil {
+			return Info{}, err
+		}
+	}
+	if err := os.Rename(tmp, dir); err != nil {
+		if backup != "" {
+			_ = os.Rename(backup, dir)
+		}
+		return Info{}, err
+	}
+	if backup != "" {
+		_ = os.RemoveAll(backup)
+	}
+	syncDir(s.dir)
+
 	s.mu.Lock()
 	s.items[id] = &entry{info: info, cert: &cert}
 	s.mu.Unlock()
@@ -216,6 +267,8 @@ func (s *Store) Delete(id string) error {
 	s.mu.Lock()
 	delete(s.items, id)
 	s.mu.Unlock()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	return os.RemoveAll(filepath.Join(s.dir, id))
 }
 

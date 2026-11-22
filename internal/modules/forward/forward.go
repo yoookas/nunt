@@ -245,6 +245,7 @@ func (f *Forward) Stats() map[string]any {
 	active, accepted := 0, uint64(0)
 	up, down := uint64(0), uint64(0)
 	rejectedRule, rejectedIP := uint64(0), uint64(0)
+	rejectedQueue := uint64(0)
 	listening := 0
 	for _, p := range proxies {
 		active += int(p.active.Load())
@@ -253,6 +254,7 @@ func (f *Forward) Stats() map[string]any {
 		down += p.downBytes.Load()
 		rejectedRule += p.rejectedRule.Load()
 		rejectedIP += p.rejectedIP.Load()
+		rejectedQueue += p.rejectedQueue.Load()
 		if p.isRunning() {
 			listening++
 		}
@@ -267,6 +269,7 @@ func (f *Forward) Stats() map[string]any {
 		"downBytes":         down,
 		"rejectedRuleLimit": rejectedRule,
 		"rejectedIPLimit":   rejectedIP,
+		"rejectedQueueFull": rejectedQueue,
 		"accessLogEnabled":  f.access.enabledNow(),
 	}
 }

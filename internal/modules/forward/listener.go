@@ -39,6 +39,11 @@ type proxy struct {
 	pending sync.WaitGroup
 	wg      sync.WaitGroup
 
+	// udpQueue feeds the relay workers; rejectedQueue counts the datagrams
+	// dropped because every worker was busy.
+	udpQueue      chan udpPacket
+	rejectedQueue atomic.Uint64
+
 	// limitMu guards connPerIP, the per client address counter of the admitted
 	// TCP connections; sessPerIP is the same counter for the UDP sessions and is
 	// guarded by mu, which already owns the session table.
@@ -82,6 +87,21 @@ func newProxyFor(f *Forward, r model.ForwardRule, proto string) *proxy {
 	}
 }
 
+// The datagram relay is bounded: a fixed worker pool drains a fixed queue, so a
+// flood costs memory that is already allocated instead of one goroutine per
+// packet.
+const (
+	udpWorkers   = 4
+	udpQueueSize = 256
+)
+
+// udpPacket is one datagram waiting for a worker.
+type udpPacket struct {
+	pc     net.PacketConn
+	client net.Addr
+	data   []byte
+}
+
 // ---------------------------------------------------------------------------
 // lifecycle
 // ---------------------------------------------------------------------------
@@ -113,9 +133,19 @@ func (p *proxy) start() error {
 		p.lastErr = nil
 		p.mu.Unlock()
 
-		p.wg.Add(2)
-		go p.udpReadLoop(pc)
+		p.udpQueue = make(chan udpPacket, udpQueueSize)
+		p.wg.Add(2 + udpWorkers)
+		go func() {
+			defer p.wg.Done()
+			p.udpReadLoop(pc)
+			// The read loop is the only producer: closing the queue after it
+			// returns lets the workers drain and exit on a normal shutdown.
+			close(p.udpQueue)
+		}()
 		go p.udpSweepLoop()
+		for i := 0; i < udpWorkers; i++ {
+			go p.udpWorker()
+		}
 		p.logStarted(addr)
 		return nil
 	}
@@ -591,7 +621,6 @@ func (s *udpSession) close() {
 }
 
 func (p *proxy) udpReadLoop(pc net.PacketConn) {
-	defer p.wg.Done()
 	buf := make([]byte, udpBufferSize)
 	for {
 		n, client, err := pc.ReadFrom(buf)
@@ -613,8 +642,34 @@ func (p *proxy) udpReadLoop(pc net.PacketConn) {
 		}
 		payload := make([]byte, n)
 		copy(payload, buf[:n])
-		p.wg.Add(1)
-		go p.handleUDP(pc, client, payload)
+		p.enqueue(pc, client, payload)
+	}
+}
+
+// enqueue hands one datagram to the worker pool. It drops the datagram when the
+// queue is full, which is the correct behaviour for UDP and keeps a flood from
+// growing without bound.
+func (p *proxy) enqueue(pc net.PacketConn, client net.Addr, data []byte) bool {
+	if p.udpQueue == nil {
+		return false
+	}
+	select {
+	case p.udpQueue <- udpPacket{pc: pc, client: client, data: data}:
+		return true
+	default:
+		if n := p.rejectedQueue.Add(1); n%1000 == 1 && p.f != nil && p.f.log != nil {
+			p.f.log.Warn("forward: the udp worker queue is full, datagrams are dropped",
+				"rule", ruleLabel(p.rule), "dropped", n)
+		}
+		return false
+	}
+}
+
+// udpWorker relays the datagrams of the queue until it is closed.
+func (p *proxy) udpWorker() {
+	defer p.wg.Done()
+	for pkt := range p.udpQueue {
+		p.handleUDP(pkt.pc, pkt.client, pkt.data)
 	}
 }
 
@@ -624,7 +679,6 @@ func (p *proxy) udpReadLoop(pc net.PacketConn) {
 // connection limits of the rule so it cannot be abused as a reflection
 // amplifier.
 func (p *proxy) handleUDP(pc net.PacketConn, client net.Addr, data []byte) {
-	defer p.wg.Done()
 	if !p.isRunning() {
 		return
 	}

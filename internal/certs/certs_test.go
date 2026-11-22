@@ -9,7 +9,9 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -111,5 +113,99 @@ func TestTLSConfigHardening(t *testing.T) {
 	}
 	if _, err := store.GetCertificate(&tls.ClientHelloInfo{ServerName: "missing.example"}); err == nil {
 		t.Fatal("an empty store must not hand out certificates")
+	}
+}
+
+// selfSignedPair builds a certificate and key for tests.
+func selfSignedPair(t *testing.T, cn string) ([]byte, []byte) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(time.Now().UnixNano()),
+		Subject:      pkix.Name{CommonName: cn},
+		DNSNames:     []string{"example.com"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	return certPEM, keyPEM
+}
+
+// A replaced certificate is swapped in atomically: a reader can only ever load
+// a matching certificate and key pair, and no temporary directory survives.
+func TestAddReplacesAtomically(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	certA, keyA := selfSignedPair(t, "first")
+	if _, err := s.Add([]string{"example.com"}, certA, keyA, "manual", "", false); err != nil {
+		t.Fatalf("add A: %v", err)
+	}
+	certB, keyB := selfSignedPair(t, "second")
+	if _, err := s.Add([]string{"example.com"}, certB, keyB, "manual", "", false); err != nil {
+		t.Fatalf("add B: %v", err)
+	}
+
+	// A fresh store must load the replacement, not a mix of the two.
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	info, ok := reopened.Get(IDFor([]string{"example.com"}))
+	if !ok {
+		t.Fatal("the certificate was not loaded")
+	}
+	if info.Source != "manual" {
+		t.Fatalf("info = %+v", info)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	for _, e := range entries {
+		if len(e.Name()) > 0 && e.Name()[0] == '.' {
+			t.Fatalf("temporary directory left behind: %s", e.Name())
+		}
+	}
+}
+
+// Concurrent replacements of the same id must never pair one certificate with
+// the key of another: a fresh load verifies the pair.
+func TestConcurrentAddKeepsPairsMatched(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			cert, key := selfSignedPair(t, "concurrent")
+			if _, err := s.Add([]string{"example.com"}, cert, key, "manual", "", false); err != nil {
+				t.Errorf("add %d: %v", n, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if _, err := Open(dir); err != nil {
+		t.Fatalf("the store does not load after concurrent replacements: %v", err)
 	}
 }

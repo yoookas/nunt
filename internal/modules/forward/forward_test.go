@@ -887,3 +887,21 @@ func TestForwardTCPIdleTimeoutKeepsActiveConnections(t *testing.T) {
 		t.Fatal("the idle timeout left a silent connection open")
 	}
 }
+
+// The datagram relay is bounded: when the queue is full the packet is dropped
+// instead of spawning another goroutine.
+func TestUDPQueueDropsWhenFull(t *testing.T) {
+	p := &proxy{
+		f:        &Forward{},
+		udpQueue: make(chan udpPacket, 1),
+	}
+	if !p.enqueue(nil, nil, []byte("first")) {
+		t.Fatal("the first datagram was not queued")
+	}
+	if p.enqueue(nil, nil, []byte("second")) {
+		t.Fatal("a datagram was queued past the bound")
+	}
+	if got := p.rejectedQueue.Load(); got != 1 {
+		t.Fatalf("rejectedQueue = %d, want 1", got)
+	}
+}
