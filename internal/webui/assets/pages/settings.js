@@ -595,7 +595,7 @@ class SettingsPage extends NuntElement {
         type: 'tags',
         value: [],
         placeholder: '输入范围后按回车添加',
-        hint: '留空表示默认权限；例如 read、write，回车 / 逗号都能添加',
+        hint: '留空表示完全管理权限（等同 admin）；填 read 只会得到只读权限，回车 / 逗号都能添加',
       },
     ]);
     this.openPageDialog({

@@ -251,7 +251,7 @@ func (w *Web) capRequestBody(rw http.ResponseWriter, r *rule, req *http.Request)
 		return true
 	}
 	req.Body = &cappedBody{
-		rc:     http.MaxBytesReader(rw, req.Body, limit),
+		rc:     http.MaxBytesReader(underlyingWriter(rw), req.Body, limit),
 		limit:  limit,
 		onFull: func() { w.noteBodyRejected(r, req, limit) },
 	}

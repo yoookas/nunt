@@ -938,3 +938,48 @@ func TestRunNowOutlivesItsRequestContext(t *testing.T) {
 		return ok && st.Runs > 0
 	})
 }
+
+// The cron closure captures a copy of the task, so editing its actions or its
+// expression must rebuild the entry; an unchanged definition must not churn.
+func TestEditRebuildsTheSchedule(t *testing.T) {
+	deps, store, _ := testDeps(t)
+	base := model.Task{
+		ID: "t1", Name: "one", Cron: "@every 1h", Enable: true,
+		Actions: []model.TaskAction{{Type: model.ActionNotify, Value: "a"}},
+	}
+	setTasks(t, store, base)
+	tk := New(deps)
+	if err := tk.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer func() { _ = tk.Stop(context.Background()) }()
+
+	before, ok := tk.entries["t1"]
+	if !ok {
+		t.Fatal("the task was not scheduled")
+	}
+
+	// An unchanged definition keeps the entry.
+	tk.Reload(store.Snapshot())
+	if got := tk.entries["t1"]; got.entry != before.entry {
+		t.Fatalf("an unchanged task was rescheduled (%v -> %v)", before.entry, got.entry)
+	}
+
+	// Editing the actions rebuilds it: the old closure would keep running "a".
+	edited := base
+	edited.Actions = []model.TaskAction{{Type: model.ActionNotify, Value: "b"}}
+	setTasks(t, store, edited)
+	tk.Reload(store.Snapshot())
+	afterActions := tk.entries["t1"]
+	if afterActions.entry == before.entry {
+		t.Fatal("the entry was not rebuilt after the actions changed")
+	}
+
+	// Editing the expression rebuilds it as well.
+	edited.Cron = "@every 2h"
+	setTasks(t, store, edited)
+	tk.Reload(store.Snapshot())
+	if got := tk.entries["t1"]; got.entry == afterActions.entry {
+		t.Fatal("the entry was not rebuilt after the cron expression changed")
+	}
+}

@@ -136,6 +136,9 @@ func newTestSite(t *testing.T, deps *module.Deps, root string, mutate func(*mode
 	if err != nil {
 		t.Fatalf("site: %v", err)
 	}
+	if closer, ok := h.(io.Closer); ok {
+		t.Cleanup(func() { _ = closer.Close() })
+	}
 	return h
 }
 

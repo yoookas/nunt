@@ -2,8 +2,12 @@ package web
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/nunt/nunt/internal/model"
 )
 
 // A reconfiguration that gives up waiting must not take the rebuild slot. The
@@ -50,5 +54,58 @@ func TestRebuildGateSurvivesACancelledApply(t *testing.T) {
 	defer stopCancel()
 	if err := w.Stop(stopCtx); err != nil {
 		t.Fatalf("stop: %v", err)
+	}
+}
+
+// http.MaxBytesReader flags the response through an interface with an
+// unexported method, so it must be handed the real writer instead of a
+// middleware wrapper; otherwise the server drains an oversized upload.
+func TestUnderlyingWriterReachesTheRealWriter(t *testing.T) {
+	base := httptest.NewRecorder()
+	wrapped := &accessRecorder{ResponseWriter: base}
+	if got := underlyingWriter(wrapped); got != http.ResponseWriter(base) {
+		t.Fatalf("underlyingWriter returned %T, want the recorder", got)
+	}
+	if got := underlyingWriter(base); got != base {
+		t.Fatalf("underlyingWriter changed a plain writer: %T", got)
+	}
+}
+
+// A rule whose upstream changed must not keep the proxy (and its idle
+// connections) of the old upstream in the global cache forever.
+func TestProxyCacheIsPrunedOnReload(t *testing.T) {
+	store := testConfigStore(t)
+	w := New(testDeps(t, store))
+
+	oldTarget := &model.ProxyTarget{Targets: []string{"http://127.0.0.1:9001"}}
+	oldURL, err := parseTarget(oldTarget.Targets[0])
+	if err != nil {
+		t.Fatalf("parse target: %v", err)
+	}
+	oldKey := proxyCacheKey("r1", oldURL.Scheme+"://"+oldURL.Host, oldTarget)
+	oldRule := &rule{id: "r1", name: "old", spec: &model.WebRule{ID: "r1", Proxy: oldTarget}}
+	proxyFor(w, oldRule, upstream{url: oldURL, target: oldURL.Scheme + "://" + oldURL.Host}, oldTarget)
+	if _, ok := proxyCache.Load(oldKey); !ok {
+		t.Fatal("the proxy was not cached")
+	}
+
+	newTarget := &model.ProxyTarget{Targets: []string{"http://127.0.0.1:9002"}}
+	newRule := &rule{id: "r1", name: "new", spec: &model.WebRule{ID: "r1", Proxy: newTarget}}
+	pruneProxyCache([]*rule{newRule})
+
+	if _, ok := proxyCache.Load(oldKey); ok {
+		t.Fatal("the proxy of the replaced upstream is still cached")
+	}
+
+	// A rule that is still configured keeps its entry.
+	newURL, err := parseTarget(newTarget.Targets[0])
+	if err != nil {
+		t.Fatalf("parse target: %v", err)
+	}
+	newKey := proxyCacheKey("r1", newURL.Scheme+"://"+newURL.Host, newTarget)
+	proxyFor(w, newRule, upstream{url: newURL, target: newURL.Scheme + "://" + newURL.Host}, newTarget)
+	pruneProxyCache([]*rule{newRule})
+	if _, ok := proxyCache.Load(newKey); !ok {
+		t.Fatal("a proxy that is still in use was pruned")
 	}
 }

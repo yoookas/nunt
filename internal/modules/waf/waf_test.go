@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -946,5 +947,44 @@ func TestDirectiveStreamOrdering(t *testing.T) {
 	cfg.Mode = model.WAFModeDetect
 	if b := renderDirectives(cfg, nil); !strings.Contains(b.String(), "SecRuleEngine DetectionOnly") {
 		t.Fatalf("detect mode must emit DetectionOnly: \n%s", b.String())
+	}
+}
+
+// brokenBody fails halfway through, which makes the engine fail to inspect the
+// request. In enforce mode such a request must not reach the upstream as if it
+// had been checked.
+type brokenBody struct{ sent bool }
+
+func (b *brokenBody) Read(p []byte) (int, error) {
+	if !b.sent {
+		b.sent = true
+		p[0] = 'a'
+		return 1, nil
+	}
+	return 0, errors.New("client aborted the body")
+}
+
+func (b *brokenBody) Close() error { return nil }
+
+func TestInspectionFailureIsClosedInEnforceMode(t *testing.T) {
+	cfg := baseConfig()
+	cfg.Mode = model.WAFModeBlock
+	m := newTestModule(t, cfg)
+	up := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("upstream"))
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "http://app.example.com/upload", &brokenBody{})
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.ContentLength = 64
+	rec := httptest.NewRecorder()
+	m.Middleware("rule", up).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 when the body cannot be inspected", rec.Code)
+	}
+	if got := rec.Body.String(); strings.Contains(got, "upstream") {
+		t.Fatalf("the request reached the upstream: %q", got)
 	}
 }

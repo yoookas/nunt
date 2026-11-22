@@ -299,7 +299,13 @@ func bareWeb() *Web { return &Web{} }
 func newStaticStore(t *testing.T, root string) *staticFS {
 	t.Helper()
 	store := &staticFS{label: root}
-	store.open = func() (vfs.FS, error) { return vfs.OpenLocal(root, "test", true) }
+	store.open = func() (vfs.FS, func(), error) {
+		fsys, err := vfs.OpenLocal(root, "test", true)
+		if err != nil {
+			return nil, nil, err
+		}
+		return fsys, func() { _ = fsys.Close() }, nil
+	}
 	fsys, err := store.get()
 	if err != nil {
 		t.Fatalf("open %s: %v", root, err)

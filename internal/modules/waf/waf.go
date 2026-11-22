@@ -354,6 +354,16 @@ func (w *WAF) inspect(st requestState, ruleName string, rw http.ResponseWriter, 
 	out, perr := st.engine.process(r.Context(), meta)
 	f.inspection = false
 
+	// When the engine could not inspect the request (the body reader failed,
+	// for example) the request must not be forwarded as if it had been checked.
+	// Enforce mode answers 500; detect and log-only keep the traffic flowing so
+	// a rollout never takes the service down.
+	if perr != nil && st.engine.enforces() {
+		f.served = true
+		http.Error(rw, "internal server error", http.StatusInternalServerError)
+		return true, perr
+	}
+
 	// The enforcement decision mirrors the one taken inside the engine so the
 	// counters always describe what actually happened.
 	enforce := st.engine.enforces()

@@ -62,9 +62,9 @@ func (w *Web) tlsSetup(m *matcher, cfg *tls.Config) *tls.Config {
 
 // certificateFor loads the certificate of one rule from the certificate store.
 func (w *Web) certificateFor(r *rule) (*tls.Certificate, error) {
-	if r.tls.cert != nil {
-		return r.tls.cert, nil
-	}
+	// The certificate store keeps the parsed certificate and swaps it on
+	// renewal, so the rule must not hold its own copy: a per rule cache raced
+	// between handshakes and kept serving the old certificate after a renewal.
 	if w.deps.Certs == nil {
 		return nil, fmt.Errorf("web: certificate store is unavailable")
 	}
@@ -72,12 +72,7 @@ func (w *Web) certificateFor(r *rule) (*tls.Certificate, error) {
 	if len(domains) == 0 {
 		return nil, fmt.Errorf("web: rule %q has no certificate domain", r.name)
 	}
-	cert, err := w.deps.Certs.GetCertificate(&tls.ClientHelloInfo{ServerName: domains[0]})
-	if err != nil {
-		return nil, err
-	}
-	r.tls.cert = cert
-	return cert, nil
+	return w.deps.Certs.GetCertificate(&tls.ClientHelloInfo{ServerName: domains[0]})
 }
 
 // ruleHasWildcard reports whether a rule declares a wildcard domain matching

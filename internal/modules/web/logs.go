@@ -176,13 +176,23 @@ func (a *accessRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 // Unwrap lets http.ResponseController reach the underlying writer.
 func (a *accessRecorder) Unwrap() http.ResponseWriter { return a.ResponseWriter }
 
-// requestTooLarge forwards the signal of http.MaxBytesReader to the underlying
-// writer so the server closes the connection instead of draining the rest of an
-// oversized upload.
-func (a *accessRecorder) requestTooLarge() {
-	if r, ok := a.ResponseWriter.(interface{ requestTooLarge() }); ok {
-		r.requestTooLarge()
+// underlyingWriter unwraps the middleware writers down to the writer net/http
+// knows about. http.MaxBytesReader marks the response through an unexported
+// interface, which a wrapper implemented in another package can never satisfy,
+// so anything that has to talk to net/http directly is handed this writer.
+func underlyingWriter(w http.ResponseWriter) http.ResponseWriter {
+	for i := 0; i < 8; i++ {
+		unwrapper, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return w
+		}
+		next := unwrapper.Unwrap()
+		if next == nil || next == w {
+			return w
+		}
+		w = next
 	}
+	return w
 }
 
 // maxLogLimit bounds the number of entries a single API call may return.

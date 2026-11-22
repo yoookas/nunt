@@ -366,10 +366,11 @@ func createShare(ctx context.Context, deps *module.Deps, rule *model.WebRule, re
 
 // checkExists verifies that the shared path is reachable inside the rule.
 func checkExists(ctx context.Context, deps *module.Deps, rule *model.WebRule, clean string) error {
-	fsys, _, _, err := openTarget(deps, rule)
+	fsys, _, _, release, err := openTarget(deps, rule)
 	if err != nil {
 		return err
 	}
+	defer release()
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -485,11 +486,12 @@ func mountDownload(deps *module.Deps) http.HandlerFunc {
 			rest.Fail(w, http.StatusNotFound, "存储管理器不可用")
 			return
 		}
-		fsys, _, err := deps.Mounts.Get(mountID)
+		fsys, _, release, err := deps.Mounts.Get(mountID)
 		if err != nil {
 			rest.Fail(w, http.StatusNotFound, "存储挂载不存在或不可用")
 			return
 		}
+		defer release()
 		clean, err := vfs.Clean(r.URL.Query().Get("path"))
 		if err != nil {
 			rest.Fail(w, http.StatusNotFound, "路径无效")

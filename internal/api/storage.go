@@ -134,11 +134,12 @@ func (s *Server) handleDeleteMount(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleBrowseMount(w http.ResponseWriter, r *http.Request) {
 	id := idParam(r, "id")
-	fsys, mnt, err := s.opts.Mounts.Get(id)
+	fsys, mnt, release, err := s.opts.Mounts.Get(id)
 	if err != nil {
 		rest.Fail(w, http.StatusBadRequest, "%s", err.Error())
 		return
 	}
+	defer release()
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		path = "/"

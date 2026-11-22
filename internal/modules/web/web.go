@@ -493,6 +493,11 @@ func (w *Web) apply(ctx context.Context, cfg *model.Config) error {
 		w.ensureCertificates(m)
 	}
 
+	// Release the cached proxies of rules that are gone or whose upstream
+	// configuration changed, so a long lived process does not keep every
+	// upstream it has ever served.
+	pruneProxyCache(compiled)
+
 	w.mu.Lock()
 	total := len(w.bindings)
 	w.mu.Unlock()

@@ -51,7 +51,7 @@ type Task struct {
 
 	mu      sync.Mutex
 	cron    *cron.Cron
-	entries map[string]cron.EntryID
+	entries map[string]scheduledTask
 	states  map[string]*taskState
 	manual  map[string]time.Time
 	cfg     *model.Config
@@ -65,7 +65,7 @@ type Task struct {
 func New(deps *module.Deps) *Task {
 	t := &Task{
 		deps:    deps,
-		entries: map[string]cron.EntryID{},
+		entries: map[string]scheduledTask{},
 		states:  map[string]*taskState{},
 		manual:  map[string]time.Time{},
 		sem:     make(chan struct{}, maxConcurrentRuns),
@@ -119,7 +119,7 @@ func (t *Task) Stop(ctx context.Context) error {
 	t.stopped = true
 	c := t.cron
 	t.cron = nil
-	t.entries = map[string]cron.EntryID{}
+	t.entries = map[string]scheduledTask{}
 	t.manual = map[string]time.Time{}
 	states := make([]*taskState, 0, len(t.states))
 	for _, st := range t.states {
@@ -278,6 +278,23 @@ type Item struct {
 // scheduling
 // ---------------------------------------------------------------------------
 
+// scheduledTask is one cron entry together with the fingerprint of the task it
+// runs. The closure registered with the cron library captures a copy of the
+// task, so a change to the actions or to the expression has to rebuild it.
+type scheduledTask struct {
+	entry cron.EntryID
+	key   string
+}
+
+// scheduleKey fingerprints everything the scheduled closure depends on.
+func scheduleKey(item model.Task) string {
+	data, err := json.Marshal(item)
+	if err != nil {
+		return fmt.Sprintf("%#v", item)
+	}
+	return string(data)
+}
+
 // apply rebuilds the cron entries. It must be called with t.mu held.
 func (t *Task) apply(cfg *model.Config) {
 	if t.cron == nil {
@@ -296,11 +313,14 @@ func (t *Task) apply(cfg *model.Config) {
 		desired[item.ID] = item
 	}
 
-	for id, entry := range t.entries {
-		if _, keep := desired[id]; keep {
+	for id, scheduled := range t.entries {
+		item, keep := desired[id]
+		if keep && scheduled.key == scheduleKey(item) {
 			continue
 		}
-		t.cron.Remove(entry)
+		// Either the task is gone or its definition changed: the cron closure
+		// captured the old model.Task, so the entry has to be rebuilt.
+		t.cron.Remove(scheduled.entry)
 		delete(t.entries, id)
 	}
 	for id, item := range desired {
@@ -313,7 +333,7 @@ func (t *Task) apply(cfg *model.Config) {
 			t.log.Error("task: cannot schedule task", "task", taskLabel(task), "cron", task.Cron, "error", err)
 			continue
 		}
-		t.entries[id] = entry
+		t.entries[id] = scheduledTask{entry: entry, key: scheduleKey(item)}
 	}
 }
 

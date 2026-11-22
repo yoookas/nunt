@@ -194,6 +194,47 @@ func (w *Web) proxySite(r *rule, cfg *model.Config) (*webSite, error) {
 // survive configuration reloads.
 var proxyCache sync.Map // cache key -> *httputil.ReverseProxy
 
+// pruneProxyCache drops the cached proxies the current rule set can no longer
+// use and closes their idle connections. Entries that a surviving rule still
+// reaches are kept, so a reload does not throw away healthy connection pools.
+func pruneProxyCache(rules []*rule) {
+	live := make(map[string]bool, len(rules))
+	for _, r := range rules {
+		if r.spec == nil || r.spec.Proxy == nil {
+			continue
+		}
+		target := r.spec.Proxy
+		for _, raw := range target.Targets {
+			u, err := parseTarget(raw)
+			if err != nil {
+				continue
+			}
+			live[proxyCacheKey(r.id, u.Scheme+"://"+u.Host, target)] = true
+		}
+	}
+	proxyCache.Range(func(key, value any) bool {
+		cacheKey, _ := key.(string)
+		if live[cacheKey] {
+			return true
+		}
+		if p, ok := value.(*httputil.ReverseProxy); ok {
+			closeIdleConnections(p.Transport)
+		}
+		proxyCache.Delete(key)
+		return true
+	})
+}
+
+// closeIdleConnections releases the pooled connections of a transport.
+func closeIdleConnections(rt http.RoundTripper) {
+	switch t := rt.(type) {
+	case *http.Transport:
+		t.CloseIdleConnections()
+	case *http2.Transport:
+		t.CloseIdleConnections()
+	}
+}
+
 // proxyFor returns the cached reverse proxy of one upstream.
 func proxyFor(w *Web, r *rule, up upstream, target *model.ProxyTarget) *httputil.ReverseProxy {
 	key := proxyCacheKey(r.id, up.target, target)

@@ -42,7 +42,7 @@ func (s *Service) Site(rule *model.WebRule) (http.Handler, error) {
 	if rule.Files == nil {
 		return nil, fmt.Errorf("webdav rule %q: no storage is configured", rule.Name)
 	}
-	fsys, readOnly, label, err := s.open(rule)
+	fsys, readOnly, label, release, err := s.open(rule)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +66,23 @@ func (s *Service) Site(rule *model.WebRule) (http.Handler, error) {
 	if log != nil {
 		log.Info("webdav site ready", "rule", rule.ID, "path", model.NormalizePath(rule.Path), "storage", label, "readOnly", readOnly)
 	}
-	return handler, nil
+	return &closingHandler{Handler: handler, release: release}, nil
+}
+
+// closingHandler keeps the storage handle of a WebDAV site and releases it when
+// the web module replaces the rule.
+type closingHandler struct {
+	http.Handler
+	release func()
+}
+
+// Close releases the storage handle owned by the site.
+func (h *closingHandler) Close() error {
+	if h.release != nil {
+		h.release()
+		h.release = nil
+	}
+	return nil
 }
 
 // RegisterAPI mounts the management endpoints.
@@ -87,26 +103,30 @@ func (s *Service) logger() *slog.Logger {
 
 // open resolves the rule target into a file system, the effective read-only
 // flag and a label for the logs.
-func (s *Service) open(rule *model.WebRule) (vfs.FS, bool, string, error) {
+func (s *Service) open(rule *model.WebRule) (vfs.FS, bool, string, func(), error) {
 	files := rule.Files
 	if s.deps == nil || s.deps.Mounts == nil {
-		return nil, false, "", errors.New("webdav: storage manager is not available")
+		return nil, false, "", nil, errors.New("webdav: storage manager is not available")
 	}
 	if strings.TrimSpace(files.MountID) != "" {
-		fsys, mnt, err := s.deps.Mounts.Get(files.MountID)
+		fsys, mnt, release, err := s.deps.Mounts.Get(files.MountID)
 		if err != nil {
-			return nil, false, "", fmt.Errorf("webdav rule %q: %w", rule.Name, err)
+			return nil, false, "", nil, fmt.Errorf("webdav rule %q: %w", rule.Name, err)
 		}
-		return fsys, files.ReadOnly || mnt.ReadOnly || fsys.ReadOnly(), mnt.Name, nil
+		return fsys, files.ReadOnly || mnt.ReadOnly || fsys.ReadOnly(), mnt.Name, release, nil
 	}
 	if strings.TrimSpace(files.Root) == "" {
-		return nil, false, "", fmt.Errorf("webdav rule %q: either a mount or a directory is required", rule.Name)
+		return nil, false, "", nil, fmt.Errorf("webdav rule %q: either a mount or a directory is required", rule.Name)
 	}
 	fsys, err := s.deps.Mounts.Local(files.Root, rule.Name, files.ReadOnly)
 	if err != nil {
-		return nil, false, "", fmt.Errorf("webdav rule %q: %w", rule.Name, err)
+		return nil, false, "", nil, fmt.Errorf("webdav rule %q: %w", rule.Name, err)
 	}
-	return fsys, files.ReadOnly || fsys.ReadOnly(), fsys.Name(), nil
+	release := func() {}
+	if c, ok := fsys.(interface{ Close() error }); ok {
+		release = func() { _ = c.Close() }
+	}
+	return fsys, files.ReadOnly || fsys.ReadOnly(), fsys.Name(), release, nil
 }
 
 // ---------------------------------------------------------------------------

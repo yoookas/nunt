@@ -56,10 +56,22 @@ type site struct {
 	showHidden bool
 	shares     *shareStore
 	log        *slog.Logger
+	// release closes the storage handle this site owns. The web module calls
+	// Close once the rule is replaced and the in flight requests are done.
+	release func()
+}
+
+// Close releases the storage handle owned by the site.
+func (s *site) Close() error {
+	if s != nil && s.release != nil {
+		s.release()
+		s.release = nil
+	}
+	return nil
 }
 
 func newSite(deps *module.Deps, rule *model.WebRule) (*site, error) {
-	fsys, readOnly, label, err := openTarget(deps, rule)
+	fsys, readOnly, label, release, err := openTarget(deps, rule)
 	if err != nil {
 		return nil, err
 	}
@@ -73,6 +85,7 @@ func newSite(deps *module.Deps, rule *model.WebRule) (*site, error) {
 	}
 	s := &site{
 		deps:       deps,
+		release:    release,
 		rule:       rule,
 		fs:         fsys,
 		prefix:     model.NormalizePath(rule.Path),

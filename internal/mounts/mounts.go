@@ -5,7 +5,6 @@ package mounts
 import (
 	"fmt"
 	"log/slog"
-	"sync"
 
 	"github.com/nunt/nunt/internal/config"
 	"github.com/nunt/nunt/internal/model"
@@ -13,41 +12,23 @@ import (
 	"github.com/nunt/nunt/internal/vfs"
 )
 
-type cacheItem struct {
-	fs          vfs.FS
-	closer      func() error
-	fingerprint string
-}
-
-// Manager resolves mount ids to file systems and caches them.
+// Manager resolves mount ids to file systems.
 type Manager struct {
 	cfg *config.Store
 	box *secret.Box
 	log *slog.Logger
-
-	mu    sync.Mutex
-	cache map[string]cacheItem
 }
 
 // New creates a manager bound to the configuration store.
 func New(cfg *config.Store, box *secret.Box, log *slog.Logger) *Manager {
-	m := &Manager{cfg: cfg, box: box, log: log, cache: map[string]cacheItem{}}
-	cfg.Subscribe(func(*model.Config) { m.Invalidate() })
-	return m
+	return &Manager{cfg: cfg, box: box, log: log}
 }
 
-// Invalidate drops every cached backend (called on configuration changes).
-func (m *Manager) Invalidate() {
-	m.mu.Lock()
-	items := m.cache
-	m.cache = map[string]cacheItem{}
-	m.mu.Unlock()
-	for _, item := range items {
-		if item.closer != nil {
-			_ = item.closer()
-		}
-	}
-}
+// Invalidate is kept for the callers that used to drop a shared cache. Backends
+// are no longer shared between sites: every Get returns a handle owned by the
+// caller, so a configuration change can never close a file system that a
+// running site is still using.
+func (m *Manager) Invalidate() {}
 
 // List returns the configured mounts.
 func (m *Manager) List() []model.Mount {
@@ -64,37 +45,25 @@ func (m *Manager) Find(id string) (model.Mount, bool) {
 	return model.Mount{}, false
 }
 
-// Get returns the file system of a mount.
-func (m *Manager) Get(id string) (vfs.FS, model.Mount, error) {
+// Get opens the file system of a mount. The caller owns the returned handle and
+// releases it with release when the site that uses it goes away.
+func (m *Manager) Get(id string) (vfs.FS, model.Mount, func(), error) {
 	mnt, ok := m.Find(id)
 	if !ok {
-		return nil, model.Mount{}, fmt.Errorf("mount %q does not exist", id)
+		return nil, model.Mount{}, nil, fmt.Errorf("mount %q does not exist", id)
 	}
 	if !mnt.Enable {
-		return nil, mnt, fmt.Errorf("mount %q is disabled", mnt.Name)
+		return nil, mnt, nil, fmt.Errorf("mount %q is disabled", mnt.Name)
 	}
-	fp := fingerprint(mnt)
-	m.mu.Lock()
-	if item, ok := m.cache[id]; ok && item.fingerprint == fp {
-		m.mu.Unlock()
-		return item.fs, mnt, nil
-	}
-	if old, ok := m.cache[id]; ok {
-		if old.closer != nil {
-			_ = old.closer()
-		}
-		delete(m.cache, id)
-	}
-	m.mu.Unlock()
-
 	fsys, closer, err := m.open(mnt)
 	if err != nil {
-		return nil, mnt, err
+		return nil, mnt, nil, err
 	}
-	m.mu.Lock()
-	m.cache[id] = cacheItem{fs: fsys, closer: closer, fingerprint: fp}
-	m.mu.Unlock()
-	return fsys, mnt, nil
+	release := func() {}
+	if closer != nil {
+		release = func() { _ = closer() }
+	}
+	return fsys, mnt, release, nil
 }
 
 func (m *Manager) open(mnt model.Mount) (vfs.FS, func() error, error) {
@@ -137,8 +106,4 @@ func (m *Manager) Test(mnt model.Mount) error {
 	}
 	_, err = fsys.List(nil, "/", false) //nolint:staticcheck // nil ctx is fine for local listing
 	return err
-}
-
-func fingerprint(m model.Mount) string {
-	return fmt.Sprintf("%s|%s|%s|%s|%s|%t|%t", m.Type, m.Root, m.URL, m.Username, m.Password, m.ReadOnly, m.InsecureTLS)
 }

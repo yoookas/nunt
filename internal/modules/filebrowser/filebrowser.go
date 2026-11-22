@@ -43,32 +43,40 @@ func (s *Service) RegisterAPI(mux *rest.Mux) { RegisterFilesAPI(mux, s.deps) }
 
 // openTarget resolves the storage configured by a rule into a file system,
 // the effective read-only flag and a label for logs.
-func openTarget(deps *module.Deps, rule *model.WebRule) (vfs.FS, bool, string, error) {
+func openTarget(deps *module.Deps, rule *model.WebRule) (vfs.FS, bool, string, func(), error) {
 	if rule == nil {
-		return nil, false, "", errors.New("filebrowser: rule is nil")
+		return nil, false, "", nil, errors.New("filebrowser: rule is nil")
 	}
 	if rule.Files == nil {
-		return nil, false, "", fmt.Errorf("filebrowser rule %q: no storage is configured", rule.Name)
+		return nil, false, "", nil, fmt.Errorf("filebrowser rule %q: no storage is configured", rule.Name)
 	}
 	if deps == nil || deps.Mounts == nil {
-		return nil, false, "", errors.New("filebrowser: storage manager is not available")
+		return nil, false, "", nil, errors.New("filebrowser: storage manager is not available")
 	}
 	files := rule.Files
 	if files.MountID != "" {
-		fsys, mnt, err := deps.Mounts.Get(files.MountID)
+		fsys, mnt, release, err := deps.Mounts.Get(files.MountID)
 		if err != nil {
-			return nil, false, "", fmt.Errorf("filebrowser rule %q: %w", rule.Name, err)
+			return nil, false, "", nil, fmt.Errorf("filebrowser rule %q: %w", rule.Name, err)
 		}
-		return fsys, files.ReadOnly || mnt.ReadOnly || fsys.ReadOnly(), mnt.Name, nil
+		return fsys, files.ReadOnly || mnt.ReadOnly || fsys.ReadOnly(), mnt.Name, release, nil
 	}
 	if strings.TrimSpace(files.Root) == "" {
-		return nil, false, "", fmt.Errorf("filebrowser rule %q: either a mount or a directory is required", rule.Name)
+		return nil, false, "", nil, fmt.Errorf("filebrowser rule %q: either a mount or a directory is required", rule.Name)
 	}
 	fsys, err := deps.Mounts.Local(files.Root, rule.Name, files.ReadOnly)
 	if err != nil {
-		return nil, false, "", fmt.Errorf("filebrowser rule %q: %w", rule.Name, err)
+		return nil, false, "", nil, fmt.Errorf("filebrowser rule %q: %w", rule.Name, err)
 	}
-	return fsys, files.ReadOnly || fsys.ReadOnly(), fsys.Name(), nil
+	return fsys, files.ReadOnly || fsys.ReadOnly(), fsys.Name(), closerOf(fsys), nil
+}
+
+// closerOf returns a release function for a file system that owns a handle.
+func closerOf(fsys vfs.FS) func() {
+	if c, ok := fsys.(interface{ Close() error }); ok {
+		return func() { _ = c.Close() }
+	}
+	return func() {}
 }
 
 // logger returns a logger tagged for this package.

@@ -2,7 +2,6 @@ package web
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -20,8 +19,7 @@ type ruleTLS struct {
 	mode   string
 	certID string
 	hsts   bool
-	// cert caches the loaded certificate; it is written under the web mutex.
-	cert        *tls.Certificate
+	// certDomains is the certificate the rule asks the store for.
 	certDomains []string
 }
 
@@ -275,17 +273,19 @@ func (rt *router) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	ctx := withRule(req.Context(), r)
 	req = req.WithContext(ctx)
 
-	// The chain is built outer to inner: access control, rate limit, basic
-	// auth, WAF and finally the business handler. The rate limit sits in front
-	// of the password check so a flood cannot burn the hashing budget.
-	handler := rt.web.accessHandler(r, r.site.handler)
-	if r.limiter != nil {
-		handler = rt.web.rateLimitHandler(r, handler)
-	}
+	// The chain is built inner to outer: basic auth, WAF, access control, rate
+	// limit and finally HSTS. Execution therefore runs the rate limit before
+	// the password check (a flood must not burn the Argon2 hashing budget) and
+	// the access control before the WAF (a denied address costs no inspection).
+	handler := r.site.handler
 	if r.spec.BasicAuth != nil && r.spec.BasicAuth.Enable {
 		handler = rt.web.basicAuthHandler(r, handler)
 	}
 	handler = rt.web.wafHandler(r, handler)
+	handler = rt.web.accessHandler(r, handler)
+	if r.limiter != nil {
+		handler = rt.web.rateLimitHandler(r, handler)
+	}
 	if r.tls.hsts && isTLSRequest(req) {
 		handler = rt.web.hstsHandler(r, handler)
 	}

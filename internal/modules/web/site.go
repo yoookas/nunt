@@ -84,35 +84,101 @@ type cachedSite struct {
 }
 
 // webSite bundles the handler of a rule with the resources that have to be
-// released when the rule disappears from the configuration.
+// released when the rule disappears from the configuration. A site that owns
+// storage (a file browser or WebDAV root) releases it only after the requests
+// that are still running have finished.
 type webSite struct {
 	handler   http.Handler
 	closer    func() error
 	upstreams []string
 	// static holds the lazily opened file system of a static rule.
 	static *staticFS
+
+	mu       sync.Mutex
+	inflight int
+	closed   bool
+	released bool
 }
 
-// close releases the resources of a site.
+// guard keeps requests from running after the site was closed.
+func (s *webSite) guard(h http.Handler) http.Handler {
+	if s.closer == nil {
+		return h
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			http.Error(w, "route is not available", http.StatusServiceUnavailable)
+			return
+		}
+		s.inflight++
+		s.mu.Unlock()
+		defer func() {
+			s.mu.Lock()
+			s.inflight--
+			done := s.closed && s.inflight == 0
+			s.mu.Unlock()
+			if done {
+				s.release()
+			}
+		}()
+		h.ServeHTTP(w, r)
+	})
+}
+
+// release gives up the owned resources exactly once.
+func (s *webSite) release() {
+	s.mu.Lock()
+	if s.released {
+		s.mu.Unlock()
+		return
+	}
+	s.released = true
+	closer, static := s.closer, s.static
+	s.mu.Unlock()
+	if static != nil {
+		static.close()
+	}
+	if closer != nil {
+		_ = closer()
+	}
+}
+
+// close releases the resources of a site, waiting for in flight requests when
+// the site owns storage.
 func (s *webSite) close() {
 	if s == nil {
 		return
 	}
-	if s.static != nil {
-		s.static.close()
-	}
 	s.detach()
 }
 
-// detach releases the per request resources of a site but keeps the storage
-// open, so a request that is already being served can still finish reading.
+// detach marks the site as closed. A site that owns storage keeps it open until
+// the requests that are already running have finished reading from it.
 func (s *webSite) detach() {
 	if s == nil {
 		return
 	}
-	if s.closer != nil {
-		_ = s.closer()
+	s.mu.Lock()
+	s.closed = true
+	done := s.inflight == 0
+	s.mu.Unlock()
+	if done {
+		s.release()
 	}
+}
+
+// storageSite wraps a handler that owns a storage handle. Such a site is never
+// cached (storeSite skips closers): the handle belongs to one rule build and is
+// released by detach once the requests that are running have finished.
+func (w *Web) storageSite(handler http.Handler) *webSite {
+	ws := &webSite{handler: handler}
+	if closer, ok := handler.(io.Closer); ok {
+		ws.closer = closer.Close
+		ws.handler = ws.guard(handler)
+	}
+	return ws
 }
 
 // buildSite creates the business handler of a rule.
@@ -129,13 +195,13 @@ func (w *Web) buildSite(r *rule, cfg *model.Config) (*webSite, error) {
 		if err != nil {
 			return nil, fmt.Errorf("rule %q: %w", r.name, err)
 		}
-		return &webSite{handler: handler}, nil
+		return w.storageSite(handler), nil
 	case model.WebTypeWebDAV:
 		handler, err := w.dav.Site(r.spec)
 		if err != nil {
 			return nil, fmt.Errorf("rule %q: %w", r.name, err)
 		}
-		return &webSite{handler: handler}, nil
+		return w.storageSite(handler), nil
 	default:
 		return nil, fmt.Errorf("rule %q: unsupported type %q", r.name, r.spec.Type)
 	}
@@ -223,7 +289,8 @@ type staticFS struct {
 	err      error
 	label    string
 	readOnly bool
-	open     func() (vfs.FS, error)
+	open     func() (vfs.FS, func(), error)
+	release  func()
 }
 
 func (s *staticFS) get() (vfs.FS, error) {
@@ -232,7 +299,7 @@ func (s *staticFS) get() (vfs.FS, error) {
 			s.err = fmt.Errorf("storage %q is not configured", s.label)
 			return
 		}
-		s.fs, s.err = s.open()
+		s.fs, s.release, s.err = s.open()
 		if s.err != nil {
 			s.err = fmt.Errorf("open storage %q: %w", s.label, s.err)
 		}
@@ -242,11 +309,12 @@ func (s *staticFS) get() (vfs.FS, error) {
 
 // close releases the file system when it was opened.
 func (s *staticFS) close() {
-	if s == nil || s.fs == nil {
+	if s == nil {
 		return
 	}
-	if c, ok := s.fs.(io.Closer); ok {
-		_ = c.Close()
+	if s.release != nil {
+		s.release()
+		s.release = nil
 	}
 }
 
@@ -259,15 +327,23 @@ func (w *Web) staticSite(r *rule) (*webSite, error) {
 	switch {
 	case target.MountID != "":
 		store.label = "mount " + target.MountID
-		store.open = func() (vfs.FS, error) {
-			fsys, _, err := w.deps.Mounts.Get(target.MountID)
-			return fsys, err
+		store.open = func() (vfs.FS, func(), error) {
+			fsys, _, release, err := w.deps.Mounts.Get(target.MountID)
+			return fsys, release, err
 		}
 	case strings.TrimSpace(target.Root) != "":
 		root := strings.TrimSpace(target.Root)
 		store.label = root
-		store.open = func() (vfs.FS, error) {
-			return w.deps.Mounts.Local(root, r.name, true)
+		store.open = func() (vfs.FS, func(), error) {
+			fsys, err := w.deps.Mounts.Local(root, r.name, true)
+			if err != nil {
+				return nil, nil, err
+			}
+			release := func() {}
+			if c, ok := fsys.(io.Closer); ok {
+				release = func() { _ = c.Close() }
+			}
+			return fsys, release, nil
 		}
 	default:
 		return nil, fmt.Errorf("rule %q: a mount or a root directory is required", r.name)
