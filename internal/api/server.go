@@ -62,6 +62,9 @@ type Server struct {
 	// the requests that the allow list guard rejected.
 	allowList   atomic.Pointer[ipAllowList]
 	allowDenied atomic.Int64
+	// bindSessionIP mirrors System.SessionBindIP, refreshed by a configuration
+	// subscriber so the request path does not have to clone the configuration.
+	bindSessionIP atomic.Bool
 	// bg tracks best effort background work (for example persisting the last
 	// use of an API token) so it can be joined before the data directory goes
 	// away.
@@ -108,8 +111,10 @@ func New(opts Options) *Server {
 	// The admin IP allow list is parsed once here and refreshed by the
 	// configuration subscriber, never on the request path.
 	s.allowList.Store(newIPAllowList(log, opts.Cfg.Snapshot().System))
+	s.bindSessionIP.Store(opts.Cfg.Snapshot().System.SessionBindIP)
 	opts.Cfg.Subscribe(func(cfg *model.Config) {
 		s.allowList.Store(newIPAllowList(log, cfg.System))
+		s.bindSessionIP.Store(cfg.System.SessionBindIP)
 	})
 	s.mux = rest.NewMux(log, rest.Recover(log), rest.AccessLog(log))
 	s.mux = s.mux.With(s.apiLimit)
@@ -138,13 +143,22 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	rest.OK(w, map[string]any{"status": "ok", "time": time.Now().Format(time.RFC3339)})
 }
 
+// rateLimitKey identifies the caller for the API rate limiter. It honours the
+// trust proxy setting, so clients behind a reverse proxy get a bucket each
+// instead of sharing the proxy address.
+func (s *Server) rateLimitKey(r *http.Request) string {
+	if ip := s.clientIP(r); ip != nil {
+		return ip.String()
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
 func (s *Server) apiLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := r.RemoteAddr
-		if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-			ip = host
-		}
-		if !s.apiLimiter.Allow(ip) {
+		if !s.apiLimiter.Allow(s.rateLimitKey(r)) {
 			rest.Fail(w, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
 			return
 		}
@@ -234,6 +248,13 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		sess, ok := s.opts.Sessions.Get(token)
 		if !ok {
 			rest.FailCode(w, http.StatusUnauthorized, "unauthorized", "会话已过期，请重新登录")
+			return
+		}
+		if !s.sessionMatches(sess, r) {
+			// The cookie is being used by another client: drop it instead of
+			// letting the copied token live until it expires.
+			s.opts.Sessions.Delete(token)
+			rest.FailCode(w, http.StatusUnauthorized, "session_mismatch", "会话与当前客户端不匹配，请重新登录")
 			return
 		}
 		// Cookie authenticated state changing requests must carry the CSRF token.
@@ -345,6 +366,21 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+// sessionMatches checks that a session is used by the client it was issued to.
+// The user agent is compared against the one captured at login; the address is
+// only compared when the administrator enabled it. A session that recorded no
+// user agent (older sessions, or clients that send none) skips that check.
+func (s *Server) sessionMatches(sess *security.Session, r *http.Request) bool {
+	if sess.UserAgent != "" && sess.UserAgent != r.UserAgent() {
+		return false
+	}
+	if !s.bindSessionIP.Load() || sess.IP == "" {
+		return true
+	}
+	ip := s.clientIP(r)
+	return ip != nil && ip.String() == sess.IP
 }
 
 // clientIP returns the caller address honouring the trust proxy setting.

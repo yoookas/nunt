@@ -101,10 +101,16 @@ func (p *desecProvider) Set(ctx context.Context, rec Record) error {
 	if err != nil {
 		return err
 	}
+	records := []string{rec.Value}
+	if existing != nil && normalizeType(rec.Type) == "TXT" {
+		// Keep the other values of the same TXT set (ACME publishes one per
+		// challenge); replacing the set would invalidate the pending order.
+		records = mergeTXTRecords(existing.Records, rec.Value)
+	}
 	payload := desecRRset{
 		Subname: desecSubname(rec),
 		Type:    normalizeType(rec.Type),
-		Records: []string{rec.Value},
+		Records: records,
 	}
 	if ttl := rec.TTL; ttl > 0 {
 		payload.TTL = ttl

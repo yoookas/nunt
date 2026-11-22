@@ -193,17 +193,33 @@ func (p *nameCheapProvider) setHosts(ctx context.Context, domain string, hosts [
 func applyRecord(hosts []nameCheapHost, rec Record, remove bool) ([]nameCheapHost, bool) {
 	name := strings.Trim(recordName(rec), ".")
 	typ := normalizeType(rec.Type)
+	// A TXT set is multi valued (ACME publishes one value per challenge) while
+	// the other types hold a single value per name, so only TXT records are
+	// merged and everything else is replaced.
+	merge := typ == "TXT" && !remove
+	want := strings.TrimSpace(rec.Value)
 	out := make([]nameCheapHost, 0, len(hosts)+1)
 	matched := false
+	kept := false
 	for _, host := range hosts {
-		if strings.EqualFold(strings.Trim(host.Name, "."), name) && strings.EqualFold(host.Type, typ) {
-			matched = true
+		if !hostMatches(host, name, typ) {
+			out = append(out, host)
 			continue
+		}
+		matched = true
+		if !merge {
+			continue
+		}
+		if strings.TrimSpace(strings.Trim(host.Address, `"`)) == want {
+			kept = true
 		}
 		out = append(out, host)
 	}
 	if remove {
 		return out, matched
+	}
+	if merge && kept {
+		return out, true
 	}
 	out = append(out, nameCheapHost{
 		Name:    name,
@@ -212,6 +228,11 @@ func applyRecord(hosts []nameCheapHost, rec Record, remove bool) ([]nameCheapHos
 		TTL:     strconv.Itoa(ttlOr(rec, 1800)),
 	})
 	return out, true
+}
+
+// hostMatches reports whether a host row belongs to the same name and type.
+func hostMatches(host nameCheapHost, name, typ string) bool {
+	return strings.EqualFold(strings.Trim(host.Name, "."), name) && strings.EqualFold(host.Type, typ)
 }
 
 // nameCheapAddress formats the Address column; TXT values need at least

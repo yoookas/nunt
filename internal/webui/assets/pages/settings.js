@@ -221,6 +221,7 @@ class SettingsPage extends NuntElement {
       { name: 'loginMaxFail', label: '登录失败次数上限', type: 'number', value: data.loginMaxFail || 5, min: 1, max: 100 },
       { name: 'loginLockMinutes', label: '锁定时长（分钟）', type: 'number', value: data.loginLockMin || 15, min: 1, max: 1440 },
       { name: 'trustProxy', label: '信任反向代理', type: 'switch', value: !!data.trustProxy, text: '使用 X-Forwarded-For 识别客户端 IP' },
+      { name: 'sessionBindIp', label: '会话绑定客户端 IP', type: 'switch', value: !!data.sessionBindIp, text: '开启后会话只能从登录时的地址使用（移动网络会频繁重登）；User-Agent 始终校验' },
       { name: 'checkUpdate', label: '检查更新', type: 'switch', value: data.checkUpdate !== false, text: '启动时检查新版本' },
       { name: 'theme', label: '默认主题', type: 'select', value: data.theme || 'dark', options: THEMES, hint: '仅作为新设备的默认值，本机选择保存在浏览器中' },
       {
@@ -271,6 +272,7 @@ class SettingsPage extends NuntElement {
       adminListen: String(values.adminListen || '').trim(),
       adminAllowIps: splitList(values.adminAllowIps),
       trustProxy: !!values.trustProxy,
+      sessionBindIp: !!values.sessionBindIp,
       logLevel: values.logLevel || 'info',
       sessionTtlHours: Number(values.sessionTtlHours) || 24,
       loginMaxFail: Number(values.loginMaxFail) || 5,

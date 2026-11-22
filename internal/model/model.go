@@ -59,10 +59,14 @@ type SystemConfig struct {
 	LogLevel        string   `json:"logLevel"`
 	SessionTTLHours int      `json:"sessionTtlHours"`
 	LoginMaxFail    int      `json:"loginMaxFail"`
-	LoginLockMin    int      `json:"loginLockMinutes"`
-	Theme           string   `json:"theme"`
-	CheckUpdate     bool     `json:"checkUpdate"`
-	BaseURL         string   `json:"baseUrl,omitempty"`
+	// SessionBindIP also binds a browser session to the client address it was
+	// created from. It is off by default because clients on mobile networks
+	// change address often; the user agent is always compared.
+	SessionBindIP bool   `json:"sessionBindIp,omitempty"`
+	LoginLockMin  int    `json:"loginLockMinutes"`
+	Theme         string `json:"theme"`
+	CheckUpdate   bool   `json:"checkUpdate"`
+	BaseURL       string `json:"baseUrl,omitempty"`
 }
 
 // User is an administrator account.

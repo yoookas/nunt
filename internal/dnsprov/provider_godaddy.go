@@ -68,6 +68,25 @@ func goDaddyRecordURL(rec Record) string {
 		goDaddyAPI, url.PathEscape(rootDomain(rec.Domain)), normalizeType(rec.Type), escapeHost(recordName(rec)))
 }
 
+// find reads the records stored under one name and type.
+func (p *goDaddyProvider) find(ctx context.Context, rec Record) ([]goDaddyRecord, error) {
+	res, err := p.req(ctx, http.MethodGet, goDaddyRecordURL(rec), "", "", p.headers())
+	if err != nil {
+		return nil, fmt.Errorf("godaddy: read record: %w", err)
+	}
+	if res.Status == http.StatusNotFound {
+		return nil, nil
+	}
+	if err := res.statusError(); err != nil {
+		return nil, fmt.Errorf("godaddy: read record: %w", err)
+	}
+	var out []goDaddyRecord
+	if err := res.decodeJSON(&out); err != nil {
+		return nil, fmt.Errorf("godaddy: decode record: %w", err)
+	}
+	return out, nil
+}
+
 func (p *goDaddyProvider) Set(ctx context.Context, rec Record) error {
 	if strings.TrimSpace(rec.Value) == "" {
 		return fmt.Errorf("godaddy: record value is empty")
@@ -77,6 +96,25 @@ func (p *goDaddyProvider) Set(ctx context.Context, rec Record) error {
 		Name: recordName(rec),
 		TTL:  ttlOr(rec, 600),
 	}}
+	if normalizeType(rec.Type) == "TXT" {
+		// A PUT replaces the whole set, so the other TXT values (one per ACME
+		// challenge) have to be carried over.
+		existing, err := p.find(ctx, rec)
+		if err != nil {
+			return err
+		}
+		if len(existing) > 0 {
+			values := make([]string, 0, len(existing))
+			for _, e := range existing {
+				values = append(values, e.Data)
+			}
+			merged := mergeTXTRecords(values, rec.Value)
+			payload = make([]goDaddyRecord, 0, len(merged))
+			for _, value := range merged {
+				payload = append(payload, goDaddyRecord{Data: value, Name: recordName(rec), TTL: ttlOr(rec, 600)})
+			}
+		}
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("godaddy: encode record: %w", err)
