@@ -60,10 +60,14 @@ func (h *eventHub) subscribe() (<-chan []byte, func()) {
 	return ch, func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		if c, ok := h.subs[id]; ok {
-			delete(h.subs, id)
-			close(c)
-		}
+		// The payload channel is deliberately left open. Publish copies the
+		// subscriber list under the lock and sends outside of it, so closing
+		// the channel here would race with a send that already holds the copy
+		// and panic with "send on closed channel" whenever a browser
+		// disconnects while a log line is being fanned out. The reader leaves
+		// on the request context instead, and the buffered channel is
+		// reclaimed once no sender references it any more.
+		delete(h.subs, id)
 	}
 }
 

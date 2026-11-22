@@ -20,7 +20,6 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/nunt/nunt/internal/model"
-	"github.com/nunt/nunt/internal/modules/waf"
 	"github.com/nunt/nunt/internal/netutil"
 )
 
@@ -301,12 +300,6 @@ func buildProxy(w *Web, r *rule, up upstream, target *model.ProxyTarget) *httput
 				// The configured cap stopped the upload: the upstream never saw
 				// the request and the refusal is already counted.
 				http.Error(rw, bodyLimitMessage, http.StatusRequestEntityTooLarge)
-				return
-			}
-			if failure, ok := waf.FrameFailure(req, err); ok {
-				// The WAF refused a gRPC frame of the request body. A gRPC client
-				// must get the gRPC status of the failure instead of a proxy error.
-				waf.WriteFrameFailure(rw, req, failure)
 				return
 			}
 			status := http.StatusBadGateway

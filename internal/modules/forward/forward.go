@@ -63,17 +63,19 @@ type Forward struct {
 	// never install the same socket twice.
 	reloadMu sync.Mutex
 	mu       sync.RWMutex
-	proxies  map[string]*proxy
-	stopped  bool
-	access   *accessLogger
-	cfg      *model.Config
+	// proxies maps a rule id to the proxies it owns: one for tcp or udp, two
+	// for a rule that declares "both".
+	proxies map[string][]*proxy
+	stopped bool
+	access  *accessLogger
+	cfg     *model.Config
 }
 
 // New creates the module.
 func New(deps *module.Deps) *Forward {
 	f := &Forward{
 		deps:    deps,
-		proxies: map[string]*proxy{},
+		proxies: map[string][]*proxy{},
 		access:  newAccessLogger(defaultLogKeep),
 	}
 	f.Init(deps, "forward", "Port forwarding")
@@ -155,23 +157,42 @@ func (f *Forward) Reload(cfg *model.Config) {
 	var fresh, obsolete []*proxy
 	f.mu.Lock()
 	for id, r := range desired {
-		prev := f.proxies[id]
-		if prev != nil && prev.fingerprint == fingerprint(r) {
+		current := map[string]*proxy{}
+		for _, p := range f.proxies[id] {
+			current[p.proto] = p
+		}
+		want := protoList(r.Protocol)
+		kept := make([]*proxy, 0, len(want))
+		for _, proto := range want {
+			prev := current[proto]
+			delete(current, proto)
+			if prev != nil && prev.fingerprint == fingerprint(r) {
+				kept = append(kept, prev)
+				continue
+			}
+			np := newProxyFor(f, r, proto)
+			kept = append(kept, np)
+			fresh = append(fresh, np)
+			if prev != nil {
+				obsolete = append(obsolete, prev)
+			}
+		}
+		// Protocols the rule stopped declaring are released.
+		for _, p := range current {
+			obsolete = append(obsolete, p)
+		}
+		if len(kept) == 0 {
+			delete(f.proxies, id)
 			continue
 		}
-		np := newProxy(f, r)
-		f.proxies[id] = np
-		fresh = append(fresh, np)
-		if prev != nil {
-			obsolete = append(obsolete, prev)
-		}
+		f.proxies[id] = kept
 	}
-	for id, p := range f.proxies {
+	for id, proxies := range f.proxies {
 		if _, keep := desired[id]; keep {
 			continue
 		}
 		delete(f.proxies, id)
-		obsolete = append(obsolete, p)
+		obsolete = append(obsolete, proxies...)
 	}
 	f.mu.Unlock()
 
@@ -206,10 +227,7 @@ func (f *Forward) Status() module.Status {
 func (f *Forward) Stats() map[string]any {
 	f.mu.RLock()
 	cfg := f.cfg
-	proxies := make([]*proxy, 0, len(f.proxies))
-	for _, p := range f.proxies {
-		proxies = append(proxies, p)
-	}
+	proxies := f.proxiesLocked()
 	f.mu.RUnlock()
 
 	total, enabled := 0, 0
@@ -279,10 +297,7 @@ func (f *Forward) snapshot() *model.Config {
 func (f *Forward) detail() string {
 	f.mu.RLock()
 	cfg := f.cfg
-	proxies := make([]*proxy, 0, len(f.proxies))
-	for _, p := range f.proxies {
-		proxies = append(proxies, p)
-	}
+	proxies := f.proxiesLocked()
 	f.mu.RUnlock()
 
 	total, enabled := 0, 0
@@ -325,26 +340,27 @@ func (f *Forward) ensure(id, proto string) (*proxy, bool) {
 
 	f.mu.RLock()
 	stopped := f.stopped
-	_, exists := f.proxies[id]
 	f.mu.RUnlock()
-	if stopped || exists {
+	if stopped {
 		return nil, false
 	}
 	r, ok := f.ruleByID(id, proto)
 	if !ok {
 		return nil, false
 	}
-	np := newProxy(f, r)
+	np := newProxyFor(f, r, proto)
 	f.mu.Lock()
 	if f.stopped {
 		f.mu.Unlock()
 		return nil, false
 	}
-	if _, dup := f.proxies[id]; dup {
-		f.mu.Unlock()
-		return nil, false
+	for _, p := range f.proxies[id] {
+		if p.proto == np.proto {
+			f.mu.Unlock()
+			return nil, false
+		}
 	}
-	f.proxies[id] = np
+	f.proxies[id] = append(f.proxies[id], np)
 	f.mu.Unlock()
 	if err := np.start(); err != nil {
 		f.log.Error("forward: cannot start rule on demand",
@@ -354,13 +370,34 @@ func (f *Forward) ensure(id, proto string) (*proxy, bool) {
 	return np, true
 }
 
+// proxiesLocked flattens the proxy table. The caller must hold f.mu.
+func (f *Forward) proxiesLocked() []*proxy {
+	out := make([]*proxy, 0, len(f.proxies))
+	for _, proxies := range f.proxies {
+		out = append(out, proxies...)
+	}
+	return out
+}
+
+// proxy returns the running proxy of one rule and protocol (nil when absent).
+func (f *Forward) proxy(id, proto string) *proxy {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	for _, p := range f.proxies[id] {
+		if p.proto == proto {
+			return p
+		}
+	}
+	return nil
+}
+
 func (f *Forward) detachAll() []*proxy {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := make([]*proxy, 0, len(f.proxies))
-	for id, p := range f.proxies {
+	for id, proxies := range f.proxies {
 		delete(f.proxies, id)
-		out = append(out, p)
+		out = append(out, proxies...)
 	}
 	return out
 }

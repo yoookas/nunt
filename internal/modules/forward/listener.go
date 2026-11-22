@@ -57,10 +57,23 @@ type proxy struct {
 }
 
 func newProxy(f *Forward, r model.ForwardRule) *proxy {
+	proto := protoTCP
+	if protos := protoList(r.Protocol); len(protos) > 0 {
+		proto = protos[0]
+	}
+	return newProxyFor(f, r, proto)
+}
+
+// newProxyFor builds the proxy of one concrete protocol: a rule declared as
+// "both" owns one TCP and one UDP proxy, each bound to the same source address.
+func newProxyFor(f *Forward, r model.ForwardRule, proto string) *proxy {
+	if proto != protoUDP {
+		proto = protoTCP
+	}
 	return &proxy{
 		f:           f,
 		rule:        r,
-		proto:       protoTCP,
+		proto:       proto,
 		fingerprint: fingerprint(r),
 		sessions:    map[string]*udpSession{},
 		conns:       map[net.Conn]struct{}{},
@@ -77,9 +90,9 @@ func newProxy(f *Forward, r model.ForwardRule) *proxy {
 // goroutines. It never panics: a busy port is reported as an error and the
 // rule is simply marked as not listening.
 func (p *proxy) start() error {
-	protocol := protoTCP
-	if protos := protoList(p.rule.Protocol); len(protos) > 0 {
-		protocol = protos[0]
+	protocol := p.proto
+	if protocol != protoUDP {
+		protocol = protoTCP
 	}
 	p.proto = protocol
 	addr := listenAddr(p.rule.SrcAddr)
@@ -430,8 +443,14 @@ func (p *proxy) relay(src, dst net.Conn, timeoutSec int) (int64, int64) {
 			_ = dst.Close()
 		})
 	}
+	// The deadline is pushed forward on every relayed chunk, so the configured
+	// timeout is an idle timeout: an active connection (an SSH session, a
+	// WebSocket tunnel) is never cut just because it has been open for a while.
+	var touchMu sync.Mutex
 	timer := time.AfterFunc(timeout, shutdown)
 	touch := func() {
+		touchMu.Lock()
+		defer touchMu.Unlock()
 		now := time.Now()
 		_ = src.SetDeadline(now.Add(timeout))
 		_ = dst.SetDeadline(now.Add(timeout))
@@ -446,14 +465,14 @@ func (p *proxy) relay(src, dst net.Conn, timeoutSec int) (int64, int64) {
 		ch <- n
 	}
 	go func() {
-		n, _ := io.Copy(dst, src)
+		n, _ := idleCopy(dst, src, touch)
 		// The counter is published as soon as one direction is done, so the
 		// statistics stay meaningful while the other half is still open.
 		publish(upCh, n, &p.upBytes)
 		closeWrite(dst)
 	}()
 	go func() {
-		n, _ := io.Copy(src, dst)
+		n, _ := idleCopy(src, dst, touch)
 		publish(downCh, n, &p.downBytes)
 		closeWrite(src)
 	}()
@@ -462,6 +481,37 @@ func (p *proxy) relay(src, dst net.Conn, timeoutSec int) (int64, int64) {
 	timer.Stop()
 	shutdown()
 	return up, down
+}
+
+// relayBufferSize is the chunk size of the relay loop.
+const relayBufferSize = 32 * 1024
+
+// idleCopy copies src to dst and calls touch after every successful read, which
+// is what makes the configured timeout an idle timeout rather than a cap on the
+// total lifetime of a connection.
+func idleCopy(dst io.Writer, src io.Reader, touch func()) (int64, error) {
+	buf := make([]byte, relayBufferSize)
+	var written int64
+	for {
+		nr, rerr := src.Read(buf)
+		if nr > 0 {
+			touch()
+			nw, werr := dst.Write(buf[:nr])
+			written += int64(nw)
+			if werr != nil {
+				return written, werr
+			}
+			if nw < nr {
+				return written, io.ErrShortWrite
+			}
+		}
+		if rerr != nil {
+			if rerr == io.EOF {
+				return written, nil
+			}
+			return written, rerr
+		}
+	}
 }
 
 func closeWrite(c net.Conn) {
@@ -511,7 +561,34 @@ func (s *udpSession) counters() (uint64, uint64, uint64) {
 	return s.packets, s.upBytes, s.downBytes
 }
 
-func (s *udpSession) close() { _ = s.conn.Close() }
+// connection returns the target connection of the session. It is nil until the
+// dial of the first datagram finished: a session is published in the table
+// before that point so a parallel packet reuses it instead of dialling again.
+func (s *udpSession) connection() net.Conn {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.conn
+}
+
+// setConn stores the target connection once the dial succeeded.
+func (s *udpSession) setConn(conn net.Conn) {
+	s.mu.Lock()
+	s.conn = conn
+	s.mu.Unlock()
+}
+
+// close releases the target connection. A session that never reached the dial
+// (an access rule refusal or a dial error) has no connection, so closing it has
+// to stay a no-op instead of dereferencing nil.
+func (s *udpSession) close() {
+	s.mu.Lock()
+	conn := s.conn
+	s.conn = nil
+	s.mu.Unlock()
+	if conn != nil {
+		_ = conn.Close()
+	}
+}
 
 func (p *proxy) udpReadLoop(pc net.PacketConn) {
 	defer p.wg.Done()
@@ -590,14 +667,21 @@ func (p *proxy) handleUDP(pc net.PacketConn, client net.Addr, data []byte) {
 				"rule", ruleLabel(p.rule), "dst", p.rule.DstAddr, "error", err)
 			return
 		}
-		sess.conn = conn
+		sess.setConn(conn)
 		p.pending.Add(1)
 		p.total.Add(1)
 		p.active.Add(1)
 		go p.udpReplyLoop(pc, key, sess)
 	}
 
-	if _, err := sess.conn.Write(data); err != nil {
+	conn := sess.connection()
+	if conn == nil {
+		// Another datagram created this session and its dial has not finished
+		// yet. Dropping the packet keeps the read loop from blocking and, more
+		// importantly, from writing to a nil connection.
+		return
+	}
+	if _, err := conn.Write(data); err != nil {
 		p.removeSession(key, sess, "failed: "+err.Error())
 		return
 	}
@@ -617,6 +701,10 @@ func (p *proxy) udpReplyLoop(pc net.PacketConn, key string, sess *udpSession) {
 		p.removeSession(key, sess, "closed")
 	}()
 
+	conn := sess.connection()
+	if conn == nil {
+		return
+	}
 	buf := make([]byte, udpBufferSize)
 	for {
 		if !p.isRunning() {
@@ -624,8 +712,8 @@ func (p *proxy) udpReplyLoop(pc net.PacketConn, key string, sess *udpSession) {
 		}
 		// The read wakes up regularly so a stopped proxy does not have to wait
 		// for the full session timeout before its goroutine can exit.
-		_ = sess.conn.SetReadDeadline(time.Now().Add(udpPollInterval))
-		n, err := sess.conn.Read(buf)
+		_ = conn.SetReadDeadline(time.Now().Add(udpPollInterval))
+		n, err := conn.Read(buf)
 		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
 				if time.Since(sess.lastSeenTime()) >= udpSessionTTL {

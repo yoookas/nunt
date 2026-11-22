@@ -311,9 +311,7 @@ func TestForwardUDPSessionLimitUsesRuleCap(t *testing.T) {
 	}
 	defer func() { _ = f.Stop(context.Background()) }()
 
-	f.mu.RLock()
-	p := f.proxies["u-cap"]
-	f.mu.RUnlock()
+	p := f.proxy("u-cap", protoUDP)
 	if p == nil {
 		t.Fatal("the udp proxy was not created")
 	}

@@ -382,7 +382,7 @@ CI 里由 `.github/workflows/ci.yml` 的 `frontend` job 跑同一组命令（独
 旧检查点用 `?id=1 union select 1`，在默认配置（WAF 关闭）下永远返回「未拦截」，只断言了「结果渲染出来」。
 现在：
 
-- 演示数据里显式打开 WAF（引擎 + CRS + block + `enforcementMode=enforce`）——**这是前提**，
+- 演示数据里显式打开 WAF（引擎 + CRS + block）——**这是前提**，
   不打开的话任何 payload 都不会被拦；
 - payload 换成 `/?test=../../../../etc/passwd`（CRS 930120/930110/930100 + 949110 必然命中）；
 - 断言改成 4 条：**blocked=true 且 enforced=true（HTTP 200 的判定响应）**、**命中规则 ID 非空且落在 CRS 的

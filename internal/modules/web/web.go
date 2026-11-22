@@ -42,12 +42,16 @@ type Web struct {
 	// counters land on the instance the admin API and the WAF page report.
 	waf *waf.WAF
 
-	mu        sync.Mutex
-	rebuildMu sync.Mutex
-	started   bool
-	stopCtx   context.Context
-	cancelAll context.CancelFunc
-	wg        sync.WaitGroup
+	mu sync.Mutex
+	// rebuildSem serialises reconfigurations. It is a one slot channel rather
+	// than a mutex because a caller that gives up waiting must be able to
+	// leave the slot alone: a mutex taken by a helper goroutine after the
+	// caller timed out would stay locked for the rest of the process.
+	rebuildSem chan struct{}
+	started    bool
+	stopCtx    context.Context
+	cancelAll  context.CancelFunc
+	wg         sync.WaitGroup
 
 	rules     []*rule
 	bindings  map[string]*listener
@@ -67,6 +71,28 @@ type Web struct {
 	bodyRejected int64
 
 	logs *logBuffer
+}
+
+// acmeChallengePath is the well known prefix the ACME server queries for an
+// http-01 challenge. The web listeners answer it when a certificate order is in
+// flight, so the ACME module never has to compete for port 80.
+const acmeChallengePath = "/.well-known/acme-challenge/"
+
+// challengeProvider returns the ACME module when it can answer http-01
+// challenges through the listeners of this module.
+func (w *Web) challengeProvider() module.ChallengeProvider {
+	if w.deps == nil || w.deps.Registry == nil {
+		return nil
+	}
+	mod, ok := w.deps.Registry.Get("acme")
+	if !ok {
+		return nil
+	}
+	provider, ok := mod.(module.ChallengeProvider)
+	if !ok {
+		return nil
+	}
+	return provider
 }
 
 // sharedWAF returns the firewall of the module registry. The registry owns the
@@ -90,17 +116,18 @@ func sharedWAF(deps *module.Deps) *waf.WAF {
 func New(deps *module.Deps) *Web {
 	cfg := deps.Cfg.Snapshot()
 	w := &Web{
-		deps:      deps,
-		log:       deps.Logger("web"),
-		fb:        filebrowser.New(deps),
-		dav:       webdav.New(deps),
-		waf:       sharedWAF(deps),
-		bindings:  map[string]*listener{},
-		tlsAddrs:  map[string]bool{},
-		siteCache: map[string]cachedSite{},
-		counters:  map[string]int64{},
-		logs:      newLogBuffer(cfg.Web.LogKeep),
-		stopCtx:   context.Background(),
+		deps:       deps,
+		log:        deps.Logger("web"),
+		fb:         filebrowser.New(deps),
+		dav:        webdav.New(deps),
+		waf:        sharedWAF(deps),
+		bindings:   map[string]*listener{},
+		tlsAddrs:   map[string]bool{},
+		siteCache:  map[string]cachedSite{},
+		rebuildSem: make(chan struct{}, 1),
+		counters:   map[string]int64{},
+		logs:       newLogBuffer(cfg.Web.LogKeep),
+		stopCtx:    context.Background(),
 	}
 	w.Init(deps, "web", "Web service")
 	w.cfg = cfg
@@ -114,14 +141,12 @@ func New(deps *module.Deps) *Web {
 // Start brings the listeners up. It is safe to call more than once.
 func (w *Web) Start(ctx context.Context) error {
 	w.mu.Lock()
-	w.rebuildMu.Lock()
 	if w.cancelAll == nil {
 		w.stopCtx, w.cancelAll = context.WithCancel(context.Background())
 	}
 	base := w.stopCtx
 	w.started = true
 	w.mu.Unlock()
-	w.rebuildMu.Unlock()
 
 	if err := w.apply(base, w.snapshot()); err != nil {
 		w.SetRunning(true)
@@ -139,7 +164,15 @@ func (w *Web) Stop(ctx context.Context) error {
 	w.started = false
 	w.mu.Unlock()
 
-	w.rebuildMu.Lock()
+	// Wait for an in flight reconfiguration, but never forever: a shutdown has
+	// to finish even when a previous rebuild is stuck.
+	gated := false
+	select {
+	case w.rebuildSem <- struct{}{}:
+		gated = true
+	case <-time.After(configWait):
+	case <-ctx.Done():
+	}
 	w.mu.Lock()
 	listeners := make([]*listener, 0, len(w.bindings))
 	for _, l := range w.bindings {
@@ -155,7 +188,9 @@ func (w *Web) Stop(ctx context.Context) error {
 	w.rules = nil
 	w.siteCache = map[string]cachedSite{}
 	w.mu.Unlock()
-	w.rebuildMu.Unlock()
+	if gated {
+		<-w.rebuildSem
+	}
 
 	if cancel != nil {
 		cancel()
@@ -252,22 +287,18 @@ func (w *Web) apply(ctx context.Context, cfg *model.Config) error {
 	if cfg == nil {
 		return nil
 	}
-	// Serialise the reconfiguration. Another rebuild is allowed to finish,
-	// but never for longer than configWait, so a caller can not be blocked
-	// forever by a stuck listener.
-	acquired := make(chan struct{})
-	go func() {
-		w.rebuildMu.Lock()
-		close(acquired)
-	}()
+	// Serialise the reconfiguration. Another rebuild is allowed to finish, but
+	// never for longer than configWait, so a caller can not be blocked forever
+	// by a stuck listener. Giving up releases nothing, so a late rebuild can
+	// never steal the slot from the caller that owns it.
 	select {
-	case <-acquired:
+	case w.rebuildSem <- struct{}{}:
+		defer func() { <-w.rebuildSem }()
 	case <-time.After(configWait):
 		return errors.New("timed out waiting for the previous reconfiguration")
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	defer w.rebuildMu.Unlock()
 
 	compiled, errs := w.compileRules(cfg)
 	var ruleErr error

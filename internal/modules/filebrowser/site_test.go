@@ -1,6 +1,7 @@
 package filebrowser
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -766,5 +767,104 @@ func TestContentDisposition(t *testing.T) {
 	inline := contentDisposition("a.txt", true)
 	if !strings.HasPrefix(inline, "inline; ") {
 		t.Fatalf("inline disposition: %q", inline)
+	}
+}
+
+// zipEntryNames returns the names stored in a zip archive.
+func zipEntryNames(t *testing.T, data []byte) []string {
+	t.Helper()
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("open zip: %v", err)
+	}
+	names := make([]string, 0, len(zr.File))
+	for _, f := range zr.File {
+		names = append(names, f.Name)
+	}
+	return names
+}
+
+// A share link scoped to one directory must never archive the whole storage
+// root. The missing path parameter used to be re-read inside the zip handler and
+// resolved to "/", which turned "download the shared folder as a zip" into
+// "download everything on the mount".
+func TestShareZipStaysInsideTheShare(t *testing.T) {
+	root := t.TempDir()
+	seedFile(t, root, "public/inside.txt", "inside")
+	seedFile(t, root, "private.txt", "secret")
+	deps := newTestDeps(t)
+	h := newTestSite(t, deps, root, nil)
+
+	token, _ := createShareForTest(t, h, "/public")["token"].(string)
+	base := "/files/_share/" + token
+
+	for _, target := range []string{base + "/download?zip=1", base + "/zip"} {
+		rec := do(t, h, http.MethodGet, target, nil, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", target, rec.Code, rec.Body.String())
+		}
+		names := zipEntryNames(t, rec.Body.Bytes())
+		for _, name := range names {
+			if name == "private.txt" || strings.HasPrefix(name, "../") {
+				t.Fatalf("%s archived data outside the share: %v", target, names)
+			}
+		}
+		found := false
+		for _, name := range names {
+			if name == "inside.txt" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s missed the shared file: %v", target, names)
+		}
+	}
+}
+
+// pageConfigFromBody extracts the JSON the page hands to its own script.
+func pageConfigFromBody(t *testing.T, body []byte) map[string]any {
+	t.Helper()
+	const marker = "window.__FB = "
+	text := string(body)
+	start := strings.Index(text, marker)
+	if start < 0 {
+		t.Fatalf("page does not carry its configuration: %s", text)
+	}
+	rest := text[start+len(marker):]
+	end := strings.Index(rest, ";</script>")
+	if end < 0 {
+		t.Fatalf("page configuration is not terminated")
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(rest[:end]), &cfg); err != nil {
+		t.Fatalf("decode page configuration %q: %v", rest[:end], err)
+	}
+	return cfg
+}
+
+// The share page talks to the endpoints that exist below the share token. It
+// used to point its own script at .../_share/<token>/_api, a prefix the server
+// never routes, so every share page opened with an empty file list.
+func TestSharePageAPIRoutesResolve(t *testing.T) {
+	root := t.TempDir()
+	seedFile(t, root, "public/a.txt", "shared")
+	deps := newTestDeps(t)
+	h := newTestSite(t, deps, root, nil)
+
+	token, _ := createShareForTest(t, h, "/public")["token"].(string)
+	rec := do(t, h, http.MethodGet, "/files/_share/"+token, nil, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("share page: %d", rec.Code)
+	}
+	api, _ := pageConfigFromBody(t, rec.Body.Bytes())["api"].(string)
+	if api != "/files/_share/"+token {
+		t.Fatalf("share page api = %q, want %q", api, "/files/_share/"+token)
+	}
+
+	// Every endpoint the page calls must answer on that base.
+	for _, endpoint := range []string{"/list?path=/public", "/download?path=/public/a.txt"} {
+		if got := do(t, h, http.MethodGet, api+endpoint, nil, ""); got.Code != http.StatusOK {
+			t.Fatalf("share page endpoint %s: %d %s", api+endpoint, got.Code, got.Body.String())
+		}
 	}
 }

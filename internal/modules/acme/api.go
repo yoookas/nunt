@@ -279,8 +279,10 @@ func (a *ACME) buildJob(req certJobUpdate, existing *model.CertJob) (*model.Cert
 			return nil, fmt.Errorf("domain %s is a wildcard and requires the dns-01 challenge", d)
 		}
 	}
-	if req.RenewDays < 0 || req.RenewDays > 365 {
-		return nil, fmt.Errorf("renewDays must be between 0 and 365")
+	// A renewal window wider than maxRenewDays would make a 90 day certificate
+	// due for renewal the moment it is issued, which hammers the CA rate limits.
+	if req.RenewDays < 0 || req.RenewDays > maxRenewDays {
+		return nil, fmt.Errorf("renewDays must be between 0 and %d", maxRenewDays)
 	}
 
 	job := model.CertJob{

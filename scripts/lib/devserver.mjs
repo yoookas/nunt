@@ -214,8 +214,8 @@ export async function prepareSampleSite(dataDir) {
  * seedDemoData：给「真实数据渲染」用的演示数据。
  *
  * WAF 配置这一步很关键：默认配置里 WAF 是关闭的，页面的「请求测试」永远返回「未拦截」。
- * 这里显式打开引擎 + CRS + block 模式，并声明 enforcementMode=enforce，
- * 这样冒烟里的攻击 payload 才会**必然被拦截**（blocked=true / 403 / 命中 CRS 规则 ID）。
+ * 这里显式打开引擎 + CRS + block 模式，这样冒烟里的攻击 payload 才会
+ * **必然被拦截**（blocked=true / 403 / 命中 CRS 规则 ID）。
  */
 export async function seedDemoData(client, opts, www) {
   const steps = [];
@@ -304,8 +304,7 @@ export async function seedDemoData(client, opts, www) {
     checkUpdate: false,
     baseUrl: '',
   });
-  // WAF：打开引擎 + CRS + block，并把 enforcementMode 切到 enforce。
-  // 只改响应、不改判定，但「请求测试」的 403 断言需要它（见 docs/CONTRACT.md 第 8.4 节）。
+  // WAF：打开引擎 + CRS + block，让「请求测试」能真的返回 403。
   const wafPayload = {
     enable: true,
     mode: 'block',
@@ -320,11 +319,6 @@ export async function seedDemoData(client, opts, www) {
     adminProtect: false,
     bodyLimitKb: 1024,
     logOnly: false,
-    enforcementMode: 'enforce',
-    defaultBodyPolicy: 'full',
-    peekBytes: 65536,
-    peekTimeoutMs: 250,
-    notifyBodyRatio: 0,
   };
   await step('WAF 配置（引擎 + CRS + enforce）', 'put', '/api/v1/waf/config', wafPayload);
 

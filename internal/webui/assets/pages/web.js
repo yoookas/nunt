@@ -54,40 +54,6 @@ function balanceValue(v) {
   return 'roundrobin';
 }
 
-// ---------------------------------------------------------------------------
-// 请求体检查策略（与后端 model.WebRule.bodyPolicy 一一对应）
-//
-// 空串 = 继承全局默认策略；其余取值由 CONTRACT.md 第 8 节冻结。
-// 说明文案里必须保留「gRPC 流式只查首消息」这一能力边界，避免运维误以为
-// 流式路由的每一条消息都被检查过。
-// ---------------------------------------------------------------------------
-const BODY_POLICY_OPTIONS = [
-  { value: '', label: '继承全局默认' },
-  { value: 'full', label: '全量（full，fail-closed）' },
-  { value: 'peek', label: '偷看（peek，只检查前 N 字节）' },
-  { value: 'skip', label: '跳过（skip，只查 URI / 请求头）' },
-  { value: 'grpc-unary', label: 'gRPC 单消息（grpc-unary）' },
-  { value: 'grpc-stream', label: 'gRPC 流式（grpc-stream，只查首消息）' },
-];
-
-const BODY_POLICY_HINT = {
-  '': '跟随 WAF 页的「默认策略」；改全局默认会同时影响所有未声明的路由。',
-  full: '请求体必须先完整到达才转发；Content-Length 未知（chunked / 流式）时，enforce 模式下返回 411 并给出可操作文案。',
-  peek: '读满 peekBytes 或空闲 peekTimeoutMs 就先检查已到达的部分，其余字节流式透传；只对前若干字节负责。',
-  skip: '只检查 URI 与请求头，请求体原样透传；计为 skipped:declared，是显式声明的检查缺口。',
-  'grpc-unary': '先读第一条 gRPC 消息，读到 EOF 判定为 unary / 服务端流式并做请求级判定；若随后又出现第二帧，按执行模式拒绝或记录（防止把 unary 路由伪装成流式降级）。',
-  'grpc-stream': '首消息先判定一次，通过后连同 scanner 交给上游；后续帧只做帧校验（compressed flag、长度上限、截断）——不会逐消息做 CRS 检查。',
-};
-
-// 表格 WAF 列的策略短标签（迁移前是一整列「请求体策略」，本批按验收要求把信息并进 WAF 列）。
-const BODY_POLICY_SHORT = {
-  full: '全量',
-  peek: '偷看',
-  skip: '跳过',
-  'grpc-unary': 'gRPC 单消息',
-  'grpc-stream': 'gRPC 流式',
-};
-
 /* ------------------------------------------------------------------ 局部样式 */
 
 const PAGE_CSS = [
@@ -189,11 +155,6 @@ function targetText(r) {
   }
   const f = r.files || {};
   return f.mountId ? '挂载: ' + f.mountId + (f.root ? ' ' + f.root : '') : (f.root || '-');
-}
-
-function bodyPolicyHintOf(value) {
-  const key = String(value || '');
-  return BODY_POLICY_HINT[key] === undefined ? BODY_POLICY_HINT[''] : BODY_POLICY_HINT[key];
 }
 
 /** chipList：监听 / 域名这种多值列的标签渲染（超出 max 的折叠成 +N）。 */
@@ -516,10 +477,6 @@ class WebPage extends NuntElement {
     targetLegend.className = 'pweb-legend';
     targetLegend.textContent = '反向代理（proxy）';
 
-    const bodyHint = document.createElement('div');
-    bodyHint.className = 'pweb-legend';
-    bodyHint.textContent = bodyPolicyHintOf(base.bodyPolicy);
-
     const form = formGrid([
       legendField('legendBasic', '基本信息'),
       { name: 'name', label: '名称', value: base.name || '', placeholder: '例如 博客首页' },
@@ -729,11 +686,9 @@ class WebPage extends NuntElement {
       { name: 'authEnable', label: '启用', type: 'switch', value: !!auth.enable, text: '启用 BasicAuth 保护' },
       { name: 'authUsers', label: false, type: 'custom', wide: true, node: authField.node },
 
-      // --- WAF 与请求体策略 ---
-      legendField('legendWaf', 'WAF 与请求体检查策略'),
-      { name: 'waf', label: 'WAF 开关', type: 'switch', value: !!base.waf, text: '启用 WAF 检查', hint: '关闭后该路由完全不经过 WAF（含请求体检查）' },
-      { name: 'bodyPolicy', label: '请求体策略', type: 'select', value: String(base.bodyPolicy || ''), options: BODY_POLICY_OPTIONS },
-      { name: 'bodyPolicyHint', label: false, type: 'custom', wide: true, node: bodyHint },
+      // --- WAF ---
+      legendField('legendWaf', 'WAF'),
+      { name: 'waf', label: 'WAF 开关', type: 'switch', value: !!base.waf, text: '启用 WAF 检查', hint: '关闭后该路由完全不经过 WAF' },
     ]);
 
     const FILES_FIELDS = ['filesMount', 'filesRoot', 'filesTitle', 'filesReadOnly', 'filesUpload', 'filesDelete', 'filesMkdir', 'filesRename', 'filesHidden', 'filesShare', 'filesShareTTL'];
@@ -762,7 +717,6 @@ class WebPage extends NuntElement {
     form.node.onFieldChange = (name, value) => {
       if (name === 'type') syncTarget(String(value || 'proxy'));
       else if (name === 'tlsMode') form.toggle('tlsCertId', String(value || 'off') === 'custom');
-      else if (name === 'bodyPolicy') bodyHint.textContent = bodyPolicyHintOf(value);
       else if (name === 'authEnable') form.toggle('authUsers', !!value);
     };
 
@@ -811,7 +765,6 @@ class WebPage extends NuntElement {
                 hsts: !!values.tlsHsts,
               },
               waf: !!values.waf,
-              bodyPolicy: String(values.bodyPolicy || ''),
               access: {
                 mode: String(values.accessMode || 'off'),
                 ips: splitLines(values.accessIPs),
@@ -1006,18 +959,9 @@ class WebPage extends NuntElement {
         title: 'WAF',
         width: 140,
         sort: (row) => (row && row.waf ? 1 : 0),
-        // 迁移前这里有独立的「请求体策略」列；本批按验收的列清单把它并进 WAF 列，
-        // 信息不丢：开启 WAF 时同时显示该路由显式声明的策略（没有则标「继承默认」）。
-        render: (row) => {
-          if (!row.waf) return html`<span class="muted">关闭</span>`;
-          const policy = String(row.bodyPolicy || '');
-          return html`<div class="pweb-waf">
-            <sl-badge pill variant="success">已开启</sl-badge>
-            <sl-badge pill variant="neutral" title=${policy ? '该路由显式声明的请求体策略' : '继承全局默认请求体策略'}>
-              ${policy ? (BODY_POLICY_SHORT[policy] || policy) : '继承默认'}
-            </sl-badge>
-          </div>`;
-        },
+        render: (row) => (row.waf
+          ? html`<sl-badge pill variant="success">已开启</sl-badge>`
+          : html`<span class="muted">关闭</span>`),
       },
       {
         key: 'enable',
@@ -1057,14 +1001,14 @@ class WebPage extends NuntElement {
     const rule = this.rules.filter((r) => r.id === id)[0] || null;
     return html`<div class="notice pweb-focus">
       <div class="pweb-focus-title">${rule
-        ? '来自 WAF 页：为路由「' + (rule.name || rule.id) + '」声明请求体策略'
-        : '来自 WAF 页：找不到规则 ' + id}</div>
+        ? '已定位到路由「' + (rule.name || rule.id) + '」'
+        : '找不到规则 ' + id}</div>
       <div>${rule
-        ? '该路由尚未声明 bodyPolicy，当前继承全局默认策略；保存后按该路由自己的策略执行。'
+        ? '该行已高亮显示，可直接编辑。'
         : '该规则可能已被删除，请刷新列表。'}</div>
       ${rule
         ? html`<div class="pweb-focus-actions">
-            <sl-button size="small" variant="primary" @click=${() => this.openRuleForm(rule)}>设置请求体策略</sl-button>
+            <sl-button size="small" variant="primary" @click=${() => this.openRuleForm(rule)}>编辑这条规则</sl-button>
           </div>`
         : nothing}
     </div>`;
@@ -1149,8 +1093,7 @@ export default {
     const offStyle = pageStyle(root, PAGE_CSS);
     const page = document.createElement('nunt-page-web');
     page.ctx = ctx;              // 必须在 appendChild 之前赋值：connectedCallback 里要取数据
-    // WAF 页的「未声明 bodyPolicy 的路由」通过 #/web?rule=<id> 跳到本页：
-    // 自动过滤 + 高亮目标行 + 顶部提示条。
+    // #/web?rule=<id> 深链：自动过滤 + 高亮目标行 + 顶部提示条。
     const params = ctx && ctx.params;
     const focus = String((params && typeof params.get === 'function' ? params.get('rule') : '') || '').trim();
     page.focusId = focus;

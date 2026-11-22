@@ -39,9 +39,7 @@ try {
   $login = Invoke-RestMethod "$base/api/v1/auth/login" -Method Post -WebSession $session -ContentType 'application/json' -Body (@{ username = 'admin'; password = $pw } | ConvertTo-Json)
   $h = @{ 'X-CSRF-Token' = $login.csrf }
   $cfg = Invoke-RestMethod "$base/api/v1/waf/config" -WebSession $session -Headers $h
-  "policy      : mode=$($cfg.config.enforcementMode) default=$($cfg.config.defaultBodyPolicy) peek=$($cfg.config.peekBytes)B/$($cfg.config.peekTimeoutMs)ms alert=$($cfg.config.notifyBodyRatio)"
-  "bodyStates  : $($cfg.stats.bodyStates | ConvertTo-Json -Compress)"
-  "counters    : wouldReject=$($cfg.stats.wouldReject) refused=$($cfg.stats.refused) undeclared=$($cfg.undeclaredRoutes.Count)"
+  "config      : enable=$($cfg.config.enable) mode=$($cfg.config.mode) crs=$($cfg.config.useCrs) bodyLimitKb=$($cfg.config.bodyLimitKb)"
 
   # The WAF engine has a global master switch; enable it so the per rule flag can work.
   $c0 = $cfg.config; $c0.enable = $true
@@ -56,18 +54,9 @@ try {
              static = @{ root = $www; listing = $true } } | ConvertTo-Json -Depth 6
   $null = Invoke-RestMethod "$base/api/v1/web/rules" -Method Post -WebSession $session -Headers $h -ContentType 'application/json' -Body $rule
   Start-Sleep -Milliseconds 800
-  "chunked POST under observe -> $((Send-Chunked 18081 '/upload'))"
+  "chunked POST        -> $((Send-Chunked 18081 '/upload'))"
   $cfg2 = Invoke-RestMethod "$base/api/v1/waf/config" -WebSession $session -Headers $h
-  "after observe : wouldReject=$($cfg2.stats.wouldReject) bodyStates=$($cfg2.stats.bodyStates | ConvertTo-Json -Compress)"
-
-  $newCfg = $cfg2.config; $newCfg.enforcementMode = 'enforce'
-  $null = Invoke-RestMethod "$base/api/v1/waf/config" -Method Put -WebSession $session -Headers $h -ContentType 'application/json' -Body ($newCfg | ConvertTo-Json -Depth 6)
-  Start-Sleep -Milliseconds 400
-  $cfg3 = Invoke-RestMethod "$base/api/v1/waf/config" -WebSession $session -Headers $h
-  "mode now      : $($cfg3.config.enforcementMode)"
-  "chunked POST under enforce -> $((Send-Chunked 18081 '/upload'))"
-  $cfg4 = Invoke-RestMethod "$base/api/v1/waf/config" -WebSession $session -Headers $h
-  "after enforce : wouldReject=$($cfg4.stats.wouldReject) refused=$($cfg4.stats.refused)"
+  "after chunked POST  : blocked=$($cfg2.stats.blocked) detected=$($cfg2.stats.detected) passed=$($cfg2.stats.passed)"
   "undeclared    : $(($cfg4.undeclaredRoutes | ForEach-Object { $_.name + '(' + $_.path + ')' }) -join ', ')"
 } finally {
   if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }

@@ -57,10 +57,7 @@ func (f *Forward) ruleViews() []ruleView {
 	if f.cfg != nil {
 		rules = append(rules, f.cfg.Forward.Rules...)
 	}
-	proxies := make([]*proxy, 0, len(f.proxies))
-	for _, p := range f.proxies {
-		proxies = append(proxies, p)
-	}
+	proxies := f.proxiesLocked()
 	f.mu.RUnlock()
 
 	out := make([]ruleView, 0, len(rules))

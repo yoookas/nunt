@@ -217,7 +217,13 @@ func (s *site) handleAPI(w http.ResponseWriter, r *http.Request, name string) {
 	case "download":
 		s.requireMethod(w, r, http.MethodGet, s.handleDownload)
 	case "zip":
-		s.requireMethod(w, r, http.MethodGet, s.handleZip)
+		s.requireMethod(w, r, http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
+			clean, ok := s.pathParam(w, r, "")
+			if !ok {
+				return
+			}
+			s.handleZip(w, r, clean)
+		})
 	case "upload":
 		s.requireMethod(w, r, http.MethodPost, s.handleUpload)
 	case "mkdir":
@@ -582,11 +588,11 @@ func asciiFallback(name string) string {
 // zip
 // ---------------------------------------------------------------------------
 
-func (s *site) handleZip(w http.ResponseWriter, r *http.Request) {
-	clean, ok := s.pathParam(w, r, "")
-	if !ok {
-		return
-	}
+// handleZip streams a zip archive of clean. The caller owns the path: the API
+// derives it from the query, while a share link passes the path it already
+// checked against the share root. Re-reading the query here would let a share
+// link archive the whole storage root by omitting the parameter.
+func (s *site) handleZip(w http.ResponseWriter, r *http.Request, clean string) {
 	entry, err := s.fs.Stat(r.Context(), clean)
 	if err != nil {
 		s.fail(w, "stat", err)
@@ -697,8 +703,11 @@ func (s *site) handleShare(w http.ResponseWriter, r *http.Request, suffix string
 			}
 		}
 		s.renderPage(w, pageConfig{
-			Mode:       "share",
-			API:        base + apiPrefix,
+			Mode: "share",
+			// The read only endpoints of a share link live directly below the
+			// token (/_share/<token>/list, /download, /zip), so the page must
+			// not append the /_api prefix the authenticated pages use.
+			API:        base,
 			Title:      s.title,
 			Root:       share.Path,
 			Start:      start,
@@ -728,7 +737,7 @@ func (s *site) handleShare(w http.ResponseWriter, r *http.Request, suffix string
 			return
 		}
 		if r.URL.Query().Get("zip") == "1" {
-			s.handleZip(w, r)
+			s.handleZip(w, r, clean)
 			return
 		}
 		s.download(w, r, clean, false)
@@ -745,7 +754,7 @@ func (s *site) handleShare(w http.ResponseWriter, r *http.Request, suffix string
 			rest.Fail(w, http.StatusForbidden, "该路径不在此分享范围内")
 			return
 		}
-		s.handleZip(w, r)
+		s.handleZip(w, r, clean)
 	default:
 		rest.Fail(w, http.StatusNotFound, "分享链接不存在或已过期")
 	}

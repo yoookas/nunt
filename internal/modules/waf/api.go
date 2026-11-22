@@ -91,51 +91,11 @@ func (w *WAF) engineView() engineView {
 }
 
 func (w *WAF) handleGetConfig(rw http.ResponseWriter, r *http.Request) {
-	// The requests the body policy refused, or would have refused in observe
-	// mode, are returned with the configuration so the WAF page can show the
-	// routes whose body declaration has to be fixed before switching to
-	// enforce. They are capped at the size of the ring buffer.
 	rest.OK(rw, map[string]any{
-		"config":           w.Config(),
-		"engine":           w.engineView(),
-		"stats":            w.Stats(),
-		"wouldReject":      w.body.list(0),
-		"undeclaredRoutes": w.undeclaredRoutes(),
+		"config": w.Config(),
+		"engine": w.engineView(),
+		"stats":  w.Stats(),
 	})
-}
-
-// routeView describes one web rule in the body policy report.
-type routeView struct {
-	ID   string `json:"id"`
-	Name string `json:"name,omitempty"`
-	Path string `json:"path,omitempty"`
-	Type string `json:"type,omitempty"`
-	// WAF reports whether the rule is inspected at all.
-	WAF bool `json:"waf"`
-}
-
-// undeclaredRoutes lists the enabled routes that declare no body policy and
-// therefore inherit the global default. They are the gap observe mode exists
-// to expose: an administrator completes this list before switching to
-// enforce.
-func (w *WAF) undeclaredRoutes() []routeView {
-	if w.deps == nil || w.deps.Cfg == nil {
-		return []routeView{}
-	}
-	out := []routeView{}
-	for _, r := range w.deps.Cfg.Snapshot().Web.Rules {
-		if !r.Enable || strings.TrimSpace(r.BodyPolicy) != "" {
-			continue
-		}
-		out = append(out, routeView{
-			ID:   r.ID,
-			Name: r.Name,
-			Path: model.NormalizePath(r.Path),
-			Type: r.Type,
-			WAF:  r.WAF,
-		})
-	}
-	return out
 }
 
 func (w *WAF) handlePutConfig(rw http.ResponseWriter, r *http.Request) {

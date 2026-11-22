@@ -224,7 +224,7 @@ func (a *ACME) provisionChallenge(ctx context.Context, client *acme.Client, req 
 	var cleanup func()
 	switch req.challenge {
 	case challengeHTTP:
-		cleanup, err = startHTTP01(client, chal, domain)
+		cleanup, err = a.startHTTP01(client, chal, domain)
 	case challengeDNS:
 		cleanup, err = a.startDNS01(ctx, client, chal, req, domain)
 	case challengeTLSALPN:

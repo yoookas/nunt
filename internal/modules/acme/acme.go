@@ -35,6 +35,9 @@ const (
 
 	// defaultRenewDays is used when a job does not set renewDays.
 	defaultRenewDays = 30
+	// maxRenewDays is the widest renewal window a job may ask for. A window
+	// wider than the lifetime of the certificate would renew it on every check.
+	maxRenewDays = 30
 	// checkInterval is how often the renewal loop wakes up.
 	checkInterval = 12 * time.Hour
 	// initialDelay staggers the first check after Start.
@@ -71,6 +74,10 @@ type ACME struct {
 	// jobMu serialises issuance per job so the renewal loop and an explicit
 	// "issue now" never run the same order twice.
 	jobMu map[string]*sync.Mutex
+
+	// challenges maps a /.well-known/acme-challenge/<token> path to its answer
+	// while the CA validates it. The web service reads it when it owns port 80.
+	challenges sync.Map
 
 	// statMu guards the counters shown on the dashboard.
 	statMu  sync.Mutex
@@ -251,6 +258,9 @@ func (a *ACME) checkDue(ctx context.Context, cfg *model.Config) {
 		days := job.RenewDays
 		if days <= 0 {
 			days = defaultRenewDays
+		}
+		if days > maxRenewDays {
+			days = maxRenewDays
 		}
 		if time.Until(info.NotAfter) > time.Duration(days)*24*time.Hour {
 			continue

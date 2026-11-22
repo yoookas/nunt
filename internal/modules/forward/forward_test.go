@@ -644,9 +644,7 @@ func TestForwardUDPSessionLimit(t *testing.T) {
 	}
 	defer func() { _ = f.Stop(context.Background()) }()
 
-	f.mu.RLock()
-	p := f.proxies["u2"]
-	f.mu.RUnlock()
+	p := f.proxy("u2", protoUDP)
 	if p == nil {
 		t.Fatal("the udp proxy was not created")
 	}
@@ -689,5 +687,203 @@ func TestForwardUDPSessionLimit(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("the dropped session was not written to the access log: %v", accessResults(f, "u2"))
+	}
+}
+
+// A UDP session is published in the table before its target connection exists,
+// so an access rule that refuses the first packet releases a session that never
+// dialled. That release used to close a nil connection, panic inside the read
+// loop goroutine and take the whole process down with it.
+func TestForwardUDPAccessDeniedDoesNotPanic(t *testing.T) {
+	deps, store := testDeps(t)
+	target := echoUDP(t)
+	srcPort := freePort(t, "udp")
+
+	rule := model.ForwardRule{
+		ID:       "u-deny",
+		Name:     "udp denied",
+		Enable:   true,
+		Protocol: protoUDP,
+		SrcAddr:  fmt.Sprintf("127.0.0.1:%d", srcPort),
+		DstAddr:  target,
+		Access:   model.Access{Mode: model.AccessDeny, IPs: []string{"127.0.0.1/32"}},
+	}
+	setRules(t, store, rule)
+
+	f := New(deps)
+	if err := f.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer func() { _ = f.Stop(context.Background()) }()
+
+	client, err := net.Dial("udp", fmt.Sprintf("127.0.0.1:%d", srcPort))
+	if err != nil {
+		t.Fatalf("dial forwarder: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+	if _, err := client.Write([]byte("datagram")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// The refusal happens in the read loop, out of band: a panic there aborts
+	// the test binary instead of failing one assertion, which is exactly the
+	// regression this test guards against.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		logs := f.access.list("", 50)
+		if len(logs) > 0 && logs[0].Result == "denied" {
+			if stats := f.Stats(); stats["listening"].(int) != 1 {
+				t.Fatalf("listener stopped after a denied datagram: %v", stats)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("no denial entry was recorded for the denied udp datagram")
+}
+
+// dualEcho serves TCP and UDP on the same port and echoes whatever it receives,
+// which is what a single "both" rule needs as a destination.
+func dualEcho(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen tcp echo: %v", err)
+	}
+	pc, err := net.ListenPacket("udp", ln.Addr().String())
+	if err != nil {
+		_ = ln.Close()
+		t.Fatalf("listen udp echo on the same port: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = ln.Close()
+		_ = pc.Close()
+	})
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer func() { _ = c.Close() }()
+				_, _ = io.Copy(c, c)
+			}(conn)
+		}
+	}()
+	go func() {
+		buf := make([]byte, 2048)
+		for {
+			n, addr, err := pc.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			_, _ = pc.WriteTo(buf[:n], addr)
+		}
+	}()
+	return ln.Addr().String()
+}
+
+// A rule that declares "both" used to start only the first protocol of the list
+// (TCP) while the UI kept offering TCP and UDP, so its UDP side silently did
+// nothing.
+func TestForwardBothProtocolListensOnTCPAndUDP(t *testing.T) {
+	deps, store := testDeps(t)
+	target := dualEcho(t)
+	srcPort := freePort(t, "tcp")
+	addr := fmt.Sprintf("127.0.0.1:%d", srcPort)
+
+	rule := model.ForwardRule{
+		ID: "b1", Name: "both", Enable: true, Protocol: protoBoth,
+		SrcAddr: addr, DstAddr: target,
+	}
+	setRules(t, store, rule)
+
+	f := New(deps)
+	if err := f.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer func() { _ = f.Stop(context.Background()) }()
+
+	// TCP side.
+	conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+	if err != nil {
+		t.Fatalf("dial tcp: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	if _, err := conn.Write([]byte("tcp")); err != nil {
+		t.Fatalf("tcp write: %v", err)
+	}
+	if got := make([]byte, 8); true {
+		n, err := conn.Read(got)
+		if err != nil || string(got[:n]) != "tcp" {
+			t.Fatalf("tcp echo = %q, %v", got[:n], err)
+		}
+	}
+
+	// UDP side.
+	client, err := net.Dial("udp", addr)
+	if err != nil {
+		t.Fatalf("dial udp: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+	if _, err := client.Write([]byte("udp")); err != nil {
+		t.Fatalf("udp write: %v", err)
+	}
+	_ = client.SetReadDeadline(time.Now().Add(3 * time.Second))
+	buf := make([]byte, 8)
+	n, err := client.Read(buf)
+	if err != nil || string(buf[:n]) != "udp" {
+		t.Fatalf("udp echo = %q, %v", buf[:n], err)
+	}
+
+	if got := f.Stats()["listening"]; got != 2 {
+		t.Fatalf("listening = %v, want two listeners (tcp and udp)", got)
+	}
+}
+
+// The configured timeout is an idle timeout: an active connection must outlive
+// it, while a silent one is still closed.
+func TestForwardTCPIdleTimeoutKeepsActiveConnections(t *testing.T) {
+	deps, store := testDeps(t)
+	target := echoTCP(t)
+	srcPort := freePort(t, "tcp")
+	addr := fmt.Sprintf("127.0.0.1:%d", srcPort)
+
+	rule := model.ForwardRule{
+		ID: "i1", Name: "idle", Enable: true, Protocol: protoTCP,
+		SrcAddr: addr, DstAddr: target, TimeoutSec: 1,
+	}
+	setRules(t, store, rule)
+
+	f := New(deps)
+	if err := f.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer func() { _ = f.Stop(context.Background()) }()
+
+	conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	// Keep talking for well over the one second timeout.
+	for i := 0; i < 8; i++ {
+		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+		if _, err := conn.Write([]byte("ping")); err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+		if _, err := conn.Read(make([]byte, 4)); err != nil {
+			t.Fatalf("the relay closed an active connection after %d pings: %v", i, err)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+
+	// Now go silent: the idle timeout has to fire.
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := conn.Read(make([]byte, 8)); err == nil {
+		t.Fatal("the idle timeout left a silent connection open")
 	}
 }

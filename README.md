@@ -14,10 +14,10 @@
 | **Web 服务** | 同一套监听器上按「监听地址 + 域名 + 路径」路由，支持 5 种规则类型：反向代理、重定向、静态托管、文件管理（FileBrowser）、WebDAV。支持 IP/UA 黑白名单、HTTP Basic 认证、多上游负载均衡（轮询/随机/IP 哈希）、路径重写、自定义请求/响应头、WebSocket、访问日志 |
 | **端口转发** | TCP / UDP / 同时转发，源地址 → 目标地址，支持 IPv6、源 IP 黑白名单、空闲超时、活跃与累计连接数、上下行流量统计、访问日志 |
 | **动态域名 DDNS** | 内置 Cloudflare、阿里云、DNSPod、Dynv6、DuckDNS、No-IP、FreeDNS、deSEC、Porkbun、NameSilo、GoDaddy、Namecheap、Vercel 与「自定义回调」；支持多子域名、A/AAAA、TTL、间隔或 cron 调度、公网 IP 探测（网卡 / URL / 静态）、变化才更新、失败通知 |
-| **ACME 自动证书** | 基于 `golang.org/x/crypto/acme` 自研签发流程，支持 http-01 / dns-01 / tls-alpn-01，DNS-01 复用 DDNS 的提供商，自动续期（默认剩余 30 天），证书热加载、无需重启 |
+| **ACME 自动证书** | 基于 `golang.org/x/crypto/acme` 自研签发流程，支持 http-01 / dns-01 / tls-alpn-01，DNS-01 复用 DDNS 的提供商；**http-01 复用 web 的 :80 监听**（端口被自家规则占用也能签发），自动续期（默认剩余 30 天，上限 30 天），证书热加载、无需重启 |
 | **WebDAV** | 基于 `golang.org/x/net/webdav`，可挂载本地目录或远程 WebDAV，细粒度读写权限，支持 Windows 资源管理器 / macOS 访达 / rclone / RaiDrive 挂载 |
 | **文件管理** | 服务端渲染的文件浏览器：上传（拖拽 + 进度）、下载（Range、断点续传）、新建、重命名、删除、搜索、目录分享链接（可设有效期） |
-| **Coraza WAF** | 内嵌 OWASP CRS 规则集，支持检测/拦截模式、PL 等级、入站/出站阈值、规则文件勾选、自定义 SecLang 规则、拦截日志与在线测试；**请求体检查策略**（每条路由声明全量/偷看/跳过/gRPC，observe 观察模式 + wouldReject 记录） |
+| **Coraza WAF** | 内嵌 OWASP CRS 规则集，支持检测/拦截模式、PL 等级、入站/出站阈值、规则文件勾选、自定义 SecLang 规则、请求体上限、拦截日志与在线测试；可保护管理后台本身 |
 | **计划任务** | 可视化 cron：模块启停、规则开关、HTTP 请求、Webhook 通知（Shell 需显式开启） |
 | **通知** | 通用 Webhook，事件：证书签发/失败、DDNS 更新/失败、系统告警 |
 
@@ -158,77 +158,26 @@ data/
 - **开放 API**：Bearer Token 或 `X-API-Token`，令牌只存 SHA-256 哈希，可限制 scope，可随时吊销。
 - **文件安全**：静态托管、文件管理、WebDAV 全部走基于 `os.Root` 的虚拟文件系统，符号链接与 `..` 逃逸在内核层面被拒绝。
 - **反向代理**：剥离 hop-by-hop 头、可控超时、上游仅允许 http/https，响应头可裁剪。
-- **WAF**：Coraza + CRS，可保护后台接口本身；拦截页面不回显用户输入；**请求体检查策略**默认 fail-closed（见下方「WAF 与请求体检查策略」）。
+- **WAF**：Coraza + CRS，可保护后台接口本身；拦截页面不回显用户输入；请求体检查由 Coraza 自己按 `bodyLimitKb` 截断（见下方「WAF」）。
 - **TLS**：最低 TLS 1.2、仅 ECDHE 系列套件、按 SNI 热加载证书。
 - **其它**：管理后台支持 IP 白名单；配置与密钥文件权限 0600；日志不记录任何凭据。
 
 ---
 
-## WAF 与请求体检查策略
+## WAF
 
-WAF 的请求体检查**由部署声明，不由攻击者决定**：每条 Web 规则都可以声明自己的请求体策略，没声明的继承全局默认值。
-这解决的是「攻击者用 chunked / 流式请求让 WAF 读不到 body，从而把全量检查悄悄降级成不检查」的问题。
+内嵌 [Coraza](https://coraza.io/) v3 + OWASP CRS v4，规则集编译进二进制，不需要任何外部依赖：
 
-### 全局配置（`model.WAFConfig`）：4 项策略 + 1 项告警
+- **检测 / 拦截**两种模式；`logOnly` 只记录不拦截；paranoia level、执行等级、入站 / 出站阈值可调；
+- 规则文件可整份或按 ID 区间禁用，支持追加自定义 SecLang 规则（`extraRules`）；
+- **请求体**交给 Coraza：`bodyLimitKb` 设置 `SecRequestBodyLimit`，超出上限的部分按 `ProcessPartial` 只检查前缀，
+  其余字节流式透传给上游（不返回 411，chunked / 大上传都能正常过）；
+- 可保护管理后台本身（`adminProtect`，拦截页不回显用户输入）；
+- WAF 页提供拦截日志、规则命中统计与「请求测试」（把请求喂给引擎，不会真的发出去）。
 
-| 字段 | 默认值 | 含义 |
-| --- | --- | --- |
-| `enforcementMode` | `observe` | `observe` 只记录「本应拒绝」，`enforce` 真的拒绝。**只改变响应，不改变判定逻辑** |
-| `defaultBodyPolicy` | `full` | 未声明策略的路由用它：`full` / `peek` / `skip` / `grpc` |
-| `peekBytes` | `65536` | `peek` 策略检查的字节数上限 |
-| `peekTimeoutMs` | `250` | `peek` 的空闲超时，超时后不再等待客户端 |
-| `notifyBodyRatio` | `0`（关闭） | 非 full 请求体检查占比**超过**该比例时发一条告警（0–1，`0` 表示不告警）；同一进程每小时最多一次，样本少于 50 条时不发 |
-
-### 每条 Web 规则的 `bodyPolicy`（空 = 继承全局）
-
-| 取值 | 行为 | 检查缺口 |
-| --- | --- | --- |
-| `full` | 请求体完整到达并检查后才转发；Content-Length 未知时 enforce 下直接拒绝（411） | 无 |
-| `peek` | 读满 `peekBytes` 或空闲 `peekTimeoutMs` 就检查已到达的部分，其余流式透传 | 只覆盖前若干字节 |
-| `skip` | 只查 URI / 请求头，请求体原样透传 | 请求体完全不查（显式声明） |
-| `grpc-unary` | 首消息 + 立即 EOF 即完成请求级判定；出现第二帧则拒绝/记录 | 无（针对 unary / 服务端流式） |
-| `grpc-stream` | 首消息先判定一次，后续帧只做帧校验 | **只查首消息** |
-
-固定上限（不是配置项，写在代码里）：单条 gRPC 消息 **4MiB**（`maxGRPCMessageBytes`），超过按帧层违规处理。
-CRS 侧另外把 `application/grpc` / `application/grpc-web` 加进了 `tx.allowed_request_content_type`，并按实际读到的消息长度设置 `Content-Length`，
-因此「gRPC 被 CRS 当成未知 Content-Type」「缺 Content-Length 被 CRS 误判」这两类误报不会发生——它只是不检查后续消息。
-
-### 「部分检查」是什么意思
-
-除 `full` 之外的策略都会产生 **bodyState**（每次请求落一个），WAF 页会把分布直接画出来：
-`full`（全量）/ `peeked`（部分）/ `skipped`（声明跳过）/ `grpc-unary` / `grpc-stream` / `grpc-server-first`（服务端先说话的流）/ `frame-error`（畸形、超长、截断帧）。
-**非 full 的请求仍然会被 URI 与请求头检查覆盖**，而且这是你自己声明的取舍，不是被攻击者降级的结果——WAF 页会同时显示非 full 占比，方便判断这个缺口有多大。
-
-### observe 模式（先观察，后强制）
-
-默认 `enforcementMode=observe`：所有「本应拒绝」的请求**照常放行**，但会记录一条 **wouldReject**
-（规则、路径、原因、本应返回的状态码，环形缓冲 500 条 + 计数）。上线顺序：
-
-1. 保持 `observe`，正常跑流量（建议覆盖一个完整业务周期）；
-2. 在 WAF 页看 **wouldReject 样例表**、**未声明 bodyPolicy 的路由**列表、**bodyState 分布**；
-3. 打开列表里的路由（一键跳转到 Web 规则页）逐条声明策略；
-4. 列表清空、样例逐条确认过之后，在 WAF 页一键切到 `enforce`（界面会弹确认框提示后果）；
-5. 建议同时打开通知告警（非 full 占比 / wouldReject 计数超阈值）。
-
-> **在 enforce 之前不要开 body 策略**：否则 chunked / 流式请求会直接被 411 或拒绝。
-
-### 本次顺带修复的生产缺陷
-
-- **web 模块自建的 WAF 实例此前从未 `Start`**：web 模块自己 `waf.New()` 了一个实例给规则级 WAF 用（注册表里那个是给管理 API 用的），
-  此前没有任何地方启动它，于是「规则级 WAF」在生产里静默不生效（管理面 `adminProtect` 看起来正常，规则却完全不检查）。
-  现在 web 模块在 `Start` 里启动、在 `Stop` 里停止这个实例（`internal/modules/web/web.go`），并有测试覆盖。
-- **CRS 对 gRPC 与缺失 Content-Length 的误判**：把 `application/grpc` / `application/grpc-web` 加入 `tx.allowed_request_content_type`，
-  并在把首消息交给引擎时按实际读到的消息长度设置 `Content-Length`。否则 gRPC 请求会被 CRS 当成未知 Content-Type、
-  缺 `Content-Length` 的请求会被当成畸形体误报。
-
-### 能力边界（必须知道）
-
-- **gRPC 流式路由只做首消息检查 + 帧校验**：`grpc-stream`（含 bidi、客户端流式）只会检查**第一条**消息，
-  后续消息只做帧层校验（compressed flag、单条消息长度上限 4MiB、截断检测），**不做逐消息 CRS 检查，也不做跨消息累计评分**。
-  这条边界是刻意收窄的范围，不是 bug；把它当成「首发放攻击能被挡住」而不是「整个流都被检查过」。
-- `peek` 同理：只对前 `peekBytes` 负责，后面的字节是透传的。
-- WAF 的**出站**检查与响应体处理不在本策略范围内。
-- 面向将来的逐消息检查（D）、外部检查（ext_proc）与描述符校验，接口已经预留（`BodyInspector` / `Spooler` / `PolicyResolver`），见 [实施清单](docs/PLAN-waf-body-policy.md) 第 9 节。
+> **已移除**：按路由声明请求体策略（`full` / `peek` / `skip` / `grpc-unary` / `grpc-stream`）与
+> `observe` / `enforce` 双模式那套机制。它主要为 gRPC 帧级检查服务，实现复杂、维护成本高，
+> 且 chunked 请求在 enforce 下会被 411 拒绝。现在所有请求体都走 Coraza 的默认检查路径。
 
 ---
 

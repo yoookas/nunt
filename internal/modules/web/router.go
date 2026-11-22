@@ -225,6 +225,14 @@ func (rt *router) currentMatcher() *matcher {
 
 // ServeHTTP resolves the rule and runs the middleware chain.
 func (rt *router) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+	// An ACME http-01 challenge is answered before routing: it belongs to no
+	// rule, and the CA only accepts it on port 80, which this listener may own.
+	if strings.HasPrefix(req.URL.Path, acmeChallengePath) {
+		if provider := rt.web.challengeProvider(); provider != nil && provider.ServeChallenge(rw, req) {
+			return
+		}
+	}
+
 	m := rt.currentMatcher()
 	if m == nil {
 		http.Error(rw, "service unavailable", http.StatusServiceUnavailable)

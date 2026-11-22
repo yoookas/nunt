@@ -17,17 +17,6 @@ const (
 	defaultForwardMaxConnsPerIP = 64
 )
 
-// Request body inspection defaults and bounds. PeekBytes caps how much of a
-// body the peek and gRPC policies buffer; PeekTimeoutMS caps how long they
-// wait for the client. Both are bounded so a configuration cannot turn the
-// request path into an unbounded read.
-const (
-	defaultWAFPeekBytes     = 65536
-	defaultWAFPeekTimeoutMS = 250
-	maxWAFPeekBytes         = 4 << 20
-	maxWAFPeekTimeoutMS     = 10000
-)
-
 func deepCopy(in, out any) error {
 	data, err := json.Marshal(in)
 	if err != nil {
@@ -68,18 +57,6 @@ func Normalize(c *model.Config) {
 	}
 	if c.WAF.BodyLimitKB <= 0 {
 		c.WAF.BodyLimitKB = 128
-	}
-	if c.WAF.EnforcementMode == "" {
-		c.WAF.EnforcementMode = model.WAFEnforceObserve
-	}
-	if c.WAF.DefaultBodyPolicy == "" {
-		c.WAF.DefaultBodyPolicy = model.WAFBodyFull
-	}
-	if c.WAF.PeekBytes <= 0 {
-		c.WAF.PeekBytes = defaultWAFPeekBytes
-	}
-	if c.WAF.PeekTimeoutMS <= 0 {
-		c.WAF.PeekTimeoutMS = defaultWAFPeekTimeoutMS
 	}
 	if c.ACME.CA == "" {
 		c.ACME.CA = "letsencrypt"
@@ -163,7 +140,12 @@ func Normalize(c *model.Config) {
 		if j.Challenge == "" {
 			j.Challenge = "http"
 		}
-		if j.RenewDays <= 0 {
+		switch {
+		case j.RenewDays <= 0:
+			j.RenewDays = 30
+		case j.RenewDays > 30:
+			// A window wider than the certificate lifetime would renew on every
+			// check and burn the CA rate limit.
 			j.RenewDays = 30
 		}
 		if j.KeyType == "" {
@@ -195,16 +177,9 @@ func Validate(c *model.Config) error {
 	if len(c.Users) == 0 {
 		return fmt.Errorf("at least one administrator account is required")
 	}
-	if err := validateWAFBody(c); err != nil {
-		return err
-	}
 	for _, r := range c.Web.Rules {
 		if len(r.Listen) == 0 {
 			return fmt.Errorf("web rule %q: at least one listen address is required", displayName(r.Name, r.ID))
-		}
-		if !validBodyPolicy(r.BodyPolicy) {
-			return fmt.Errorf("web rule %q: unknown bodyPolicy %q (full, peek, skip, grpc-unary or grpc-stream)",
-				displayName(r.Name, r.ID), r.BodyPolicy)
 		}
 		if err := requireFileServiceAuth(&r); err != nil {
 			return err
@@ -275,45 +250,6 @@ func Validate(c *model.Config) error {
 		}
 	}
 	return nil
-}
-
-// validateWAFBody rejects request body inspection settings the runtime does
-// not understand. An empty value is accepted because Normalize fills it in
-// before Validate runs and because older configurations carry neither.
-func validateWAFBody(c *model.Config) error {
-	switch c.WAF.EnforcementMode {
-	case "", model.WAFEnforceObserve, model.WAFEnforceEnforce:
-	default:
-		return fmt.Errorf("waf enforcementMode %q is neither observe nor enforce", c.WAF.EnforcementMode)
-	}
-	switch c.WAF.DefaultBodyPolicy {
-	case "", model.WAFBodyFull, model.WAFBodyPeek, model.WAFBodySkip, model.WAFBodyGRPC:
-	default:
-		return fmt.Errorf("waf defaultBodyPolicy %q is not full, peek, skip or grpc", c.WAF.DefaultBodyPolicy)
-	}
-	if c.WAF.PeekBytes < 0 || c.WAF.PeekBytes > maxWAFPeekBytes {
-		return fmt.Errorf("waf peekBytes must be between 0 and %d", maxWAFPeekBytes)
-	}
-	if c.WAF.PeekTimeoutMS < 0 || c.WAF.PeekTimeoutMS > maxWAFPeekTimeoutMS {
-		return fmt.Errorf("waf peekTimeoutMs must be between 0 and %d", maxWAFPeekTimeoutMS)
-	}
-	// notifyBodyRatio is a share, so 0 (off, the default) and 1 are both valid
-	// while anything outside the range would make the comparison meaningless.
-	if c.WAF.NotifyBodyRatio < 0 || c.WAF.NotifyBodyRatio > 1 {
-		return fmt.Errorf("waf notifyBodyRatio must be between 0 and 1")
-	}
-	return nil
-}
-
-// validBodyPolicy reports whether a rule body policy is understood by the
-// runtime. The empty value inherits the global default.
-func validBodyPolicy(p string) bool {
-	switch p {
-	case "", model.WAFBodyFull, model.WAFBodyPeek, model.WAFBodySkip,
-		model.WAFBodyGRPCUnary, model.WAFBodyGRPCStream:
-		return true
-	}
-	return false
 }
 
 // requireFileServiceAuth rejects filebrowser and webdav rules that would be

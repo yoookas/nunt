@@ -201,6 +201,9 @@ func renewWindow(cfg *model.Config) time.Duration {
 			}
 		}
 	}
+	if days > maxRenewDays {
+		days = maxRenewDays
+	}
 	return time.Duration(days) * 24 * time.Hour
 }
 

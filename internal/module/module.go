@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sort"
 	"sync"
 	"time"
@@ -63,6 +64,15 @@ type CertProvider interface {
 	EnsureCertificate(ctx context.Context, domains []string) error
 	// HasCertificate reports whether a valid certificate is already stored.
 	HasCertificate(domains []string) bool
+}
+
+// ChallengeProvider is implemented by a module that can answer ACME http-01
+// challenges through the listeners of the web service, so issuing a certificate
+// does not need a second listener on port 80.
+type ChallengeProvider interface {
+	// ServeChallenge answers the request when its path belongs to a challenge
+	// that is currently being validated, and reports whether it did.
+	ServeChallenge(w http.ResponseWriter, r *http.Request) bool
 }
 
 // Deps carries everything a module may need.

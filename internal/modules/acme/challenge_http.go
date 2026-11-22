@@ -16,13 +16,43 @@ import (
 // during challenge validation.
 const challengeServerTimeout = 15 * time.Second
 
-// startHTTP01 answers one http-01 challenge on port 80.
+// acmeChallengePrefix is the well known path an ACME CA queries for http-01.
+const acmeChallengePrefix = "/.well-known/acme-challenge/"
+
+// ServeChallenge answers one active http-01 token. It reports whether the path
+// belongs to a challenge this module is validating right now.
+func (a *ACME) ServeChallenge(w http.ResponseWriter, r *http.Request) bool {
+	value, ok := a.challenges.Load(r.URL.Path)
+	if !ok {
+		return false
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte(value.(string)))
+	return true
+}
+
+// webServesChallenges reports whether the web service is running, in which case
+// it routes the well known challenge path to ServeChallenge and the standalone
+// listener is not needed.
+func (a *ACME) webServesChallenges() bool {
+	if a.deps == nil || a.deps.Registry == nil {
+		return false
+	}
+	mod, ok := a.deps.Registry.Get("web")
+	if !ok {
+		return false
+	}
+	return mod.Status().Running
+}
+
+// startHTTP01 answers one http-01 challenge.
 //
-// The CA connects to http://<domain>/.well-known/acme-challenge/<token>, so a
-// minimal server is started for the duration of the validation. A bind failure
-// is reported with the underlying error because it almost always means another
-// process (the web service) already owns port 80.
-func startHTTP01(client *acme.Client, chal *acme.Challenge, domain string) (func(), error) {
+// The answer is registered in memory first. When the web service already owns
+// port 80 (the usual deployment: a web rule listens on :80) the request is
+// served by that listener and no second server is started. The temporary
+// listener below is only the fallback for a deployment that leaves port 80 free.
+func (a *ACME) startHTTP01(client *acme.Client, chal *acme.Challenge, domain string) (func(), error) {
 	if client == nil || chal == nil {
 		return nil, fmt.Errorf("http-01 challenge is incomplete")
 	}
@@ -31,20 +61,31 @@ func startHTTP01(client *acme.Client, chal *acme.Challenge, domain string) (func
 		return nil, fmt.Errorf("build http-01 response: %w", err)
 	}
 	path := client.HTTP01ChallengePath(chal.Token)
+	a.challenges.Store(path, response)
+	drop := func() { a.challenges.Delete(path) }
 
-	mux := http.NewServeMux()
-	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+	ln, err := net.Listen("tcp", ":80")
+	if err != nil {
+		if a.webServesChallenges() {
+			// The web listeners answer the challenge; keep the answer registered
+			// for the whole validation and let the caller drop it afterwards.
+			return drop, nil
+		}
+		drop()
+		return nil, fmt.Errorf("listen on port 80 for the http-01 challenge of %s: %w (another service, for example the web module, may already use port 80)", domain, err)
+	}
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != path {
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write([]byte(response))
 	})
-
-	ln, err := net.Listen("tcp", ":80")
-	if err != nil {
-		return nil, fmt.Errorf("listen on port 80 for the http-01 challenge of %s: %w (another service, for example the web module, may already use port 80)", domain, err)
-	}
 	srv := &http.Server{
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: challengeServerTimeout,
 		ReadTimeout:       challengeServerTimeout,
 		WriteTimeout:      challengeServerTimeout,
@@ -66,6 +107,7 @@ func startHTTP01(client *acme.Client, chal *acme.Challenge, domain string) (func
 		case <-done:
 		case <-time.After(2 * time.Second):
 		}
+		drop()
 	}
 	return cleanup, nil
 }

@@ -136,11 +136,21 @@ func TestMatchJob(t *testing.T) {
 func TestRenewWindowFollowsTheLargestJob(t *testing.T) {
 	cfg := &model.Config{ACME: model.ACMEConfig{Jobs: []model.CertJob{
 		{ID: "a", Enable: true, RenewDays: 10},
-		{ID: "b", Enable: true, RenewDays: 45},
+		{ID: "b", Enable: true, RenewDays: 20},
 		{ID: "c", Enable: false, RenewDays: 90},
 	}}}
-	if got, want := renewWindow(cfg), 45*24*time.Hour; got != want {
+	// The default window equals the cap, so a smaller per job value never widens
+	// it; the per job value only narrows the re-check window in checkDue.
+	if got, want := renewWindow(cfg), defaultRenewDays*24*time.Hour; got != want {
 		t.Fatalf("renewWindow = %v, want %v", got, want)
+	}
+	// A window above the cap is clamped: a 90 day certificate would otherwise be
+	// renewed on every check.
+	capped := &model.Config{ACME: model.ACMEConfig{Jobs: []model.CertJob{
+		{ID: "d", Enable: true, RenewDays: 90},
+	}}}
+	if got, want := renewWindow(capped), maxRenewDays*24*time.Hour; got != want {
+		t.Fatalf("capped renewWindow = %v, want %v", got, want)
 	}
 	if got, want := renewWindow(nil), defaultRenewDays*24*time.Hour; got != want {
 		t.Fatalf("renewWindow(nil) = %v, want %v", got, want)

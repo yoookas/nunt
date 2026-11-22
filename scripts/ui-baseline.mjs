@@ -493,11 +493,6 @@ async function seedDemoData(client, opts, www) {
     adminProtect: false,
     bodyLimitKb: 1024,
     logOnly: false,
-    enforcementMode: 'observe',
-    defaultBodyPolicy: 'full',
-    peekBytes: 65536,
-    peekTimeoutMs: 250,
-    notifyBodyRatio: 0.2,
   };
   const waf = await step('WAF 配置', 'put', '/api/v1/waf/config', wafPayload);
   if (!waf.ok) {
