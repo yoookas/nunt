@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Alert, Button, Switch } from '@heroui/react'
 import { api, errorText } from '../api'
 import { fmtBytes, fmtTime, splitLines } from '../format'
+import { useProvinces } from '../useProvinces'
 import {
   ConfirmModal,
   DataTable,
   FormModal,
+  MultiSelectInput,
   NumberInput,
   Page,
   PageHeader,
@@ -221,6 +223,7 @@ function FormField({ full, error, children }: { full?: boolean; error?: string; 
 }
 
 export default function Forward() {
+  const provinces = useProvinces()
   const [rules, setRules] = useState<ForwardRule[]>([])
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<unknown>(null)
@@ -883,12 +886,13 @@ export default function Forward() {
             />
           </FormField>
           <FormField full>
-            <TagInput
+            <MultiSelectInput
               label="省份（ip2region）"
               value={form.accessProvinces}
               onChange={(value) => patchForm({ accessProvinces: value })}
-              placeholder="例如 浙江、广东"
-              hint="与 IP 列表取并集；私有地址不参与地理匹配。"
+              options={provinces.options}
+              placeholder="选择省份"
+              hint={`与 IP 列表取并集；省份列表${provinces.source === 'database' ? '来自 ip2region 地址库' : '为内置列表'}，私有地址不参与地理匹配。`}
             />
           </FormField>
 

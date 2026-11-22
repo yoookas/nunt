@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { Button, Input, TextField } from '@heroui/react'
 import { api, errorText } from '../../api'
 import { splitLines } from '../../format'
+import { useProvinces } from '../../useProvinces'
 import {
   FormModal,
+  MultiSelectInput,
   NumberInput,
   SelectInput,
   SwitchInput,
@@ -159,6 +161,7 @@ export default function RouteModal({
   onClose: () => void
   onSaved: () => void
 }) {
+  const provinces = useProvinces()
   const [form, setForm] = useState<RouteForm>(blankForm)
   const [existingAuthNames, setExistingAuthNames] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
@@ -703,12 +706,13 @@ export default function RouteModal({
             />
           </div>
           <div className="md:col-span-2">
-            <TagInput
+            <MultiSelectInput
               label="省份（ip2region）"
               value={form.accessProvinces}
               onChange={(value) => patch({ accessProvinces: value })}
-              placeholder="例如 浙江、广东"
-              hint="与 IP 列表取并集；省市/自治区全称会自动归一。私有地址不参与地理匹配。"
+              options={provinces.options}
+              placeholder="选择省份"
+              hint={`与 IP 列表取并集；省份列表${provinces.source === 'database' ? '来自 ip2region 地址库' : '为内置列表'}，私有地址不参与地理匹配。`}
             />
           </div>
           <div className="md:col-span-2">

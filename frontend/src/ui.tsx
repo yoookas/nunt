@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Button,
   Card,
@@ -15,7 +15,7 @@ import {
   TextField,
   toast,
 } from '@heroui/react'
-import { X } from 'lucide-react'
+import { ChevronDown, X } from 'lucide-react'
 
 export { toast }
 
@@ -435,6 +435,84 @@ export function StatusChip({
     <Chip color={color === 'primary' ? 'accent' : color || 'default'} size="sm" variant="soft">
       {children}
     </Chip>
+  )
+}
+
+export function MultiSelectInput({
+  label,
+  value,
+  onChange,
+  options,
+  placeholder = '请选择',
+  hint,
+}: {
+  label?: string
+  value: string[]
+  onChange: (value: string[]) => void
+  options: SelectOption[]
+  placeholder?: string
+  hint?: ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const toggle = (item: string) => {
+    onChange(value.includes(item) ? value.filter((entry) => entry !== item) : [...value, item])
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5" ref={rootRef}>
+      {label ? <span className="text-sm font-medium">{label}</span> : null}
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen((prev) => !prev)}
+          className="flex min-h-9 w-full flex-wrap items-center gap-1 rounded-md border border-border bg-surface px-2 py-1 text-left text-sm"
+        >
+          {value.length === 0 ? (
+            <span className="text-muted">{placeholder}</span>
+          ) : (
+            value.map((item) => (
+              <span key={item} className="inline-flex items-center rounded-full bg-default px-2 py-0.5 text-xs">
+                {item}
+              </span>
+            ))
+          )}
+          <ChevronDown size={14} className="ml-auto text-muted" />
+        </button>
+        {open ? (
+          <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border bg-overlay p-1 shadow-lg">
+            {options.length === 0 ? (
+              <div className="px-2 py-3 text-xs text-muted">没有可选项</div>
+            ) : (
+              options.map((option) => (
+                <label
+                  key={option.value}
+                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-default"
+                >
+                  <input
+                    type="checkbox"
+                    checked={value.includes(option.value)}
+                    onChange={() => toggle(option.value)}
+                  />
+                  <span>{option.label}</span>
+                </label>
+              ))
+            )}
+          </div>
+        ) : null}
+      </div>
+      {hint ? <span className="field-hint">{hint}</span> : null}
+    </div>
   )
 }
 

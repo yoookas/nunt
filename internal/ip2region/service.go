@@ -7,10 +7,12 @@
 package ip2region
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -54,18 +56,20 @@ type Service struct {
 	mtime  time.Time
 }
 
-// dataset is one loaded database and its searcher pool.
+// dataset is one loaded database, its searcher pool and the provinces that
+// actually appear in it.
 type dataset struct {
-	pool sync.Pool
+	pool      sync.Pool
+	provinces []string
 }
 
-func newDataset(version *xdb.Version, content []byte) (*dataset, error) {
+func newDataset(version *xdb.Version, content []byte, provinces []string) (*dataset, error) {
 	// Validate the buffer once; pool entries are built from the same bytes and
 	// cannot fail after this point.
 	if _, err := xdb.NewWithBuffer(version, content); err != nil {
 		return nil, err
 	}
-	d := &dataset{}
+	d := &dataset{provinces: provinces}
 	d.pool.New = func() any {
 		searcher, err := xdb.NewWithBuffer(version, content)
 		if err != nil {
@@ -174,6 +178,16 @@ func (s *Service) Lookup(ip net.IP) (Record, error) {
 	return ParseRegion(raw), nil
 }
 
+// ProvincesFromDatabase returns the provinces that occur in the loaded
+// database. The second result is false when no database is loaded.
+func (s *Service) ProvincesFromDatabase() ([]string, bool) {
+	data := s.data.Load()
+	if data == nil {
+		return nil, false
+	}
+	return append([]string{}, data.provinces...), true
+}
+
 // Status reports the current database.
 func (s *Service) Status() Status {
 	s.mu.Lock()
@@ -203,7 +217,8 @@ func load(path string, info os.FileInfo) (*dataset, Status, error) {
 	} else if header.IPVersion != xdb.IPv4VersionNo {
 		return nil, Status{Path: path}, fmt.Errorf("unsupported ip version %d", header.IPVersion)
 	}
-	loaded, err := newDataset(version, data)
+	provinces := collectProvinces(data, header, version)
+	loaded, err := newDataset(version, data, provinces)
 	if err != nil {
 		return nil, Status{Path: path}, fmt.Errorf("open: %w", err)
 	}
@@ -218,6 +233,46 @@ func load(path string, info os.FileInfo) (*dataset, Status, error) {
 		status.CreatedAt = &created
 	}
 	return loaded, status, nil
+}
+
+// collectProvinces walks the segment index of the database and collects the
+// distinct third field (province) of every row. The database has no
+// enumeration API, so this one-time scan is what makes a province picker
+// possible without hard-coding a list that can drift from the data.
+func collectProvinces(content []byte, header *xdb.Header, version *xdb.Version) []string {
+	if header == nil || version == nil {
+		return nil
+	}
+	ipBytes := version.Bytes
+	segSize := version.SegmentIndexSize
+	if ipBytes <= 0 || segSize < ipBytes*2+6 {
+		return nil
+	}
+	start, end := int(header.StartIndexPtr), int(header.EndIndexPtr)
+	seen := map[string]struct{}{}
+	for p := start; p <= end && p+segSize <= len(content); p += segSize {
+		entry := content[p : p+segSize]
+		dataLen := int(binary.LittleEndian.Uint16(entry[ipBytes*2:]))
+		dataPtr := int(binary.LittleEndian.Uint32(entry[ipBytes*2+2:]))
+		if dataLen <= 0 || dataPtr < 0 || dataPtr+dataLen > len(content) {
+			continue
+		}
+		parts := strings.Split(string(content[dataPtr:dataPtr+dataLen]), "|")
+		if len(parts) < 3 {
+			continue
+		}
+		name := NormalizeProvince(parts[2])
+		if name == "" || name == "0" {
+			continue
+		}
+		seen[name] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ParseRegion turns a raw ip2region row into a Record. Missing fields are
