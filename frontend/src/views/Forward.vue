@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from
 import { Message, Modal } from '@arco-design/web-vue'
 import { api, errorText } from '../api'
 import { fmtBytes, fmtTime } from '../format'
+import { PROVINCE_OPTIONS } from '../provinces'
 
 const PROTOCOL_OPTIONS = [
   { value: 'tcp', label: 'TCP' },
@@ -50,6 +51,8 @@ const ruleForm = reactive({
   maxConnsPerIP: 0,
   accessMode: 'off',
   accessIps: '',
+  accessCountries: [],
+  accessProvinces: [],
   remark: '',
 })
 
@@ -305,6 +308,8 @@ function openEdit(rule) {
     maxConnsPerIP: num(rule.maxConnsPerIP),
     accessMode: access.mode || 'off',
     accessIps: (Array.isArray(access.ips) ? access.ips : []).join('\n'),
+    accessCountries: Array.isArray(access.countries) ? [...access.countries] : [],
+    accessProvinces: Array.isArray(access.provinces) ? [...access.provinces] : [],
     remark: rule.remark || '',
   })
   ruleModalVisible.value = true
@@ -328,6 +333,8 @@ async function submitRule() {
     access: {
       mode: ruleForm.accessMode || 'off',
       ips: splitLines(ruleForm.accessIps),
+      countries: [...(ruleForm.accessCountries || [])],
+      provinces: [...(ruleForm.accessProvinces || [])],
       uaMode: originalAccess.value.uaMode || 'off',
       uas: originalAccess.value.uas || [],
     },
@@ -686,6 +693,28 @@ onUnmounted(() => {
               :auto-size="{ minRows: 3, maxRows: 8 }"
             />
             <template #extra>白名单为空时会拒绝所有来源，黑名单为空时不会拒绝任何来源。</template>
+          </a-form-item>
+
+          <a-form-item field="accessCountries" label="国家/地区（ip2region）" class="full">
+            <a-select
+              v-model="ruleForm.accessCountries"
+              mode="multiple"
+              allow-create
+              allow-clear
+              placeholder="输入国家名后回车，例如 中国、美国"
+            />
+            <template #extra>与 IP 列表取并集；需把 IP 访问控制设为白名单/黑名单，并先在「设置 → IP 地址库」配置数据库。</template>
+          </a-form-item>
+          <a-form-item field="accessProvinces" label="省份（ip2region）" class="full">
+            <a-select
+              v-model="ruleForm.accessProvinces"
+              mode="multiple"
+              allow-create
+              allow-clear
+              :options="PROVINCE_OPTIONS"
+              placeholder="例如 浙江、广东"
+            />
+            <template #extra>与 IP 列表取并集；私有地址不参与地理匹配。</template>
           </a-form-item>
 
           <a-form-item field="remark" label="备注" class="full">

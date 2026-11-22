@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nunt/nunt/internal/ipfilter"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/netutil"
 )
@@ -34,6 +35,7 @@ type rule struct {
 	domains  []string
 	spec     *model.WebRule
 	ipNets   []*net.IPNet
+	filter   *ipfilter.Filter
 	tls      ruleTLS
 	// siteKey fingerprints the rule definition so an unchanged rule keeps its
 	// handler (and the storage that handler may have opened) across reloads.

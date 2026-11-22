@@ -1,13 +1,14 @@
 package forward
 
 import (
+	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/nunt/nunt/internal/ipfilter"
 	"github.com/nunt/nunt/internal/model"
-	"github.com/nunt/nunt/internal/netutil"
 )
 
 // accessEntry is one line of the forwarder access log. Byte counters use the
@@ -113,53 +114,55 @@ func (l *accessLogger) clear() {
 
 // accessMatcher is a compiled model.Access rule.
 type accessMatcher struct {
-	mode string
-	nets []*net.IPNet
-	err  error
+	mode   string
+	filter *ipfilter.Filter
+	err    error
 }
 
 var accessCache sync.Map // fingerprint string -> *accessMatcher
 
 // loadAccess compiles (and caches) an access rule. An invalid list makes the
 // rule fail closed: a typo must never silently expose a port.
-func loadAccess(a model.Access) *accessMatcher {
+func loadAccess(a model.Access, geo ipfilter.Lookup) *accessMatcher {
 	if a.Mode == "" || a.Mode == model.AccessOff {
 		return &accessMatcher{mode: model.AccessOff}
 	}
-	key := accessFingerprint(a)
+	key := accessFingerprint(a) + "|geo=" + fmt.Sprintf("%p", geo)
 	if cached, ok := accessCache.Load(key); ok {
 		return cached.(*accessMatcher)
 	}
 	m := &accessMatcher{mode: a.Mode}
-	nets, err := netutil.ParseIPList(a.IPs)
+	filter, err := ipfilter.Compile(a, geo)
 	if err != nil {
 		m.err = err
 	} else {
-		m.nets = nets
+		m.filter = filter
 	}
 	accessCache.Store(key, m)
 	return m
 }
 
-func (m *accessMatcher) allows(ip net.IP) bool {
+func (m *accessMatcher) allows(ip net.IP) (bool, string) {
 	if m == nil {
-		return true
+		return true, ""
 	}
 	if m.err != nil {
-		return false
+		return false, "invalid-access"
 	}
-	return netutil.IPAllowed(m.mode, m.nets, ip)
+	return m.filter.Allowed(ip)
 }
 
 // allow evaluates the access rule of the rule for a peer address and reports
 // refusals.
 func (f *Forward) allow(r model.ForwardRule, remote net.Addr) bool {
 	ip := clientIP(remote)
-	m := loadAccess(r.Access)
-	if m.allows(ip) {
+	m := loadAccess(r.Access, f.deps.Geo)
+	allowed, reason := m.allows(ip)
+	if allowed {
 		return true
 	}
 	f.log.Warn("forward: source address rejected",
-		"rule", ruleLabel(r), "client", addrString(remote), "mode", r.Access.Mode, "error", m.err)
+		"rule", ruleLabel(r), "client", addrString(remote), "mode", r.Access.Mode,
+		"reason", reason, "error", m.err)
 	return false
 }

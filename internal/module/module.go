@@ -14,6 +14,7 @@ import (
 
 	"github.com/nunt/nunt/internal/certs"
 	"github.com/nunt/nunt/internal/config"
+	"github.com/nunt/nunt/internal/ip2region"
 	"github.com/nunt/nunt/internal/logging"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/mounts"
@@ -100,6 +101,9 @@ type Deps struct {
 	Box      *secret.Box
 	DataDir  string
 	Registry *Registry
+	// Geo resolves the country/province of a client address; it may be nil in
+	// tests.
+	Geo *ip2region.Service
 }
 
 // Logger returns a logger tagged with the module name.

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { Message, Modal } from '@arco-design/web-vue'
 import { api, errorText } from '../api'
 import { fmtBytes, fmtTime } from '../format'
+import { PROVINCE_OPTIONS } from '../provinces'
 
 const TYPE_OPTIONS = [
   { value: 'proxy', label: '反向代理' },
@@ -276,6 +277,8 @@ function blankForm() {
     waf: false,
     accessMode: 'off',
     accessIps: '',
+    accessCountries: [],
+    accessProvinces: [],
     uaMode: 'off',
     uaList: '',
     authEnable: false,
@@ -353,6 +356,8 @@ function openEdit(rule) {
     waf: !!rule.waf,
     accessMode: access.mode || 'off',
     accessIps: (Array.isArray(access.ips) ? access.ips : []).join('\n'),
+    accessCountries: Array.isArray(access.countries) ? [...access.countries] : [],
+    accessProvinces: Array.isArray(access.provinces) ? [...access.provinces] : [],
     uaMode: access.uaMode || 'off',
     uaList: (Array.isArray(access.uas) ? access.uas : []).join('\n'),
     authEnable: !!auth.enable,
@@ -467,6 +472,8 @@ async function saveRule() {
     access: {
       mode: form.accessMode,
       ips: splitList(form.accessIps),
+      countries: [...(form.accessCountries || [])],
+      provinces: [...(form.accessProvinces || [])],
       uaMode: form.uaMode,
       uas: splitList(form.uaList),
     },
@@ -952,6 +959,27 @@ onMounted(() => {
               :auto-size="{ minRows: 2, maxRows: 6 }"
               placeholder="每行一条，支持 CIDR，例如 192.168.1.0/24"
             />
+          </a-form-item>
+          <a-form-item label="国家/地区（ip2region）" class="span-2">
+            <a-select
+              v-model="form.accessCountries"
+              mode="multiple"
+              allow-create
+              allow-clear
+              placeholder="输入国家名后回车，例如 中国、美国"
+            />
+            <div class="hint">与 IP 列表取并集；需把 IP 策略设为白名单/黑名单，并先在「设置 → IP 地址库」配置数据库。</div>
+          </a-form-item>
+          <a-form-item label="省份（ip2region）" class="span-2">
+            <a-select
+              v-model="form.accessProvinces"
+              mode="multiple"
+              allow-create
+              allow-clear
+              :options="PROVINCE_OPTIONS"
+              placeholder="例如 浙江、广东"
+            />
+            <div class="hint">与 IP 列表取并集；省市/自治区全称会自动归一。私有地址不参与地理匹配。</div>
           </a-form-item>
           <a-form-item label="UA 列表" class="span-2">
             <a-textarea

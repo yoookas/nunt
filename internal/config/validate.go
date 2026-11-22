@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/nunt/nunt/internal/dnsprov"
+	"github.com/nunt/nunt/internal/ip2region"
 	"github.com/nunt/nunt/internal/model"
 )
 
@@ -81,6 +83,7 @@ func Normalize(c *model.Config) {
 		if r.Access.UAMode == "" {
 			r.Access.UAMode = model.AccessOff
 		}
+		normalizeGeoAccess(&r.Access)
 		for j := range r.Listen {
 			r.Listen[j] = strings.TrimSpace(r.Listen[j])
 		}
@@ -102,6 +105,7 @@ func Normalize(c *model.Config) {
 		if r.Access.Mode == "" {
 			r.Access.Mode = model.AccessOff
 		}
+		normalizeGeoAccess(&r.Access)
 		if r.MaxConns == 0 {
 			r.MaxConns = defaultForwardMaxConns
 		}
@@ -147,6 +151,7 @@ func Normalize(c *model.Config) {
 			j.KeyType = c.ACME.KeyType
 		}
 	}
+	c.System.IP2RegionDB = strings.TrimSpace(c.System.IP2RegionDB)
 	for i := range c.Storage.Mounts {
 		m := &c.Storage.Mounts[i]
 		if m.ID == "" {
@@ -180,6 +185,9 @@ func Validate(c *model.Config) error {
 				return fmt.Errorf("web rule %q: invalid listen address %q", displayName(r.Name, r.ID), l)
 			}
 		}
+		if err := validateGeoAccess(r.Access, r.Enable, c.System.IP2RegionDB); err != nil {
+			return fmt.Errorf("web rule %q: %w", displayName(r.Name, r.ID), err)
+		}
 		switch r.Type {
 		case model.WebTypeProxy:
 			if r.Proxy == nil || len(r.Proxy.Targets) == 0 {
@@ -209,6 +217,9 @@ func Validate(c *model.Config) error {
 		}
 		if r.MaxConnsPerIP < 0 {
 			return fmt.Errorf("forward rule %q: maxConnsPerIP must not be negative", displayName(r.Name, r.ID))
+		}
+		if err := validateGeoAccess(r.Access, r.Enable, c.System.IP2RegionDB); err != nil {
+			return fmt.Errorf("forward rule %q: %w", displayName(r.Name, r.ID), err)
 		}
 	}
 	for _, r := range c.DDNS.Rules {
@@ -248,6 +259,67 @@ func Validate(c *model.Config) error {
 		if m.Type == model.MountWebDAV && strings.TrimSpace(m.URL) == "" {
 			return fmt.Errorf("mount %q: webdav url is required", displayName(m.Name, m.ID))
 		}
+	}
+	return nil
+}
+
+// normalizeGeoAccess trims and canonicalises the country/province lists so the
+// matcher only has to compare the short province names.
+func normalizeGeoAccess(a *model.Access) {
+	a.Countries = normalizeCountryList(a.Countries)
+	a.Provinces = normalizeProvinceList(a.Provinces)
+}
+
+func normalizeCountryList(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := map[string]bool{}
+	for _, item := range in {
+		item = strings.TrimSpace(item)
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	return out
+}
+
+func normalizeProvinceList(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := map[string]bool{}
+	for _, item := range in {
+		name := ip2region.NormalizeProvince(item)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
+}
+
+// validateGeoAccess checks the country/province part of an access rule. A rule
+// that uses it must be an allow/deny rule, and an enabled rule needs the
+// database path: without it every geo lookup fails closed.
+func validateGeoAccess(access model.Access, enabled bool, dbPath string) error {
+	if len(access.Countries) == 0 && len(access.Provinces) == 0 {
+		return nil
+	}
+	if access.Mode != model.AccessAllow && access.Mode != model.AccessDeny {
+		return fmt.Errorf("country/province filtering requires access mode allow or deny")
+	}
+	for _, country := range access.Countries {
+		if strings.Contains(country, "|") || utf8.RuneCountInString(country) > 32 {
+			return fmt.Errorf("invalid country %q", country)
+		}
+	}
+	for _, province := range access.Provinces {
+		if !ip2region.KnownProvince(province) {
+			return fmt.Errorf("unknown province %q", province)
+		}
+	}
+	if enabled && strings.TrimSpace(dbPath) == "" {
+		return fmt.Errorf("country/province filtering requires system.ip2regionDb to be configured")
 	}
 	return nil
 }

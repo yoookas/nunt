@@ -16,6 +16,7 @@ import (
 	"github.com/nunt/nunt/internal/adminlisten"
 	"github.com/nunt/nunt/internal/certs"
 	"github.com/nunt/nunt/internal/config"
+	"github.com/nunt/nunt/internal/ip2region"
 	"github.com/nunt/nunt/internal/logging"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
@@ -41,6 +42,7 @@ type Options struct {
 	Box      *secret.Box
 	Sessions *security.SessionStore
 	DataDir  string
+	Geo      *ip2region.Service
 	Reload   func() // called after a configuration change that needs a reload
 	// AdminWAF optionally wraps the admin API with the web application
 	// firewall (used when system protection is enabled in the WAF config).

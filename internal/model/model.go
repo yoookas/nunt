@@ -63,6 +63,9 @@ type SystemConfig struct {
 	Theme         string `json:"theme"`
 	CheckUpdate   bool   `json:"checkUpdate"`
 	BaseURL       string `json:"baseUrl,omitempty"`
+	// IP2RegionDB is the path of the ip2region xdb database used by the
+	// country/province access filters.
+	IP2RegionDB string `json:"ip2regionDb,omitempty"`
 }
 
 // User is an administrator account.
@@ -131,10 +134,14 @@ type WebTLS struct {
 
 // Access is an IP / User-Agent filter.
 type Access struct {
-	Mode   string   `json:"mode"`
-	IPs    []string `json:"ips,omitempty"`
-	UAMode string   `json:"uaMode,omitempty"`
-	UAs    []string `json:"uas,omitempty"`
+	Mode string   `json:"mode"`
+	IPs  []string `json:"ips,omitempty"`
+	// Countries and Provinces are matched against the ip2region database and
+	// combined with IPs as a union under the same mode.
+	Countries []string `json:"countries,omitempty"`
+	Provinces []string `json:"provinces,omitempty"`
+	UAMode    string   `json:"uaMode,omitempty"`
+	UAs       []string `json:"uas,omitempty"`
 }
 
 // BasicAuth guards a rule with HTTP basic authentication.

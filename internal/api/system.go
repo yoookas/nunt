@@ -11,6 +11,7 @@ import (
 
 	"github.com/nunt/nunt/internal/adminlisten"
 	"github.com/nunt/nunt/internal/config"
+	"github.com/nunt/nunt/internal/ip2region"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/netutil"
 	"github.com/nunt/nunt/internal/rest"
@@ -34,6 +35,11 @@ func (s *Server) registerSystem() {
 	g.Put("/config", s.handleImportConfig)
 	g.Post("/reload", s.handleReload)
 	g.Get("/sessions", s.handleListSessions)
+
+	g.Get("/ip2region", s.handleGetIP2Region)
+	g.Put("/ip2region", s.handleUpdateIP2Region)
+	g.Post("/ip2region/reload", s.handleReloadIP2Region)
+	g.Post("/ip2region/lookup", s.handleIP2RegionLookup)
 }
 
 func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
@@ -464,4 +470,117 @@ func restoreSecrets(old, next *model.Config) {
 
 func isMasked(v string) bool {
 	return v == "" || v == maskSentinel || strings.Contains(v, "********")
+}
+
+// ---------------------------------------------------------------------------
+// ip2region
+// ---------------------------------------------------------------------------
+
+// ip2regionStatus is the JSON view shared by the three endpoints.
+type ip2regionStatus struct {
+	Status    ip2region.Status `json:"status"`
+	Provinces []string         `json:"provinces"`
+}
+
+func (s *Server) ip2regionStatus() ip2regionStatus {
+	out := ip2regionStatus{Provinces: ip2region.Provinces()}
+	if s.opts.Geo != nil {
+		out.Status = s.opts.Geo.Status()
+	}
+	return out
+}
+
+func (s *Server) handleGetIP2Region(w http.ResponseWriter, r *http.Request) {
+	rest.OK(w, s.ip2regionStatus())
+}
+
+// handleUpdateIP2Region validates the new database before saving it, so a
+// broken path never ends up in the configuration.
+func (s *Server) handleUpdateIP2Region(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
+	var req struct {
+		Path string `json:"path"`
+	}
+	if !jsonBody(w, r, &req) {
+		return
+	}
+	path := strings.TrimSpace(req.Path)
+	if path != "" {
+		if s.opts.Geo == nil {
+			rest.Fail(w, http.StatusInternalServerError, "IP 地址库服务不可用")
+			return
+		}
+		if _, err := s.opts.Geo.Probe(path); err != nil {
+			rest.Fail(w, http.StatusBadRequest, "无法加载该地址库：%s", err)
+			return
+		}
+	}
+	if err := s.opts.Cfg.Update(func(c *model.Config) error {
+		c.System.IP2RegionDB = path
+		return nil
+	}); err != nil {
+		rest.Fail(w, http.StatusBadRequest, "无法保存地址库路径：%s", err)
+		return
+	}
+	s.audit(r, "system.ip2region", "path", path)
+	if s.opts.Reload != nil {
+		s.opts.Reload()
+	}
+	rest.OK(w, s.ip2regionStatus())
+}
+
+func (s *Server) handleReloadIP2Region(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
+	if s.opts.Geo == nil {
+		rest.Fail(w, http.StatusInternalServerError, "IP 地址库服务不可用")
+		return
+	}
+	if err := s.opts.Geo.Reload(); err != nil {
+		rest.Fail(w, http.StatusBadRequest, "重新加载失败：%s", err)
+		return
+	}
+	s.audit(r, "system.ip2region.reload")
+	rest.OK(w, s.ip2regionStatus())
+}
+
+// handleIP2RegionLookup answers "which country/province does this address
+// belong to", which the UI uses to verify a filter value.
+func (s *Server) handleIP2RegionLookup(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
+	var req struct {
+		IP string `json:"ip"`
+	}
+	if !jsonBody(w, r, &req) {
+		return
+	}
+	ip := net.ParseIP(strings.TrimSpace(req.IP))
+	if ip == nil {
+		rest.Fail(w, http.StatusBadRequest, "IP 地址不合法")
+		return
+	}
+	if s.opts.Geo == nil {
+		rest.Fail(w, http.StatusInternalServerError, "IP 地址库服务不可用")
+		return
+	}
+	record, err := s.opts.Geo.Lookup(ip)
+	if err != nil {
+		rest.Fail(w, http.StatusBadRequest, "查询失败：%s", err)
+		return
+	}
+	rest.OK(w, map[string]any{
+		"ip":                 ip.String(),
+		"country":            record.Country,
+		"region":             record.Region,
+		"province":           record.Province,
+		"provinceNormalized": ip2region.NormalizeProvince(record.Province),
+		"city":               record.City,
+		"isp":                record.ISP,
+		"raw":                record.Raw,
+	})
 }

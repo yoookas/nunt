@@ -15,6 +15,7 @@ import (
 	"github.com/nunt/nunt/internal/api"
 	"github.com/nunt/nunt/internal/certs"
 	"github.com/nunt/nunt/internal/config"
+	"github.com/nunt/nunt/internal/ip2region"
 	"github.com/nunt/nunt/internal/logging"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
@@ -46,6 +47,7 @@ type App struct {
 	box         *secret.Box
 	certs       *certs.Store
 	mounts      *mounts.Manager
+	geo         *ip2region.Service
 	registry    *module.Registry
 	sessions    *security.SessionStore
 	api         *api.Server
@@ -105,6 +107,10 @@ func New(opts Options) (*App, error) {
 	a.certs = certStore
 	a.mounts = mounts.New(cfg, box, logger.With("component", "mounts"))
 	a.sessions = security.NewSessionStore()
+	a.geo = ip2region.New()
+	if err := a.geo.Configure(cfg.Snapshot().System.IP2RegionDB); err != nil {
+		logger.Warn("ip2region: cannot load the database", "error", err)
+	}
 
 	a.registry = module.NewRegistry()
 	deps := &module.Deps{
@@ -115,6 +121,7 @@ func New(opts Options) (*App, error) {
 		Box:      box,
 		DataDir:  opts.DataDir,
 		Registry: a.registry,
+		Geo:      a.geo,
 	}
 
 	// Registration order defines the start order: the WAF must exist before
@@ -146,6 +153,7 @@ func New(opts Options) (*App, error) {
 		Box:      box,
 		Sessions: a.sessions,
 		DataDir:  opts.DataDir,
+		Geo:      a.geo,
 		Reload:   a.Reload,
 		AdminWAF: adminWAF,
 	})
@@ -178,8 +186,14 @@ func (a *App) Logger() *logging.Hub { return a.log }
 // Registry returns the module registry.
 func (a *App) Registry() *module.Registry { return a.registry }
 
-// Reload pushes the current configuration to every module.
+// Reload pushes the current configuration to every module. The geo database is
+// configured first so newly compiled rules see it.
 func (a *App) Reload() {
+	if a.geo != nil {
+		if err := a.geo.Configure(a.cfg.Snapshot().System.IP2RegionDB); err != nil {
+			a.log.Logger().Warn("ip2region: cannot reload the database", "error", err)
+		}
+	}
 	a.registry.Reload(a.cfg.Snapshot())
 }
 

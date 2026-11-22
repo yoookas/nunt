@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nunt/nunt/internal/ipfilter"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/modules/waf"
@@ -545,6 +546,12 @@ func (w *Web) compileRules(cfg *model.Config) ([]*rule, []error) {
 			errs = append(errs, fmt.Errorf("rule %q: %w", displayRuleName(raw), err))
 			continue
 		}
+		filter, err := ipfilter.Compile(raw.Access, w.deps.Geo)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("rule %q: %w", displayRuleName(raw), err))
+			continue
+		}
+		r.filter = filter
 		compiled = append(compiled, r)
 	}
 	return compiled, errs

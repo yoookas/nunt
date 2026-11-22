@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Message, Modal } from '@arco-design/web-vue'
 import { api, errorText } from '../api'
-import { fmtTime } from '../format'
+import { fmtBytes, fmtTime } from '../format'
 import { auth } from '../session'
 import { setTheme } from '../theme'
 
@@ -36,6 +36,7 @@ const system = reactive({
   checkUpdate: false,
   theme: 'dark',
   adminAllowIps: [],
+  ip2regionDb: '',
 })
 
 const systemLoading = ref(false)
@@ -121,6 +122,7 @@ function applySettingsForm(data) {
   system.checkUpdate = data.checkUpdate !== false
   system.theme = data.theme || 'dark'
   system.adminAllowIps = toList(data.adminAllowIps)
+  system.ip2regionDb = data.ip2regionDb || ''
 }
 
 function applyListenFromInfo(info, settings) {
@@ -200,6 +202,7 @@ async function saveSystem() {
     theme: system.theme || 'dark',
     checkUpdate: !!system.checkUpdate,
     baseUrl: String(system.baseUrl || '').trim(),
+    ip2regionDb: String(system.ip2regionDb || '').trim(),
   }
   const previous = listen.actual || listen.config
   systemSaving.value = true
@@ -740,7 +743,77 @@ function onTabChange(key) {
   else if (name === 'sessions') loadSessions()
 }
 
-onMounted(loadSystem)
+const ip2region = reactive({
+  path: '',
+  saving: false,
+  reloading: false,
+  looking: false,
+  testIP: '',
+  result: null,
+  status: {},
+  provinces: [],
+})
+
+async function loadIP2Region() {
+  try {
+    const data = await api.get('/api/v1/system/ip2region')
+    ip2region.status = data?.status || {}
+    ip2region.provinces = Array.isArray(data?.provinces) ? data.provinces : []
+    ip2region.path = ip2region.status.path || system.ip2regionDb || ''
+  } catch (err) {
+    Message.error(`读取 IP 地址库状态失败：${errorText(err)}`)
+  }
+}
+
+async function saveIP2Region() {
+  ip2region.saving = true
+  try {
+    const path = ip2region.path.trim()
+    const data = await api.put('/api/v1/system/ip2region', { path })
+    ip2region.status = data?.status || {}
+    system.ip2regionDb = path
+    Message.success(path ? 'IP 地址库已加载' : '已停用 IP 地址库')
+  } catch (err) {
+    Message.error(`保存失败：${errorText(err)}`)
+  } finally {
+    ip2region.saving = false
+  }
+}
+
+async function reloadIP2Region() {
+  ip2region.reloading = true
+  try {
+    const data = await api.post('/api/v1/system/ip2region/reload')
+    ip2region.status = data?.status || {}
+    Message.success('IP 地址库已重新加载')
+  } catch (err) {
+    Message.error(`重新加载失败：${errorText(err)}`)
+  } finally {
+    ip2region.reloading = false
+  }
+}
+
+async function lookupIP2Region() {
+  const ip = ip2region.testIP.trim()
+  if (!ip) {
+    Message.warning('请输入要查询的 IP')
+    return
+  }
+  ip2region.looking = true
+  try {
+    ip2region.result = await api.post('/api/v1/system/ip2region/lookup', { ip })
+  } catch (err) {
+    ip2region.result = null
+    Message.error(`查询失败：${errorText(err)}`)
+  } finally {
+    ip2region.looking = false
+  }
+}
+
+onMounted(() => {
+  loadSystem()
+  loadIP2Region()
+})
 </script>
 
 <template>
@@ -903,6 +976,50 @@ onMounted(loadSystem)
               <span>实际生效：{{ listen.actual || '-' }}</span>
               <span>配置值：{{ listen.config || '-' }}</span>
               <span>来源：{{ listen.source === 'env' ? `环境变量 ${listen.env || ''}` : '配置文件' }}</span>
+            </div>
+          </a-card>
+
+          <a-card :bordered="false">
+            <template #title>IP 地址库（ip2region）</template>
+            <template #extra>
+              <span class="muted">用于 Web / 端口转发的国家、省份过滤</span>
+            </template>
+
+            <a-form layout="vertical">
+              <a-form-item
+                label="数据库路径"
+                extra="ip2region.xdb 文件路径；留空表示不启用地理过滤。数据库可从 github.com/lionsoul2014/ip2region 下载。"
+              >
+                <a-input v-model="ip2region.path" placeholder="/data/ip2region.xdb" allow-clear />
+              </a-form-item>
+            </a-form>
+
+            <div class="toolbar">
+              <a-button type="primary" :loading="ip2region.saving" @click="saveIP2Region">保存并加载</a-button>
+              <a-button :loading="ip2region.reloading" @click="reloadIP2Region">重新加载</a-button>
+              <a-tag :color="ip2region.status.loaded ? 'green' : 'gray'">
+                {{ ip2region.status.loaded ? '已加载' : '未加载' }}
+              </a-tag>
+              <span v-if="ip2region.status.createdAt" class="muted">数据日期：{{ fmtTime(ip2region.status.createdAt) }}</span>
+              <span v-if="ip2region.status.size" class="muted">大小：{{ fmtBytes(ip2region.status.size) }}</span>
+            </div>
+
+            <a-alert v-if="ip2region.status.error" type="error" :content="ip2region.status.error" style="margin-top: 12px" />
+
+            <a-divider />
+
+            <div class="toolbar">
+              <span class="muted">查询测试</span>
+              <a-input v-model="ip2region.testIP" placeholder="1.1.1.1" style="max-width: 220px" allow-clear />
+              <a-button :loading="ip2region.looking" @click="lookupIP2Region">查询</a-button>
+              <span v-if="ip2region.result" class="mono muted">
+                {{ ip2region.result.country || '-' }} /
+                {{ ip2region.result.provinceNormalized || ip2region.result.province || '-' }} /
+                {{ ip2region.result.isp || '-' }}
+              </span>
+            </div>
+            <div class="muted" style="margin-top: 8px">
+              省份按 ip2region 返回结果匹配，配置时可写「浙江」或「浙江省」；私有地址与 IPv6 不参与地理匹配。
             </div>
           </a-card>
         </div>

@@ -455,12 +455,12 @@ func TestAccessLoggerRing(t *testing.T) {
 }
 
 func TestAccessMatcherFailsClosed(t *testing.T) {
-	m := loadAccess(model.Access{Mode: model.AccessAllow, IPs: []string{"not-an-ip"}})
-	if m.allows(net.ParseIP("127.0.0.1")) {
+	m := loadAccess(model.Access{Mode: model.AccessAllow, IPs: []string{"not-an-ip"}}, nil)
+	if ok, _ := m.allows(net.ParseIP("127.0.0.1")); ok {
 		t.Fatal("an unparsable allow list must reject every address")
 	}
-	off := loadAccess(model.Access{Mode: model.AccessOff})
-	if !off.allows(net.ParseIP("127.0.0.1")) {
+	off := loadAccess(model.Access{Mode: model.AccessOff}, nil)
+	if ok, _ := off.allows(net.ParseIP("127.0.0.1")); !ok {
 		t.Fatal("mode off must allow every address")
 	}
 }
