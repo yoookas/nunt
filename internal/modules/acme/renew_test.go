@@ -1,9 +1,12 @@
 package acme
 
 import (
+	"crypto/tls"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/acme"
 
 	"github.com/nunt/nunt/internal/model"
 )
@@ -49,5 +52,31 @@ func TestServeChallengeAnswersOnlyActiveTokens(t *testing.T) {
 	gone := httptest.NewRecorder()
 	if a.ServeChallenge(gone, httptest.NewRequest("GET", path, nil)) {
 		t.Fatal("a finished challenge was still served")
+	}
+}
+
+// The tls-alpn-01 answer is only offered while a challenge is in flight, and
+// only to a handshake that carries the acme-tls/1 protocol.
+func TestALPNChallengeConfigAnswersOnlyActiveChallenges(t *testing.T) {
+	a := &ACME{}
+	cert := &tls.Certificate{}
+	a.alpnCerts.Store("a.example.com", cert)
+
+	hello := &tls.ClientHelloInfo{ServerName: "A.Example.com.", SupportedProtos: []string{"acme-tls/1"}}
+	cfg, ok := a.ALPNChallengeConfig(hello)
+	if !ok || cfg == nil || len(cfg.Certificates) != 1 || len(cfg.NextProtos) != 1 || cfg.NextProtos[0] != acme.ALPNProto {
+		t.Fatalf("active challenge not offered: %+v %v", cfg, ok)
+	}
+
+	if _, ok := a.ALPNChallengeConfig(&tls.ClientHelloInfo{ServerName: "b.example.com", SupportedProtos: []string{"acme-tls/1"}}); ok {
+		t.Fatal("a challenge was offered for an unrelated domain")
+	}
+	if _, ok := a.ALPNChallengeConfig(&tls.ClientHelloInfo{ServerName: "a.example.com", SupportedProtos: []string{"h2"}}); ok {
+		t.Fatal("a challenge was offered without the acme-tls/1 protocol")
+	}
+
+	a.alpnCerts.Delete("a.example.com")
+	if _, ok := a.ALPNChallengeConfig(hello); ok {
+		t.Fatal("a finished challenge was still offered")
 	}
 }

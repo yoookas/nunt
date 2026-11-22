@@ -911,3 +911,30 @@ func (r *reloadCounter) count() int {
 	defer r.mu.Unlock()
 	return r.n
 }
+
+// A manual run is queued from a handler that returns 202 right away, so its
+// actions must not be aborted when the request context is cancelled.
+func TestRunNowOutlivesItsRequestContext(t *testing.T) {
+	deps, store, _ := testDeps(t)
+	setTasks(t, store, model.Task{
+		ID: "t1", Name: "manual", Cron: "@every 24h", Enable: true,
+		Actions: []model.TaskAction{{Type: model.ActionNotify, Value: "manual"}},
+	})
+	tk := New(deps)
+	if err := tk.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer func() { _ = tk.Stop(context.Background()) }()
+
+	item, ok := tk.taskByID("t1")
+	if !ok {
+		t.Fatal("task not found in the configuration")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the HTTP request is already gone by the time the work runs
+	tk.run(ctx, item)
+	waitFor(t, 5*time.Second, "the manual run", func() bool {
+		st, ok := tk.StateOf("t1")
+		return ok && st.Runs > 0
+	})
+}

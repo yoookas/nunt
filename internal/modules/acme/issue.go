@@ -228,7 +228,7 @@ func (a *ACME) provisionChallenge(ctx context.Context, client *acme.Client, req 
 	case challengeDNS:
 		cleanup, err = a.startDNS01(ctx, client, chal, req, domain)
 	case challengeTLSALPN:
-		cleanup, err = startTLSALPN01(client, chal, domain)
+		cleanup, err = a.startTLSALPN01(client, chal, domain)
 	default:
 		err = fmt.Errorf("unsupported challenge %q", req.challenge)
 	}

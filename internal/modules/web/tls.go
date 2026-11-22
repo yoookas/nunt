@@ -22,6 +22,19 @@ func (w *Web) tlsSetup(m *matcher, cfg *tls.Config) *tls.Config {
 	out := cfg.Clone()
 	hosts := m.hosts()
 	wildcards := m.wildcardHosts()
+	previousConfig := out.GetConfigForClient
+	// A tls-alpn-01 handshake carries the acme-tls/1 protocol and must be
+	// answered with the challenge certificate, not with a rule certificate, so
+	// the ACME module gets the first look at every ClientHello.
+	out.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+		if challenge, ok := w.alpnChallengeConfig(hello); ok {
+			return challenge, nil
+		}
+		if previousConfig != nil {
+			return previousConfig(hello)
+		}
+		return nil, nil
+	}
 	fallback := out.GetCertificate
 	out.GetCertificate = func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 		host := hostOnly(hello.ServerName)

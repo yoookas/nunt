@@ -317,6 +317,10 @@ func (t *Task) apply(cfg *model.Config) {
 	}
 }
 
+// queueWait bounds how long a run waits for a free concurrency slot before it
+// is skipped.
+const queueWait = 2 * time.Second
+
 // trigger spawns one asynchronous run of a task, bounded by a semaphore.
 func (t *Task) trigger(task model.Task) {
 	t.mu.Lock()
@@ -331,7 +335,7 @@ func (t *Task) trigger(task model.Task) {
 		defer t.wg.Done()
 		select {
 		case t.sem <- struct{}{}:
-		case <-time.After(2 * time.Second):
+		case <-time.After(queueWait):
 			t.log.Warn("task: too many concurrent runs, skipped", "task", taskLabel(task))
 			return
 		}
@@ -349,12 +353,19 @@ func (t *Task) run(ctx context.Context, task model.Task) {
 		return
 	}
 
+	// "Run now" is queued from an HTTP handler that answers 202 immediately, so
+	// the work has to outlive the request. context.WithoutCancel keeps the
+	// request values while dropping its cancellation and deadline; every action
+	// applies its own timeout anyway.
+	ctx = context.WithoutCancel(ctx)
+
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
 		select {
 		case t.sem <- struct{}{}:
-		case <-ctx.Done():
+		case <-time.After(queueWait):
+			t.log.Warn("task: too many concurrent runs, skipped", "task", taskLabel(task))
 			return
 		}
 		defer func() { <-t.sem }()

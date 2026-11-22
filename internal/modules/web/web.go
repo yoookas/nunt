@@ -9,6 +9,7 @@ package web
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -94,6 +95,58 @@ func (w *Web) challengeProvider() module.ChallengeProvider {
 	}
 	return provider
 }
+
+// tlsChallengeProvider returns the ACME module when it can answer tls-alpn-01
+// challenges on the TLS listeners of this module.
+func (w *Web) tlsChallengeProvider() module.TLSChallengeProvider {
+	if w.deps == nil || w.deps.Registry == nil {
+		return nil
+	}
+	mod, ok := w.deps.Registry.Get("acme")
+	if !ok {
+		return nil
+	}
+	provider, ok := mod.(module.TLSChallengeProvider)
+	if !ok {
+		return nil
+	}
+	return provider
+}
+
+// alpnChallengeConfig asks the ACME module for the answer of a tls-alpn-01
+// handshake. The TLS config installed by tlsSetup consults it before selecting
+// a rule certificate, the same way Caddy and Traefik multiplex the challenge.
+func (w *Web) alpnChallengeConfig(hello *tls.ClientHelloInfo) (*tls.Config, bool) {
+	provider := w.tlsChallengeProvider()
+	if provider == nil {
+		return nil, false
+	}
+	return provider.ALPNChallengeConfig(hello)
+}
+
+// servesOnPort reports whether a listener of the given kind is bound to port.
+func (w *Web) servesOnPort(port string, withTLS bool) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.started {
+		return false
+	}
+	for addr, hasTLS := range w.tlsAddrs {
+		if hasTLS != withTLS {
+			continue
+		}
+		if _, p, err := net.SplitHostPort(addr); err == nil && p == port {
+			return true
+		}
+	}
+	return false
+}
+
+// ServesHTTPChallenge reports whether a plain listener on port 80 is running.
+func (w *Web) ServesHTTPChallenge() bool { return w.servesOnPort("80", false) }
+
+// ServesTLSChallenge reports whether a TLS listener on port 443 is running.
+func (w *Web) ServesTLSChallenge() bool { return w.servesOnPort("443", true) }
 
 // sharedWAF returns the firewall of the module registry. The registry owns the
 // instance: it starts, stops and reloads it, and the admin API plus the WAF page

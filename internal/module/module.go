@@ -4,6 +4,7 @@ package module
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -73,6 +74,22 @@ type ChallengeProvider interface {
 	// ServeChallenge answers the request when its path belongs to a challenge
 	// that is currently being validated, and reports whether it did.
 	ServeChallenge(w http.ResponseWriter, r *http.Request) bool
+	// ServesHTTPChallenge reports whether a plain listener that routes the
+	// challenge path is currently bound to port 80, which is the only port a CA
+	// connects to for http-01.
+	ServesHTTPChallenge() bool
+}
+
+// TLSChallengeProvider is implemented by a module that can answer ACME
+// tls-alpn-01 challenges on its own TLS listeners.
+type TLSChallengeProvider interface {
+	// ALPNChallengeConfig returns the TLS configuration that answers a
+	// tls-alpn-01 ClientHello, and reports whether this handshake belongs to an
+	// active challenge.
+	ALPNChallengeConfig(hello *tls.ClientHelloInfo) (*tls.Config, bool)
+	// ServesTLSChallenge reports whether a TLS listener is currently bound to
+	// port 443.
+	ServesTLSChallenge() bool
 }
 
 // Deps carries everything a module may need.

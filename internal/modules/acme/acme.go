@@ -78,6 +78,10 @@ type ACME struct {
 	// challenges maps a /.well-known/acme-challenge/<token> path to its answer
 	// while the CA validates it. The web service reads it when it owns port 80.
 	challenges sync.Map
+	// alpnCerts maps a domain to the tls-alpn-01 certificate that answers its
+	// handshake while the CA validates it. The web service reads it when it
+	// owns port 443.
+	alpnCerts sync.Map
 
 	// statMu guards the counters shown on the dashboard.
 	statMu  sync.Mutex
