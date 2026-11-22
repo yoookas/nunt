@@ -53,7 +53,7 @@ func TestStoreAddLookupDelete(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	certPEM, keyPEM := selfSigned(t, []string{"example.com", "*.example.com"})
-	info, err := store.Add(nil, certPEM, keyPEM, "upload", "", true)
+	info, err := store.Add(nil, certPEM, keyPEM, "upload", "", "", true)
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -154,11 +154,11 @@ func TestAddReplacesAtomically(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	certA, keyA := selfSignedPair(t, "first")
-	if _, err := s.Add([]string{"example.com"}, certA, keyA, "manual", "", false); err != nil {
+	if _, err := s.Add([]string{"example.com"}, certA, keyA, "manual", "", "", false); err != nil {
 		t.Fatalf("add A: %v", err)
 	}
 	certB, keyB := selfSignedPair(t, "second")
-	if _, err := s.Add([]string{"example.com"}, certB, keyB, "manual", "", false); err != nil {
+	if _, err := s.Add([]string{"example.com"}, certB, keyB, "manual", "", "", false); err != nil {
 		t.Fatalf("add B: %v", err)
 	}
 
@@ -199,7 +199,7 @@ func TestConcurrentAddKeepsPairsMatched(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			cert, key := selfSignedPair(t, "concurrent")
-			if _, err := s.Add([]string{"example.com"}, cert, key, "manual", "", false); err != nil {
+			if _, err := s.Add([]string{"example.com"}, cert, key, "manual", "", "", false); err != nil {
 				t.Errorf("add %d: %v", n, err)
 			}
 		}(i)
@@ -219,7 +219,7 @@ func TestOpenCountsBrokenEntries(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	certPEM, keyPEM := selfSignedPair(t, "good")
-	if _, err := good.Add([]string{"good.example.com"}, certPEM, keyPEM, "manual", "", false); err != nil {
+	if _, err := good.Add([]string{"good.example.com"}, certPEM, keyPEM, "manual", "", "", false); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 
@@ -241,5 +241,22 @@ func TestOpenCountsBrokenEntries(t *testing.T) {
 	}
 	if len(reopened.List()) != 1 {
 		t.Fatalf("the good certificate was not loaded: %d", len(reopened.List()))
+	}
+}
+
+// The remark of an issued certificate is stored with it, so the UI can show
+// which job or upload it belongs to.
+func TestStoreKeepsRemark(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "certs"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	certPEM, keyPEM := selfSigned(t, []string{"remark.example.com"})
+	if _, err := store.Add(nil, certPEM, keyPEM, "acme", "job-1", "主站证书", true); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	list := store.List()
+	if len(list) != 1 || list[0].Remark != "主站证书" {
+		t.Fatalf("stored info = %+v", list)
 	}
 }

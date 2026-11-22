@@ -160,7 +160,7 @@ func TestGRPCOverTLS(t *testing.T) {
 	store := testConfigStore(t, rule)
 	deps := testDeps(t, store)
 	certPEM, keyPEM := selfSignedPair(t, "grpc.example.com")
-	if _, err := deps.Certs.Add([]string{"grpc.example.com"}, certPEM, keyPEM, "upload", "", false); err != nil {
+	if _, err := deps.Certs.Add([]string{"grpc.example.com"}, certPEM, keyPEM, "upload", "", "", false); err != nil {
 		t.Fatalf("add certificate: %v", err)
 	}
 

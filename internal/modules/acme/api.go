@@ -1,6 +1,8 @@
 package acme
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -8,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nunt/nunt/internal/certs"
 	"github.com/nunt/nunt/internal/dnsprov"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/rest"
@@ -45,6 +48,7 @@ type certificateView struct {
 	NotAfter  time.Time `json:"notAfter"`
 	Source    string    `json:"source"`
 	JobID     string    `json:"jobId,omitempty"`
+	Remark    string    `json:"remark,omitempty"`
 	AutoRenew bool      `json:"autoRenew"`
 	UpdatedAt time.Time `json:"updatedAt"`
 	KeyType   string    `json:"keyType,omitempty"`
@@ -91,6 +95,7 @@ func (a *ACME) registerAPI(mux *rest.Mux) {
 	g.Post("/jobs/{id}/issue", a.handleIssueJob)
 	g.Post("/jobs/{id}/toggle", a.handleToggleJob)
 	g.Get("/certificates", a.handleListCertificates)
+	g.Get("/certificates/{id}/download", a.handleDownloadCertificate)
 	g.Post("/certificates/upload", a.handleUploadCertificate)
 	g.Delete("/certificates/{id}", a.handleDeleteCertificate)
 	g.Get("/providers", a.handleProviders)
@@ -374,6 +379,7 @@ func (a *ACME) handleListCertificates(w http.ResponseWriter, r *http.Request) {
 			NotAfter:  info.NotAfter,
 			Source:    info.Source,
 			JobID:     info.JobID,
+			Remark:    info.Remark,
 			AutoRenew: info.AutoRenew,
 			UpdatedAt: info.UpdatedAt,
 			KeyType:   info.KeyType,
@@ -440,13 +446,88 @@ func (a *ACME) handleUploadCertificate(w http.ResponseWriter, r *http.Request) {
 		rest.Fail(w, http.StatusBadRequest, "the certificate has no subject alternative names")
 		return
 	}
-	info, err := a.deps.Certs.Add(domains, []byte(req.Cert), []byte(req.Key), "upload", "", false)
+	info, err := a.deps.Certs.Add(domains, []byte(req.Cert), []byte(req.Key), "upload", "", strings.TrimSpace(req.Name), false)
 	if err != nil {
 		rest.Fail(w, http.StatusBadRequest, "cannot store the certificate: %s", err)
 		return
 	}
 	a.refreshStats(nil)
 	rest.OK(w, info)
+}
+
+// handleDownloadCertificate returns the stored chain and key as a zip, which is
+// the easiest way to move a certificate to another machine or keep a backup.
+func (a *ACME) handleDownloadCertificate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	certPEM, keyPEM, err := a.deps.Certs.PEMBundle(id)
+	if err != nil {
+		rest.Fail(w, http.StatusNotFound, "证书不存在")
+		return
+	}
+	var info certs.Info
+	for _, item := range a.deps.Certs.List() {
+		if item.ID == id {
+			info = item
+			break
+		}
+	}
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	now := time.Now()
+	add := func(name string, data []byte) error {
+		hdr := &zip.FileHeader{Name: name, Method: zip.Deflate, Modified: now}
+		hdr.SetMode(0o600)
+		fw, err := zw.CreateHeader(hdr)
+		if err != nil {
+			return err
+		}
+		_, err = fw.Write(data)
+		return err
+	}
+	if err := add("cert.pem", certPEM); err != nil {
+		rest.Fail(w, http.StatusInternalServerError, "打包证书失败：%s", err)
+		return
+	}
+	if err := add("key.pem", keyPEM); err != nil {
+		rest.Fail(w, http.StatusInternalServerError, "打包私钥失败：%s", err)
+		return
+	}
+	if err := zw.Close(); err != nil {
+		rest.Fail(w, http.StatusInternalServerError, "打包证书失败：%s", err)
+		return
+	}
+
+	name := "certificate"
+	if len(info.Domains) > 0 {
+		name = strings.ReplaceAll(info.Domains[0], "*.", "wildcard.")
+	}
+	name = safeDownloadName(name) + ".zip"
+	h := w.Header()
+	h.Set("Content-Type", "application/zip")
+	h.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
+	h.Set("Cache-Control", "no-store")
+	h.Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(buf.Bytes())
+}
+
+// safeDownloadName keeps a file name to a conservative character set.
+func safeDownloadName(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	out := strings.Trim(b.String(), "._-")
+	if out == "" {
+		return "certificate"
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------

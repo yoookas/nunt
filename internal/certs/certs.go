@@ -30,6 +30,7 @@ type Info struct {
 	NotAfter  time.Time `json:"notAfter"`
 	Source    string    `json:"source"`
 	JobID     string    `json:"jobId,omitempty"`
+	Remark    string    `json:"remark,omitempty"`
 	AutoRenew bool      `json:"autoRenew"`
 	UpdatedAt time.Time `json:"updatedAt"`
 	KeyType   string    `json:"keyType,omitempty"`
@@ -139,7 +140,7 @@ func IDFor(domains []string) string {
 }
 
 // Add stores a certificate (chain + key) and returns its metadata.
-func (s *Store) Add(domains []string, certPEM, keyPEM []byte, source, jobID string, autoRenew bool) (Info, error) {
+func (s *Store) Add(domains []string, certPEM, keyPEM []byte, source, jobID, remark string, autoRenew bool) (Info, error) {
 	if len(certPEM) == 0 || len(keyPEM) == 0 {
 		return Info{}, fmt.Errorf("certificate and key are required")
 	}
@@ -168,6 +169,7 @@ func (s *Store) Add(domains []string, certPEM, keyPEM []byte, source, jobID stri
 		NotAfter:  leaf.NotAfter,
 		Source:    source,
 		JobID:     jobID,
+		Remark:    remark,
 		AutoRenew: autoRenew,
 		UpdatedAt: time.Now(),
 		KeyType:   keyTypeOf(leaf),

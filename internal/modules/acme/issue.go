@@ -192,7 +192,7 @@ func (a *ACME) issue(ctx context.Context, req request) (Result, error) {
 		return result, err
 	}
 
-	info, err := a.deps.Certs.Add(req.domains, certPEM, keyPEM, source, req.jobID, true)
+	info, err := a.deps.Certs.Add(req.domains, certPEM, keyPEM, source, req.jobID, req.remark, true)
 	if err != nil {
 		return result, fmt.Errorf("store certificate: %w", err)
 	}

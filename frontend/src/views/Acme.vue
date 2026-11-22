@@ -73,6 +73,7 @@ const jobColumns = [
 ]
 
 const certColumns = [
+  { title: '备注', dataIndex: 'remark', width: 160, ellipsis: true, tooltip: true },
   { title: '域名', dataIndex: 'domains', slotName: 'domains' },
   { title: '颁发者', dataIndex: 'issuer', ellipsis: true, tooltip: true },
   { title: '到期时间', dataIndex: 'notAfter', slotName: 'notAfter', width: 180 },
@@ -179,6 +180,11 @@ function caLabel(id) {
   if (!id) return '全局'
   const found = authorities.value.find((item) => item.id === id)
   return found ? found.title : id
+}
+
+function downloadCertificate(record) {
+  if (!record || !record.id) return
+  window.open(`/api/v1/acme/certificates/${encodeURIComponent(record.id)}/download`, '_blank', 'noopener')
 }
 
 function certSourceLabel(source) {
@@ -621,7 +627,7 @@ onUnmounted(() => {
             :columns="certColumns"
             :pagination="false"
             row-key="id"
-            :scroll="{ x: 960 }"
+            :scroll="{ x: 1120 }"
             size="small"
           >
             <template #domains="{ record }">
@@ -640,6 +646,7 @@ onUnmounted(() => {
               <a-tag>{{ certSourceLabel(record.source) }}</a-tag>
             </template>
             <template #actions="{ record }">
+              <a-button size="mini" @click="downloadCertificate(record)">下载</a-button>
               <a-button size="mini" status="danger" @click="deleteCert(record)">删除</a-button>
             </template>
             <template #empty>
@@ -791,8 +798,8 @@ onUnmounted(() => {
       <a-form :model="uploadForm" layout="vertical">
         <a-row :gutter="16">
           <a-col :span="12">
-            <a-form-item label="名称">
-              <a-input v-model="uploadForm.name" placeholder="名称（可选）" />
+            <a-form-item label="备注">
+              <a-input v-model="uploadForm.name" placeholder="备注（可选）" />
             </a-form-item>
           </a-col>
           <a-col :span="12">
