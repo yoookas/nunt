@@ -271,14 +271,12 @@ func (w *Web) noteBodyRejected(r *rule, req *http.Request, limit int64) {
 // file service guard
 // ---------------------------------------------------------------------------
 
-// fileServiceUnprotected reports whether a file browser or WebDAV rule is
-// reachable without any credential or address restriction. Reading and writing
-// the mounted storage must never be anonymous, so such a rule is refused even
-// when it reached the runtime without passing the configuration check.
-func (r *rule) fileServiceUnprotected() bool {
-	switch r.spec.Type {
-	case model.WebTypeFiles, model.WebTypeWebDAV:
-	default:
+// webDAVUnprotected reports whether a WebDAV rule is reachable without
+// any credential or address restriction. Reading and writing the mounted
+// storage must never be anonymous, so such a rule is refused even when it
+// reached the runtime without passing the configuration check.
+func (r *rule) webDAVUnprotected() bool {
+	if r.spec.Type != model.WebTypeWebDAV {
 		return false
 	}
 	if basicAuthEnabled(r.spec.BasicAuth) {

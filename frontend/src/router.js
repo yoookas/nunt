@@ -22,7 +22,6 @@ const routes = [
       { path: 'task', name: 'task', component: () => import('./views/Task.vue') },
       { path: 'notify', name: 'notify', component: () => import('./views/Notify.vue') },
       { path: 'storage', name: 'storage', component: () => import('./views/Storage.vue') },
-      { path: 'files', name: 'files', component: () => import('./views/Files.vue') },
       { path: 'logs', name: 'logs', component: () => import('./views/Logs.vue') },
       { path: 'settings', name: 'settings', component: () => import('./views/Settings.vue') },
       { path: 'password', name: 'password', component: () => import('./views/PasswordChange.vue') },

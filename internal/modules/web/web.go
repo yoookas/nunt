@@ -20,7 +20,6 @@ import (
 
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
-	"github.com/nunt/nunt/internal/modules/filebrowser"
 	"github.com/nunt/nunt/internal/modules/waf"
 	"github.com/nunt/nunt/internal/modules/webdav"
 	"github.com/nunt/nunt/internal/netutil"
@@ -36,7 +35,6 @@ type Web struct {
 	deps *module.Deps
 	log  *slog.Logger
 
-	fb  *filebrowser.Service
 	dav *webdav.Service
 	// waf is the firewall instance registered in the module registry; the web
 	// module shares it instead of building a second engine, so the rule level
@@ -171,7 +169,6 @@ func New(deps *module.Deps) *Web {
 	w := &Web{
 		deps:       deps,
 		log:        deps.Logger("web"),
-		fb:         filebrowser.New(deps),
 		dav:        webdav.New(deps),
 		waf:        sharedWAF(deps),
 		bindings:   map[string]*listener{},

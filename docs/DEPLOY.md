@@ -130,7 +130,6 @@ NUNT_ADMIN_LISTEN=127.0.0.1:18080 docker compose up -d
 - `config.json`：全部配置，写入时保留 `config.json.bak`；
 - `secret.key`：加密凭据用的密钥，**丢失后已加密的密码/令牌无法恢复**；
 - `certs/`、`acme/`：证书与 ACME 账号；
-- `shares/`：文件分享记录；
 - `logs/`：运行日志。
 
 备份：直接打包整个数据目录即可（包含密钥）。

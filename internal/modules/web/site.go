@@ -190,12 +190,6 @@ func (w *Web) buildSite(r *rule, cfg *model.Config) (*webSite, error) {
 		return w.redirectSite(r)
 	case model.WebTypeStatic:
 		return w.staticSite(r)
-	case model.WebTypeFiles:
-		handler, err := w.fb.Site(r.spec)
-		if err != nil {
-			return nil, fmt.Errorf("rule %q: %w", r.name, err)
-		}
-		return w.storageSite(handler), nil
 	case model.WebTypeWebDAV:
 		handler, err := w.dav.Site(r.spec)
 		if err != nil {

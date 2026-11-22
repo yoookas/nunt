@@ -17,8 +17,6 @@ import (
 
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
-	"github.com/nunt/nunt/internal/modules/filebrowser"
-	"github.com/nunt/nunt/internal/rest"
 	"github.com/nunt/nunt/internal/vfs"
 )
 
@@ -84,15 +82,6 @@ func (h *closingHandler) Close() error {
 	}
 	return nil
 }
-
-// RegisterAPI mounts the management endpoints.
-//
-// A WebDAV rule has no administration API of its own, but the share links
-// served by the file manager belong to the same "/api/v1/files" group. The
-// routes are therefore registered through the file manager package, which
-// makes the call idempotent per mux and safe to combine with the file browser
-// service.
-func (s *Service) RegisterAPI(mux *rest.Mux) { filebrowser.RegisterFilesAPI(mux, s.deps) }
 
 func (s *Service) logger() *slog.Logger {
 	if s == nil || s.deps == nil {

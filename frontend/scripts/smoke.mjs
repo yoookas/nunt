@@ -163,7 +163,6 @@ const routes = [
   ['/task', '计划任务'],
   ['/notify', '通知'],
   ['/storage', '存储'],
-  ['/files', '文件'],
   ['/logs', '日志'],
   ['/settings', '设置'],
   ['/password', '修改密码'],

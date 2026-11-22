@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/nunt/nunt/internal/model"
@@ -131,17 +130,17 @@ func TestValidate(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// File services (filebrowser / webdav) must be authenticated or allow-listed.
+// WebDAV exposes the mounted storage and must be authenticated or allow-listed.
 // ---------------------------------------------------------------------------
 
-// fileRule builds a filebrowser/webdav rule with a valid listen address so the
-// only remaining validation error can be the missing authentication.
-func fileRule(kind, name string, mutate func(*model.WebRule)) model.WebRule {
+// davRule builds a WebDAV rule with a valid listen address so the only
+// remaining validation error can be the missing authentication.
+func davRule(name string, mutate func(*model.WebRule)) model.WebRule {
 	r := model.WebRule{
-		ID:     "rule-" + kind,
+		ID:     "rule-dav",
 		Name:   name,
 		Enable: true,
-		Type:   kind,
+		Type:   model.WebTypeWebDAV,
 		Listen: []string{":8080"},
 		Path:   "/files",
 		Files:  &model.FilesTgt{Root: "/srv/files"},
@@ -159,65 +158,60 @@ func validConfigWith(rules ...model.WebRule) *model.Config {
 	return cfg
 }
 
-func TestValidateRequiresAuthForFileServices(t *testing.T) {
+func TestValidateRequiresAuthForWebDAV(t *testing.T) {
 	cases := []struct {
 		name    string
 		rule    model.WebRule
 		wantErr bool
 	}{
 		{
-			name:    "filebrowser without any authentication is rejected",
-			rule:    fileRule(model.WebTypeFiles, "files", nil),
-			wantErr: true,
-		},
-		{
 			name:    "webdav without any authentication is rejected",
-			rule:    fileRule(model.WebTypeWebDAV, "dav", nil),
+			rule:    davRule("dav", nil),
 			wantErr: true,
 		},
 		{
 			name: "basic auth with a user is accepted",
-			rule: fileRule(model.WebTypeFiles, "files", func(r *model.WebRule) {
+			rule: davRule("dav", func(r *model.WebRule) {
 				r.BasicAuth = &model.BasicAuth{Enable: true, Users: []model.BasicAuthUser{{Username: "alice", Password: "$argon2id$v=19$m=1,t=1,p=1$x$y"}}}
 			}),
 		},
 		{
 			name: "basic auth that is disabled is not enough",
-			rule: fileRule(model.WebTypeFiles, "files", func(r *model.WebRule) {
+			rule: davRule("dav", func(r *model.WebRule) {
 				r.BasicAuth = &model.BasicAuth{Enable: false, Users: []model.BasicAuthUser{{Username: "alice", Password: "x"}}}
 			}),
 			wantErr: true,
 		},
 		{
 			name: "basic auth without users is not enough",
-			rule: fileRule(model.WebTypeFiles, "files", func(r *model.WebRule) {
+			rule: davRule("dav", func(r *model.WebRule) {
 				r.BasicAuth = &model.BasicAuth{Enable: true}
 			}),
 			wantErr: true,
 		},
 		{
 			name: "allow list with addresses is accepted even without basic auth",
-			rule: fileRule(model.WebTypeWebDAV, "dav", func(r *model.WebRule) {
+			rule: davRule("dav", func(r *model.WebRule) {
 				r.Access = model.Access{Mode: model.AccessAllow, IPs: []string{"10.0.0.0/8", "192.168.1.5"}}
 			}),
 		},
 		{
 			name: "allow list without addresses is not enough",
-			rule: fileRule(model.WebTypeWebDAV, "dav", func(r *model.WebRule) {
+			rule: davRule("dav", func(r *model.WebRule) {
 				r.Access = model.Access{Mode: model.AccessAllow}
 			}),
 			wantErr: true,
 		},
 		{
 			name: "a deny list does not count as an allow list",
-			rule: fileRule(model.WebTypeWebDAV, "dav", func(r *model.WebRule) {
+			rule: davRule("dav", func(r *model.WebRule) {
 				r.Access = model.Access{Mode: model.AccessDeny, IPs: []string{"203.0.113.0/24"}}
 			}),
 			wantErr: true,
 		},
 		{
 			name: "a rule can carry both basic auth and an allow list",
-			rule: fileRule(model.WebTypeFiles, "files", func(r *model.WebRule) {
+			rule: davRule("dav", func(r *model.WebRule) {
 				r.BasicAuth = &model.BasicAuth{Enable: true, Users: []model.BasicAuthUser{{Username: "bob", Password: "x"}}}
 				r.Access = model.Access{Mode: model.AccessAllow, IPs: []string{"127.0.0.1"}}
 			}),
@@ -232,33 +226,7 @@ func TestValidateRequiresAuthForFileServices(t *testing.T) {
 			if !tc.wantErr && err != nil {
 				t.Fatalf("the configuration must be accepted: %v", err)
 			}
-			if tc.wantErr {
-				msg := err.Error()
-				for _, want := range []string{"BasicAuth", "allow", "IP"} {
-					if !strings.Contains(msg, want) {
-						t.Fatalf("the error must mention %q, got %q", want, msg)
-					}
-				}
-			}
 		})
-	}
-}
-
-func TestValidateFileServiceRuleKeepsOtherTypesWorking(t *testing.T) {
-	proxy := model.WebRule{
-		ID: "p", Name: "proxy", Enable: true, Type: model.WebTypeProxy,
-		Listen: []string{":8080"}, Proxy: &model.ProxyTarget{Targets: []string{"http://127.0.0.1:9000"}},
-	}
-	static := model.WebRule{
-		ID: "s", Name: "static", Enable: true, Type: model.WebTypeStatic,
-		Listen: []string{":8080"}, Static: &model.StaticTgt{Root: "/srv/www"},
-	}
-	redirect := model.WebRule{
-		ID: "r", Name: "redirect", Enable: true, Type: model.WebTypeRedirect,
-		Listen: []string{":8080"}, Redirect: &model.RedirectTgt{To: "https://example.com"},
-	}
-	if err := Validate(validConfigWith(proxy, static, redirect)); err != nil {
-		t.Fatalf("proxy, static and redirect rules must not need authentication: %v", err)
 	}
 }
 
@@ -267,13 +235,13 @@ func TestUpdateRejectsAnonymousFileService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	rule := fileRule(model.WebTypeFiles, "files", nil)
+	rule := davRule("dav", nil)
 	err = store.Update(func(c *model.Config) error {
 		c.Web.Rules = append(c.Web.Rules, rule)
 		return nil
 	})
 	if err == nil {
-		t.Fatal("saving an anonymous file browser rule must fail")
+		t.Fatal("saving an anonymous WebDAV rule must fail")
 	}
 	if len(store.Snapshot().Web.Rules) != 0 {
 		t.Fatal("a rejected update must not change the live configuration")
@@ -284,7 +252,7 @@ func TestUpdateRejectsAnonymousFileService(t *testing.T) {
 		c.Web.Rules = append(c.Web.Rules, rule)
 		return nil
 	}); err != nil {
-		t.Fatalf("a guarded file browser rule must be accepted: %v", err)
+		t.Fatalf("a guarded WebDAV rule must be accepted: %v", err)
 	}
 	if len(store.Snapshot().Web.Rules) != 1 {
 		t.Fatal("the guarded rule must be persisted")

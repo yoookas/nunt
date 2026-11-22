@@ -1,6 +1,6 @@
 # nunt
 
-一个用 Go 编写的自托管边缘服务：**反向代理、重定向、静态托管、端口转发、动态域名（DDNS）、ACME 自动证书、WebDAV、文件管理、Coraza WAF**，
+一个用 Go 编写的自托管边缘服务：**反向代理、重定向、静态托管、端口转发、动态域名（DDNS）、ACME 自动证书、WebDAV、Coraza WAF**，
 带一个 Vue 3 + Arco Design 的 Web 管理界面（构建产物嵌进二进制），支持 Docker Compose 一键部署。
 
 > 设计目标：单二进制、跨平台、默认安全、界面简洁；面向软路由 / NAS / 家庭服务器 / 小团队内网。
@@ -11,17 +11,16 @@
 
 | 模块 | 说明 |
 | --- | --- |
-| **Web 服务** | 同一套监听器上按「监听地址 + 域名 + 路径」路由，支持 5 种规则类型：反向代理、重定向、静态托管、文件管理（FileBrowser）、WebDAV。支持 IP/UA 黑白名单、HTTP Basic 认证、多上游负载均衡（轮询/随机/IP 哈希）、路径重写、自定义请求/响应头、WebSocket、访问日志 |
+| **Web 服务** | 同一套监听器上按「监听地址 + 域名 + 路径」路由，支持 4 种规则类型：反向代理、重定向、静态托管、WebDAV。支持 IP/UA 黑白名单、HTTP Basic 认证、多上游负载均衡（轮询/随机/IP 哈希）、路径重写、自定义请求/响应头、WebSocket、访问日志 |
 | **端口转发** | TCP / UDP / 同时转发，源地址 → 目标地址，支持 IPv6、源 IP 黑白名单、空闲超时、活跃与累计连接数、上下行流量统计、访问日志 |
 | **动态域名 DDNS** | 内置阿里云 DNS、DNSPod（腾讯云）与「自定义回调」；支持多子域名、A/AAAA、TTL、间隔或 cron 调度、公网 IP 探测（网卡 / URL / 静态）、变化才更新、失败通知 |
 | **ACME 自动证书** | 基于 `golang.org/x/crypto/acme` 自研签发流程，支持 http-01 / dns-01 / tls-alpn-01，DNS-01 复用 DDNS 的提供商；**http-01 / tls-alpn-01 复用 web 的 :80 / :443 监听**（端口被自家规则占用也能签发），自动续期（默认剩余 30 天，上限 30 天），证书热加载、无需重启 |
 | **WebDAV** | 基于 `golang.org/x/net/webdav`，可挂载本地目录或远程 WebDAV，细粒度读写权限，支持 Windows 资源管理器 / macOS 访达 / rclone / RaiDrive 挂载 |
-| **文件管理** | 服务端渲染的文件浏览器：上传（拖拽 + 进度）、下载（Range、断点续传）、新建、重命名、删除、搜索、目录分享链接（可设有效期） |
 | **Coraza WAF** | 内嵌 OWASP CRS 规则集，支持检测/拦截模式、PL 等级、入站/出站阈值、规则文件勾选、自定义 SecLang 规则、请求体上限、拦截日志与在线测试；可保护管理后台本身 |
 | **计划任务** | 可视化 cron：模块启停、规则开关、HTTP 请求、Webhook 通知（Shell 需显式开启） |
 | **通知** | 通用 Webhook，事件：证书签发/失败、DDNS 更新/失败、系统告警 |
 
-管理界面：概览、Web 服务、端口转发、动态域名、证书、存储、文件、WAF、计划任务、通知、日志、设置。
+管理界面：概览、Web 服务、端口转发、动态域名、证书、存储、WAF、计划任务、通知、日志、设置。
 
 ---
 
@@ -128,7 +127,7 @@ go build -o nunt ./cmd/nunt
 
 要把服务**直接暴露到公网**，先读 **[docs/PUBLIC-EXPOSURE.md](docs/PUBLIC-EXPOSURE.md)**：公网与内网的威胁模型差异、管理面隔离（`adminListen` 只监听回环 + WireGuard/SSH 隧道，或反代 + TLS + BasicAuth + IP 白名单 + WAF `adminProtect`）、最小暴露面清单、先观察后强制的上线顺序，以及 P0/P1/P2 勾选清单与「当前尚未验证」清单。
 
-其中一条已经写进配置校验：**FileBrowser / WebDAV 规则必须启用 BasicAuth，或把访问控制设为 `allow` + IP 列表**，否则保存配置会被直接拒绝（fail-closed）。现存匿名文件服务的迁移步骤见该文档第 8 节。
+其中一条已经写进配置校验：**WebDAV 规则必须启用 BasicAuth，或把访问控制设为 `allow` + IP 列表**，否则保存配置会被直接拒绝（fail-closed）。现存匿名 WebDAV 规则的迁移步骤见该文档第 8 节。
 
 ---
 
@@ -140,7 +139,6 @@ data/
 ├── secret.key       # 凭据加密密钥（0600，AES-256-GCM）
 ├── certs/           # 证书仓库（cert.pem / key.pem / meta.json）
 ├── acme/            # ACME 账号密钥与注册信息
-├── shares/          # 文件分享链接记录
 └── logs/            # 运行日志（按大小轮转，保留 3 份）
 ```
 
@@ -156,7 +154,7 @@ data/
 - **CSRF**：会话鉴权的写操作必须带 `X-CSRF-Token`（登录时下发）。
 - **暴力破解**：登录失败按「用户名 + IP」计数，超过阈值指数退避锁定；API 有令牌桶限流。
 - **开放 API**：Bearer Token 或 `X-API-Token`，令牌只存 SHA-256 哈希，可限制 scope，可随时吊销。
-- **文件安全**：静态托管、文件管理、WebDAV 全部走基于 `os.Root` 的虚拟文件系统，符号链接与 `..` 逃逸在内核层面被拒绝。
+- **文件安全**：静态托管与 WebDAV 全部走基于 `os.Root` 的虚拟文件系统，符号链接与 `..` 逃逸在内核层面被拒绝。
 - **反向代理**：剥离 hop-by-hop 头、可控超时、上游仅允许 http/https，响应头可裁剪。
 - **WAF**：Coraza + CRS，可保护后台接口本身；拦截页面不回显用户输入；请求体检查由 Coraza 自己按 `bodyLimitKb` 截断（见下方「WAF」）。
 - **TLS**：最低 TLS 1.2、仅 ECDHE 系列套件、按 SNI 热加载证书。
@@ -204,7 +202,7 @@ internal/api        管理后台 REST API + SSE
 internal/config     配置仓库（原子写、校验、订阅）
 internal/model      全部持久化类型
 internal/module     模块接口与注册表
-internal/modules/   各功能模块（web / forward / ddns / acme / waf / task / filebrowser / webdav）
+internal/modules/   各功能模块（web / forward / ddns / acme / waf / task / webdav）
 internal/dnsprov    DNS 提供商（DDNS 与 ACME DNS-01 共用）
 internal/certs      证书仓库（SNI 热加载）
 internal/vfs        安全文件系统抽象（os.Root）
@@ -212,7 +210,7 @@ internal/mounts     存储挂载（本地 / 远程 WebDAV）
 internal/security   密码、会话、限流
 internal/rest       路由与 JSON 工具
 internal/webui      管理界面构建产物（go:embed，源码在 frontend/）
-web 前端            internal/webui/assets/{index.html,style.css,app.js,lib,pages}
+web 前端            frontend/（Vue 3 + Arco Design + Vite）
 ```
 
 模块开发约定见 [docs/CONTRACT.md](docs/CONTRACT.md)（模块接口、REST 约定、前端页面契约）；
@@ -226,7 +224,7 @@ web 前端            internal/webui/assets/{index.html,style.css,app.js,lib,pag
 
 - 构建：`npm ci --prefix frontend && npm run build --prefix frontend`（或 `make web`），产物会整体重写
   `internal/webui/assets`；**改了前端必须重新构建并提交产物**，CI 会重跑构建并检查产物是否最新；
-- 开发：`cd frontend && npm run dev`，页面热更新；12 个页面 + 登录页都在 `frontend/src/views/`；
+- 开发：`cd frontend && npm run dev`，页面热更新；11 个页面 + 登录页都在 `frontend/src/views/`；
 - 约束：零外部请求（CSP `script-src 'self'`）、明暗主题用 `arco-theme` 切换、页面只用 Arco 组件与语义色变量。
   详细约定见 [docs/CONTRACT.md 第 7 节](docs/CONTRACT.md)。
 
@@ -246,7 +244,7 @@ pwsh -File scripts/listen-rebind.ps1
 # 前端：安装依赖、构建、再构建二进制
 npm ci --prefix frontend
 npm run build --prefix frontend
-npm run smoke --prefix frontend   # jsdom 冒烟：13 个路由逐个挂载，捕获运行时错误
+npm run smoke --prefix frontend   # jsdom 冒烟：12 个路由逐个挂载，捕获运行时错误
 go build -o nunt.exe ./cmd/nunt
 ```
 

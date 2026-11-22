@@ -135,7 +135,7 @@ func compileRule(r model.WebRule, index int) (*rule, error) {
 // it, so a broken rule cannot take a whole listener down.
 func checkRuleStorage(r model.WebRule) error {
 	switch r.Type {
-	case model.WebTypeStatic, model.WebTypeFiles, model.WebTypeWebDAV:
+	case model.WebTypeStatic, model.WebTypeWebDAV:
 	default:
 		return nil
 	}
@@ -264,7 +264,7 @@ func (rt *router) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	}
 	// A file service that nobody guards must not be served at all. This is the
 	// runtime half of the configuration check; both refuse the same rules.
-	if r.fileServiceUnprotected() {
+	if r.webDAVUnprotected() {
 		rt.web.warnUnprotectedFileService(r, req)
 		http.Error(rec, fileGuardMessage, http.StatusForbidden)
 		return

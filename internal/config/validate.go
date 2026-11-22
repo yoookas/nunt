@@ -93,9 +93,6 @@ func Normalize(c *model.Config) {
 		if r.Redirect != nil && r.Redirect.Status == 0 {
 			r.Redirect.Status = 302
 		}
-		if r.Files != nil && r.Files.ShareTTLMin == 0 {
-			r.Files.ShareTTLMin = 1440
-		}
 	}
 	for i := range c.Forward.Rules {
 		r := &c.Forward.Rules[i]
@@ -182,7 +179,7 @@ func Validate(c *model.Config) error {
 		if len(r.Listen) == 0 {
 			return fmt.Errorf("web rule %q: at least one listen address is required", displayName(r.Name, r.ID))
 		}
-		if err := requireFileServiceAuth(&r); err != nil {
+		if err := requireWebDAVAuth(&r); err != nil {
 			return err
 		}
 		if r.Proxy != nil {
@@ -207,9 +204,13 @@ func Validate(c *model.Config) error {
 			if r.Redirect == nil || strings.TrimSpace(r.Redirect.To) == "" {
 				return fmt.Errorf("web rule %q: redirect target is required", displayName(r.Name, r.ID))
 			}
-		case model.WebTypeStatic, model.WebTypeFiles, model.WebTypeWebDAV:
-			if r.Static == nil && r.Files == nil {
-				return fmt.Errorf("web rule %q: storage settings are required", displayName(r.Name, r.ID))
+		case model.WebTypeStatic:
+			if r.Static == nil {
+				return fmt.Errorf("web rule %q: static settings are required", displayName(r.Name, r.ID))
+			}
+		case model.WebTypeWebDAV:
+			if r.Files == nil {
+				return fmt.Errorf("web rule %q: WebDAV storage settings are required", displayName(r.Name, r.ID))
 			}
 		default:
 			return fmt.Errorf("web rule %q: unknown type %q", displayName(r.Name, r.ID), r.Type)
@@ -270,17 +271,14 @@ func Validate(c *model.Config) error {
 	return nil
 }
 
-// requireFileServiceAuth rejects filebrowser and webdav rules that would be
-// reachable by anybody: these rule types read and write the mounted storage, so
-// every anonymous visitor they accept is an anonymous storage account. Such a
-// rule must be gated by basic authentication or by an allow list of client
-// addresses. Both checks are deliberately made on the stored configuration, not
-// on the runtime state, so a rule cannot be activated later through a toggle
-// that skips validation.
-func requireFileServiceAuth(r *model.WebRule) error {
-	switch r.Type {
-	case model.WebTypeFiles, model.WebTypeWebDAV:
-	default:
+// requireWebDAVAuth rejects WebDAV rules that would be reachable by anybody:
+// they read and write the mounted storage, so every anonymous visitor would be
+// an anonymous storage account. Such a rule must be gated by basic
+// authentication or by an allow list of client addresses. Both checks are
+// deliberately made on the stored configuration, not on the runtime state, so a
+// rule cannot be activated later through a toggle that skips validation.
+func requireWebDAVAuth(r *model.WebRule) error {
+	if r.Type != model.WebTypeWebDAV {
 		return nil
 	}
 	if basicAuthHasUsers(r.BasicAuth) {

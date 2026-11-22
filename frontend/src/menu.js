@@ -10,7 +10,6 @@ export const menu = [
   { name: 'task', path: '/task', title: '计划任务', icon: 'IconSchedule' },
   { name: 'notify', path: '/notify', title: '通知', icon: 'IconNotification' },
   { name: 'storage', path: '/storage', title: '存储', icon: 'IconStorage' },
-  { name: 'files', path: '/files', title: '文件', icon: 'IconFolder' },
   { name: 'logs', path: '/logs', title: '日志', icon: 'IconFile' },
   { name: 'settings', path: '/settings', title: '设置', icon: 'IconSettings' },
 ]

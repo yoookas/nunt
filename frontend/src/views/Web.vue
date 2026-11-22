@@ -8,7 +8,6 @@ const TYPE_OPTIONS = [
   { value: 'proxy', label: '反向代理' },
   { value: 'redirect', label: '重定向' },
   { value: 'static', label: '静态托管' },
-  { value: 'filebrowser', label: '文件管理' },
   { value: 'webdav', label: 'WebDAV' },
 ]
 
@@ -21,7 +20,6 @@ const TYPE_COLOR = {
   proxy: 'arcoblue',
   redirect: 'orange',
   static: 'green',
-  filebrowser: 'purple',
   webdav: 'cyan',
 }
 
@@ -308,15 +306,11 @@ function blankForm() {
     staticCache: 0,
     filesMountId: '',
     filesRoot: '/',
-    filesTitle: '',
     filesReadOnly: false,
     filesUpload: false,
     filesDelete: false,
     filesMkdir: false,
     filesRename: false,
-    filesHidden: false,
-    filesShare: false,
-    filesShareTTL: 0,
   }
 }
 
@@ -399,15 +393,11 @@ function openEdit(rule) {
     staticCache: num(stat.cacheSeconds, 0),
     filesMountId: files.mountId || '',
     filesRoot: files.root || '/',
-    filesTitle: files.title || '',
     filesReadOnly: !!files.readOnly,
     filesUpload: !!files.allowUpload,
     filesDelete: !!files.allowDelete,
     filesMkdir: !!files.allowMkdir,
     filesRename: !!files.allowRename,
-    filesHidden: !!files.showHidden,
-    filesShare: !!files.shareLinks,
-    filesShareTTL: num(files.shareTtlMinutes, 0),
   })
   formVisible.value = true
 }
@@ -450,7 +440,7 @@ async function saveRule() {
       return
     }
   }
-  if (type === 'filebrowser' || type === 'webdav') {
+  if (type === 'webdav') {
     if (!form.filesMountId.trim() && !form.filesRoot.trim()) {
       Message.warning('文件服务规则必须填写存储挂载或根目录')
       return
@@ -553,15 +543,11 @@ async function saveRule() {
     payload.files = {
       mountId: form.filesMountId.trim(),
       root: form.filesRoot.trim() || '/',
-      title: form.filesTitle.trim(),
       readOnly: !!form.filesReadOnly,
       allowUpload: !!form.filesUpload,
       allowDelete: !!form.filesDelete,
       allowMkdir: !!form.filesMkdir,
       allowRename: !!form.filesRename,
-      showHidden: !!form.filesHidden,
-      shareLinks: !!form.filesShare,
-      shareTtlMinutes: num(form.filesShareTTL, 0),
     }
   }
 
@@ -985,7 +971,7 @@ onMounted(() => {
         </template>
 
         <template v-else>
-          <div class="section-title">{{ form.type === 'webdav' ? 'WebDAV' : '文件管理' }}</div>
+          <div class="section-title">WebDAV</div>
           <div class="form-grid">
             <a-form-item label="存储挂载">
               <a-select
@@ -999,9 +985,6 @@ onMounted(() => {
             <a-form-item label="根目录">
               <a-input v-model="form.filesRoot" placeholder="/" allow-clear />
               <div class="hint">未选择挂载时使用该目录</div>
-            </a-form-item>
-            <a-form-item label="页面标题">
-              <a-input v-model="form.filesTitle" placeholder="留空使用规则名称" allow-clear />
             </a-form-item>
             <a-form-item label="只读">
               <a-switch v-model="form.filesReadOnly" />
@@ -1019,19 +1002,9 @@ onMounted(() => {
             <a-form-item label="重命名">
               <a-switch v-model="form.filesRename" />
             </a-form-item>
-            <a-form-item label="显示隐藏文件">
-              <a-switch v-model="form.filesHidden" />
-            </a-form-item>
-            <a-form-item label="分享链接">
-              <a-switch v-model="form.filesShare" />
-            </a-form-item>
-            <a-form-item label="分享有效期（分钟）">
-              <a-input-number v-model="form.filesShareTTL" :min="0" style="width: 100%" />
-              <div class="hint">0 表示永久</div>
-            </a-form-item>
             <a-form-item class="span-2">
               <div class="notice">
-                文件管理与 WebDAV 必须配置 BasicAuth 或 IP 白名单，否则运行时会拒绝所有请求（403）。
+                WebDAV 必须配置 BasicAuth 或 IP 白名单，否则运行时会拒绝所有请求（403）。
               </div>
             </a-form-item>
           </div>

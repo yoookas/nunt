@@ -92,15 +92,14 @@
 - `web.rules[].path` 用精确路径，避免整站都被一条规则接走。
 - 不用的规则**删掉**，不要只把 `enable` 改成 `false` 留在配置里（配置本身就是攻击面与误操作面）。
 - 静态托管不要随手打开目录列表（`static.listing`）：列表会把不打算公开的文件名、备份文件、`.git` 之类暴露出去。
-- 文件分享链接（`files.shareLinks`）按需打开，`files.shareTtlMinutes` 设短一点；分享链接是**绕过规则认证的独立凭据**，泄漏即等于把文件给对方。
 - 计划任务的 shell 能力保持关闭（`tasks.allowShell=false`），公网实例上不建议打开。
 
-### 3.2 文件服务（FileBrowser / WebDAV）必须认证
+### 3.2 WebDAV 必须认证
 
-**这是配置校验强制的**：类型为 `filebrowser` 或 `webdav` 的 Web 规则，如果**既没有启用的 BasicAuth**（`basicAuth.enable=true` 且 `users` 非空）**也没有 IP 白名单**（`access.mode="allow"` 且 `access.ips` 非空），保存/更新配置会直接失败，报错形如：
+**这是配置校验强制的**：类型为 `webdav` 的 Web 规则，如果**既没有启用的 BasicAuth**（`basicAuth.enable=true` 且 `users` 非空）**也没有 IP 白名单**（`access.mode="allow"` 且 `access.ips` 非空），保存/更新配置会直接失败，报错形如：
 
 ```
-web rule "文件": type filebrowser exposes the file storage without authentication,
+web rule "文件": type webdav exposes the file storage without authentication,
 enable BasicAuth for this rule (basicAuth.enable with at least one user)
 or set the access control to allow + IP list
 ```
@@ -116,7 +115,7 @@ or set the access control to allow + IP list
 
 - `access.mode="deny"` **不算**白名单：deny 只是拒绝列出的地址，其它地址仍然放行，因此不满足校验；
 - `basicAuth.enable=false`、或 enable 了但 `users` 为空，都不算；
-- 文件服务默认就不该匿名：匿名可写的 FileBrowser/WebDAV 等于把一个不需要密码的网盘挂到公网，扫描器有现成的指纹与利用工具。
+- 文件服务默认就不该匿名：匿名可写的 WebDAV 等于把一个不需要密码的网盘挂到公网，扫描器有现成的指纹与利用工具。
 
 ### 3.3 端口转发：ACL + 并发上限
 
@@ -185,7 +184,7 @@ or set the access control to allow + IP list
       （`internal/api/allowlist.go`，行为见第 2 节）；「只监听回环」是部署动作，勾选后仍须自己把 `adminListen` 改掉并从外网确认端口不可达（判据见第 6 节）
 - [x] 端口转发加每规则最大连接数 + 每 IP 连接上限 —— **代码已实现并有测试**（`maxConns` 默认 1024、`maxConnsPerIP` 默认 64、UDP 会话上限 1024）
 - [x] 反向代理加每规则速率限制 + 请求体上限 —— **代码已实现并有测试**（`proxy.rateLimitPerSec` / `proxy.maxBodyBytes`）
-- [x] FileBrowser/WebDAV 默认要求认证（未配认证时显式拒绝）—— **代码已实现并有测试**：保存配置即被拒绝（fail-closed），见第 3.2 节
+- [x] WebDAV 默认要求认证（未配认证时显式拒绝）—— **代码已实现并有测试**：保存配置即被拒绝（fail-closed），见第 3.2 节
 - [ ] ACME 对真实 CA（先 staging 再正式）实测签发 + 续期 + 热加载 —— **保持未勾**：代码在，真实 CA 没跑过（见第 7 节第 2 条）
 - [x] CI 加 govulncheck + Dependabot —— **已实现**：阻塞式 `govulncheck` job + `.github/dependabot.yml`（见第 3.6 节）
 - [x] 容器契约在 CI 的真实 docker daemon 上验证通过 —— **已验证**：`docker-smoke.yml` 于 2026-10-15 首次全绿，覆盖镜像构建、
@@ -221,7 +220,7 @@ or set the access control to allow + IP list
 | AdminAllowIPs 强制执行 | 把 `adminAllowIps` 设成非本机网段 → 立刻 403（登录页与静态资源同样 403）；`/healthz` 仍 200；概览里的 `adminAllowList.blocked` 增长；再把 `adminListen` 改为 `127.0.0.1:3113`，从外网 `nmap`/`curl` 确认端口不可达 |
 | 端口转发并发上限 | 用 `maxConns`/`maxConnsPerIP` 设小值（如 5 / 2），多开连接观察：超出被拒并落访问日志；连接释放后能恢复；UDP 规则超过 1024 会话被丢弃并记日志 |
 | 反代速率/体积极限 | `proxy.rateLimitPerSec` 设小值后用 `ab`/`hey` 打，确认超限返回限流响应且不误伤正常速率；`proxy.maxBodyBytes` 设 1MiB 后上传 2MiB 被拒、1MiB 通过 |
-| 文件服务认证 | 新建 filebrowser/webdav 规则不配认证 → 保存被拒（错误信息见 3.2）；配 BasicAuth 或白名单后保存成功；匿名请求实际返回 401/403 |
+| WebDAV 认证 | 新建 webdav 规则不配认证 → 保存被拒（错误信息见 3.2）；配 BasicAuth 或白名单后保存成功；匿名请求实际返回 401/403 |
 | ACME 真实 CA | staging 上完成一次完整签发 + 到期前自动续期 + 不重启热加载（浏览器证书指纹变化）；再在正式 CA 上重复一次；证书过期前有通知 |
 | govulncheck + Dependabot | CI 上 `govulncheck` job 真实跑过一次并绿；故意引入一个已知漏洞版本时 job 变红；仓库 Insights → Dependency graph 能看到 Dependabot 的 PR |
 | 真实 Docker（compose up） | `docker compose -f docker-compose.yml up -d --build` 在目标主机上跑通一次；`docker-smoke.yml` 在 CI 上真实执行过一次并绿 |
@@ -241,7 +240,7 @@ or set the access control to allow + IP list
 2. **ACME 未对真实 CA 跑过**：没有在 Let's Encrypt（staging 或正式）/ZeroSSL/Buypass 上完成过真实签发；续期循环、失败重试、证书热加载都只有单元测试与本地自签验证。
 3. **DNS 提供商未真实联调**：`internal/dnsprov` 只保留了阿里云 DNS 与 DNSPod（腾讯云）两家国内提供商，外加自定义回调；它们目前只有接口形状与单元测试，没有用真实账号调过 API（DDNS 与 ACME dns-01 都依赖它们）。
 4. **没有 race / 压测 / soak**：没有跑过 `go test -race` 的长时间运行，没有并发压测，没有 24h soak；连接泄漏、goroutine 泄漏、限流参数是否合适都还是未知数。
-5. **前端未真机浏览器验证**：管理界面只做过静态资源可访问性检查（HTTP 200），没有在真实浏览器里逐页点过（尤其是文件管理上传/分享、WAF 规则编辑、SSE 日志这几处）。
+5. **前端未真机浏览器验证**：管理界面只做过静态资源可访问性检查（HTTP 200），没有在真实浏览器里逐页点过（尤其是 WAF 规则编辑、SSE 日志这几处）。
 6. **管理面白名单未在真实公网验证**：`adminAllowIps` 的强制逻辑有单测覆盖，但没有在真实公网环境（含 CDN/第三方反代 + `trustProxy`）验证过取到的客户端 IP 是否就是期望值。
 7. **WAF 误报率未知**：CRS 在真实业务流量下的误报率没有数据；`paranoiaLevel`、`inboundThreshold` 等参数目前是按经验值设的。
    **非 full 占比告警也还没在真实流量下发过**：阈值门限、每小时一次的去重、样本下限都有单测覆盖，但「真实业务下占比多少算异常」需要你自己定（先设一个值跑一周，再按收到的告警调）。
@@ -249,21 +248,21 @@ or set the access control to allow + IP list
 
 ---
 
-## 8. 迁移：现存的匿名文件服务配置
+## 8. 迁移：现存的匿名 WebDAV 配置
 
 ### 为什么会保存失败
 
-文件服务（FileBrowser/WebDAV）的认证校验是 **fail-closed** 的：只要规则没有「启用的 BasicAuth」或「allow + IP 白名单」，**保存配置**就会被拒绝。这是刻意的——匿名可写的文件服务在公网上等于一个免密网盘。
+WebDAV 的认证校验是 **fail-closed** 的：只要规则没有「启用的 BasicAuth」或「allow + IP 白名单」，**保存配置**就会被拒绝。这是刻意的——匿名可写的 WebDAV 在公网上等于一个免密网盘。
 
 ### 具体行为（很重要）
 
-- **启动时不会因为这条规则拒绝配置**：`config.Load` 只做 `Normalize`，不做 `Validate`。也就是说，磁盘上已有的匿名文件规则在升级后会**照旧继续提供服务**，直到你下一次保存任何配置。
-- **写入时会被拒绝**：之后任何一次配置保存（改规则、开关模块、改设置、计划任务改配置……）只要配置里还带着匿名文件规则，就会失败并返回上面的错误信息，改动不会落盘。
-- 因此这条校验挡的是「新的/被改动的配置」，**不是运行时的兜底**。如果你现在的规则是匿名文件服务，请主动去加认证，不要等它报错。
+- **启动时不会因为这条规则拒绝配置**：`config.Load` 只做 `Normalize`，不做 `Validate`。也就是说，磁盘上已有的匿名 WebDAV 规则在升级后会**照旧继续提供服务**，直到你下一次保存任何配置。
+- **写入时会被拒绝**：之后任何一次配置保存（改规则、开关模块、改设置、计划任务改配置……）只要配置里还带着匿名 WebDAV 规则，就会失败并返回上面的错误信息，改动不会落盘。
+- 因此这条校验挡的是「新的/被改动的配置」，**不是运行时的兜底**。如果你现在的规则是匿名 WebDAV，请主动去加认证，不要等它报错。
 
 ### 迁移步骤（3 步）
 
-1. 打开「Web 服务」页，编辑目标 filebrowser / webdav 规则；
+1. 打开「Web 服务」页，编辑目标 webdav 规则；
 2. 二选一（也可都配）：
    - **BasicAuth**：勾选「启用 Basic 认证」，至少添加一个用户名 + 密码（保存时会做 argon2id 哈希）；
    - **IP 白名单**：把「访问控制」模式设为 `allow`，在 IP 列表里填允许的网段，例如 `192.168.1.0/24`、`10.0.0.0/8`、`100.64.0.0/10`（Tailscale）、`::1`、`127.0.0.1`；
@@ -276,11 +275,11 @@ or set the access control to allow + IP list
 | 配了白名单仍报错 | 模式写成了 `deny`；deny 不是白名单，必须选 `allow` |
 | 勾了 BasicAuth 仍报错 | `enable` 没勾上，或者用户列表是空的 |
 | 保存成功但外网仍能访问 | 白名单里填了过宽的网段（如 `0.0.0.0/0`、`::/0`），等于没限制 |
-| 反代到文件服务，但规则认证没生效 | 认证配在**被反代的规则**上没用——要配在**对外那条规则**上 |
+| 反代到 WebDAV，但规则认证没生效 | 认证配在**被反代的规则**上没用——要配在**对外那条规则**上 |
 | 只想临时关掉这个站点 | 直接删除该规则，或给它配 `allow + 127.0.0.1`；校验只看声明，不看你是否真会访问 |
 
 ---
 
 ## 9. 附：一句话版本
 
-> 管理面进隧道（或反代 + TLS + BasicAuth + 白名单 + adminProtect）；只开必要路由；文件服务必须认证；端口转发配 ACL 与并发上限；反代配速率与体积上限；WAF 先 LogOnly 再 block；证书先 staging 再正式；上线后按 P0 → P1 → P2 逐条验证，**没验证过的就当它不存在**。
+> 管理面进隧道（或反代 + TLS + BasicAuth + 白名单 + adminProtect）；只开必要路由；WebDAV 必须认证；端口转发配 ACL 与并发上限；反代配速率与体积上限；WAF 先 LogOnly 再 block；证书先 staging 再正式；上线后按 P0 → P1 → P2 逐条验证，**没验证过的就当它不存在**。

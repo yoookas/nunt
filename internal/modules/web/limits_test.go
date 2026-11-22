@@ -291,7 +291,7 @@ func TestModuleProxyBodyLimit(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// file services
+// WebDAV storage
 // ---------------------------------------------------------------------------
 
 // serveRule pushes one request through the router of a hand built rule.
@@ -320,8 +320,8 @@ func serveRule(t *testing.T, raw model.WebRule, mutate func(*http.Request)) *htt
 	return rec
 }
 
-func TestRouterRefusesUnguardedFileService(t *testing.T) {
-	for _, typ := range []string{model.WebTypeFiles, model.WebTypeWebDAV} {
+func TestRouterRefusesUnguardedWebDAV(t *testing.T) {
+	for _, typ := range []string{model.WebTypeWebDAV} {
 		raw := mkRule(t, "files", "example.com", "/files", 0, typ)
 		rec := serveRule(t, raw, nil)
 		if rec.Code != http.StatusForbidden {
@@ -333,13 +333,13 @@ func TestRouterRefusesUnguardedFileService(t *testing.T) {
 	}
 
 	// An allow list that only denies addresses is not an access control.
-	denyList := mkRule(t, "files", "example.com", "/files", 0, model.WebTypeFiles)
+	denyList := mkRule(t, "files", "example.com", "/files", 0, model.WebTypeWebDAV)
 	denyList.Access = model.Access{Mode: model.AccessDeny, IPs: []string{"203.0.113.0/24"}}
 	if rec := serveRule(t, denyList, nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("a deny list must not count as an access control: %d", rec.Code)
 	}
 	// Neither is an allow list without addresses.
-	emptyAllow := mkRule(t, "files", "example.com", "/files", 0, model.WebTypeFiles)
+	emptyAllow := mkRule(t, "files", "example.com", "/files", 0, model.WebTypeWebDAV)
 	emptyAllow.Access = model.Access{Mode: model.AccessAllow}
 	if rec := serveRule(t, emptyAllow, nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("an empty allow list must not count as an access control: %d", rec.Code)
@@ -353,7 +353,7 @@ func TestRouterRefusesUnguardedFileService(t *testing.T) {
 	}
 }
 
-func TestRouterServesGuardedFileService(t *testing.T) {
+func TestRouterServesGuardedWebDAV(t *testing.T) {
 	hash, err := security.HashPassword("s3cret")
 	if err != nil {
 		t.Fatal(err)
@@ -361,7 +361,7 @@ func TestRouterServesGuardedFileService(t *testing.T) {
 
 	// Basic authentication lets the request through; the guard must not answer
 	// 403 in front of it.
-	guarded := mkRule(t, "files", "example.com", "/files", 0, model.WebTypeFiles)
+	guarded := mkRule(t, "files", "example.com", "/files", 0, model.WebTypeWebDAV)
 	guarded.BasicAuth = &model.BasicAuth{Enable: true, Users: []model.BasicAuthUser{{Username: "alice", Password: hash}}}
 	anonymous := serveRule(t, guarded, nil)
 	if anonymous.Code != http.StatusUnauthorized {
@@ -385,13 +385,13 @@ func TestRouterServesGuardedFileService(t *testing.T) {
 	}
 
 	// Basic authentication without a user is not an access control.
-	empty := mkRule(t, "files", "example.com", "/files", 0, model.WebTypeFiles)
+	empty := mkRule(t, "files", "example.com", "/files", 0, model.WebTypeWebDAV)
 	empty.BasicAuth = &model.BasicAuth{Enable: true}
 	compiled, err := compileRule(empty, 0)
 	if err == nil {
 		t.Fatal("basic auth without users must be rejected at compile time")
 	}
-	if compiled != nil && !compiled.fileServiceUnprotected() {
+	if compiled != nil && !compiled.webDAVUnprotected() {
 		t.Fatal("basic auth without users must not count as an access control")
 	}
 }
@@ -410,7 +410,7 @@ func TestToggleReportsValidationFailure(t *testing.T) {
 		Version: config.CurrentVersion,
 		Users:   []model.User{{ID: "u1", Username: "admin", Role: "admin", Enabled: true}},
 		Web: model.WebConfig{Rules: []model.WebRule{{
-			ID: "rule-files", Name: "files", Enable: false, Type: model.WebTypeFiles,
+			ID: "rule-files", Name: "files", Enable: false, Type: model.WebTypeWebDAV,
 			Listen: []string{":8080"}, Path: "/files", Files: &model.FilesTgt{Root: t.TempDir()},
 		}}},
 	}

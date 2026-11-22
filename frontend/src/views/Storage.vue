@@ -11,7 +11,6 @@ import { fmtBytes, fmtTime } from '../format'
 //   DELETE /api/v1/storage/mounts/{id}           删除
 //   POST   /api/v1/storage/mounts/test           测试连接（body: { mount, id }）
 //   GET    /api/v1/storage/mounts/{id}/list?path= 浏览目录
-// 文件下载复用管理端辅助接口 GET /api/v1/files/download?mount=&path=。
 const TYPE_LABELS = { local: '本地目录', webdav: 'WebDAV' }
 const pagination = { pageSize: 20, showTotal: true, size: 'mini' }
 const browsePagination = { pageSize: 20, showTotal: true, size: 'mini' }
@@ -290,12 +289,6 @@ async function loadBrowse(target) {
   }
 }
 
-function downloadEntry(entry) {
-  if (!entry || entry.dir || !browseMount.value) return
-  const url = `/api/v1/files/download?mount=${encodeURIComponent(browseMount.value.id)}&path=${encodeURIComponent(entry.path)}`
-  window.open(url, '_blank', 'noopener')
-}
-
 onMounted(load)
 </script>
 
@@ -557,7 +550,6 @@ onMounted(load)
           <a-button v-if="record.dir" type="text" size="mini" @click="loadBrowse(record.path)">
             打开
           </a-button>
-          <a-button v-else type="text" size="mini" @click="downloadEntry(record)">下载</a-button>
         </template>
         <template #empty>
           <a-empty description="目录为空" />
@@ -565,9 +557,6 @@ onMounted(load)
       </a-table>
 
       <div class="editor-footer">
-        <span class="muted">
-          下载地址：<span class="mono">/api/v1/files/download?mount=&lt;挂载&gt;&amp;path=&lt;路径&gt;</span>
-        </span>
         <span class="spacer" />
         <a-button @click="browseVisible = false">关闭</a-button>
       </div>

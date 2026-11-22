@@ -17,7 +17,6 @@ const (
 	WebTypeProxy    = "proxy"
 	WebTypeRedirect = "redirect"
 	WebTypeStatic   = "static"
-	WebTypeFiles    = "filebrowser"
 	WebTypeWebDAV   = "webdav"
 )
 
@@ -195,7 +194,7 @@ type StaticTgt struct {
 	CacheSeconds int      `json:"cacheSeconds,omitempty"`
 }
 
-// FilesTgt configures the built-in file browser / WebDAV endpoints.
+// FilesTgt configures the storage and the permissions of a WebDAV rule.
 type FilesTgt struct {
 	MountID     string `json:"mountId,omitempty"`
 	Root        string `json:"root,omitempty"`
@@ -204,10 +203,6 @@ type FilesTgt struct {
 	AllowDelete bool   `json:"allowDelete"`
 	AllowMkdir  bool   `json:"allowMkdir"`
 	AllowRename bool   `json:"allowRename"`
-	ShowHidden  bool   `json:"showHidden"`
-	ShareLinks  bool   `json:"shareLinks"`
-	ShareTTLMin int    `json:"shareTtlMinutes,omitempty"`
-	Title       string `json:"title,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
