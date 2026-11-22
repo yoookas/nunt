@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -93,6 +94,8 @@ func (a *ACME) registerAPI(mux *rest.Mux) {
 	g.Delete("/certificates/{id}", a.handleDeleteCertificate)
 	g.Get("/providers", a.handleProviders)
 	g.Get("/status", a.handleStatus)
+	g.Get("/config", a.handleGetConfig)
+	g.Put("/config", a.handleUpdateConfig)
 }
 
 // ---------------------------------------------------------------------------
@@ -438,6 +441,98 @@ func (a *ACME) handleUploadCertificate(w http.ResponseWriter, r *http.Request) {
 
 func (a *ACME) handleProviders(w http.ResponseWriter, r *http.Request) {
 	rest.OK(w, dnsprov.Default().List())
+}
+
+// ---------------------------------------------------------------------------
+// account configuration
+// ---------------------------------------------------------------------------
+
+// acmeConfigView is the instance wide account configuration plus the option
+// catalogs the UI needs to render the form.
+type acmeConfigView struct {
+	Email       string              `json:"email"`
+	CA          string              `json:"ca"`
+	CACustomURL string              `json:"caCustomUrl"`
+	KeyType     string              `json:"keyType"`
+	Authorities []map[string]string `json:"authorities"`
+	KeyTypes    []map[string]string `json:"keyTypes"`
+}
+
+// acmeConfigUpdate is the writable subset of acmeConfigView.
+type acmeConfigUpdate struct {
+	Email       string `json:"email"`
+	CA          string `json:"ca"`
+	CACustomURL string `json:"caCustomUrl"`
+	KeyType     string `json:"keyType"`
+}
+
+func configView(cfg *model.ACMEConfig) acmeConfigView {
+	ca := strings.ToLower(strings.TrimSpace(cfg.CA))
+	if ca == "" {
+		ca = "letsencrypt"
+	}
+	keyType := strings.ToLower(strings.TrimSpace(cfg.KeyType))
+	if keyType == "" {
+		keyType = keyEC256
+	}
+	return acmeConfigView{
+		Email:       cfg.Email,
+		CA:          ca,
+		CACustomURL: cfg.CACustomURL,
+		KeyType:     keyType,
+		Authorities: caCatalog(),
+		KeyTypes:    keyCatalog(),
+	}
+}
+
+func (a *ACME) handleGetConfig(w http.ResponseWriter, r *http.Request) {
+	cfg := a.deps.Cfg.Snapshot()
+	rest.OK(w, configView(&cfg.ACME))
+}
+
+// handleUpdateConfig saves the account settings. One ACME account is shared by
+// every job, so the CA and the contact email are instance wide; the key type is
+// only the default for new and on demand certificates.
+func (a *ACME) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
+	var req acmeConfigUpdate
+	if err := rest.Decode(w, r, &req); err != nil {
+		rest.Fail(w, http.StatusBadRequest, "%s", err.Error())
+		return
+	}
+	email := strings.TrimSpace(req.Email)
+	if email != "" {
+		if _, err := mail.ParseAddress(email); err != nil {
+			rest.Fail(w, http.StatusBadRequest, "联系邮箱格式不正确：%s", err)
+			return
+		}
+	}
+	ca := strings.ToLower(strings.TrimSpace(req.CA))
+	if ca == "" {
+		ca = "letsencrypt"
+	}
+	custom := strings.TrimSpace(req.CACustomURL)
+	// directoryURL validates both the CA name and the custom directory URL.
+	if _, err := directoryURL(&model.ACMEConfig{CA: ca, CACustomURL: custom}); err != nil {
+		rest.Fail(w, http.StatusBadRequest, "%s", err)
+		return
+	}
+	keyType, err := normalizeKeyType(req.KeyType)
+	if err != nil {
+		rest.Fail(w, http.StatusBadRequest, "%s", err)
+		return
+	}
+	if err := a.deps.Cfg.Update(func(c *model.Config) error {
+		c.ACME.Email = email
+		c.ACME.CA = ca
+		c.ACME.CACustomURL = custom
+		c.ACME.KeyType = keyType
+		return nil
+	}); err != nil {
+		rest.Fail(w, http.StatusBadRequest, "cannot save the ACME configuration: %s", err)
+		return
+	}
+	cfg := a.deps.Cfg.Snapshot()
+	rest.OK(w, configView(&cfg.ACME))
 }
 
 func (a *ACME) handleStatus(w http.ResponseWriter, r *http.Request) {

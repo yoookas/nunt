@@ -22,6 +22,10 @@ const CHALLENGE_LABEL = { http: 'HTTP-01', dns: 'DNS-01', tls: 'TLS-ALPN-01' }
 const jobs = ref([])
 const certs = ref([])
 const providers = ref([])
+const acmeConfig = reactive({ email: '', ca: 'letsencrypt', caCustomUrl: '', keyType: 'ec256' })
+const authorities = ref([])
+const configModal = ref(false)
+const configSaving = ref(false)
 const loading = ref(true)
 const saving = ref(false)
 const busyId = ref('')
@@ -176,6 +180,62 @@ function certSourceLabel(source) {
   return String(source)
 }
 
+const caOptions = computed(() =>
+  authorities.value.map((item) => ({ value: item.id, label: item.title || item.id })),
+)
+
+const caTitle = computed(() => {
+  const found = authorities.value.find((item) => item.id === acmeConfig.ca)
+  return found ? found.title : acmeConfig.ca || '-'
+})
+
+async function loadConfig() {
+  try {
+    const data = await api.get('/api/v1/acme/config')
+    acmeConfig.email = data?.email || ''
+    acmeConfig.ca = data?.ca || 'letsencrypt'
+    acmeConfig.caCustomUrl = data?.caCustomUrl || ''
+    acmeConfig.keyType = data?.keyType || 'ec256'
+    authorities.value = Array.isArray(data?.authorities) ? data.authorities : []
+  } catch (err) {
+    Message.error(`读取 ACME 设置失败：${errorText(err)}`)
+  }
+}
+
+function openConfig() {
+  configModal.value = true
+}
+
+async function saveConfig() {
+  const email = acmeConfig.email.trim()
+  if (email && !email.includes('@')) {
+    Message.warning('联系邮箱格式不正确')
+    return false
+  }
+  const custom = acmeConfig.caCustomUrl.trim()
+  if (acmeConfig.ca === 'custom' && !/^https?:\/\//i.test(custom)) {
+    Message.warning('自定义 CA 需要 http(s) 目录地址')
+    return false
+  }
+  configSaving.value = true
+  try {
+    await api.put('/api/v1/acme/config', {
+      email,
+      ca: acmeConfig.ca,
+      caCustomUrl: custom,
+      keyType: acmeConfig.keyType,
+    })
+    Message.success('ACME 设置已保存')
+    await loadConfig()
+    return true
+  } catch (err) {
+    Message.error(`保存失败：${errorText(err)}`)
+    return false
+  } finally {
+    configSaving.value = false
+  }
+}
+
 async function loadProviders() {
   try {
     providers.value = normalizeProviders(await api.get('/api/v1/ddns/providers'))
@@ -206,7 +266,7 @@ async function loadCerts(silent = false) {
 async function loadAll() {
   loading.value = true
   try {
-    await Promise.all([loadProviders(), loadJobs(), loadCerts()])
+    await Promise.all([loadProviders(), loadJobs(), loadCerts(), loadConfig()])
   } finally {
     loading.value = false
   }
@@ -469,11 +529,12 @@ onUnmounted(() => {
       <div>
         <h2>证书</h2>
         <div class="sub">
-          共 {{ jobs.length }} 个证书任务、{{ certs.length }} 张证书；DNS 凭据由 DDNS 提供商元数据动态生成
+          共 {{ jobs.length }} 个证书任务、{{ certs.length }} 张证书；CA：{{ caTitle }}<span v-if="acmeConfig.email"> · {{ acmeConfig.email }}</span>
         </div>
       </div>
       <div class="spacer" />
       <a-button :loading="loading" @click="loadAll">刷新</a-button>
+      <a-button @click="openConfig">ACME 设置</a-button>
       <a-button @click="openUpload">上传证书</a-button>
       <a-button type="primary" @click="openJobForm(null)">新建任务</a-button>
     </div>
@@ -747,6 +808,35 @@ onUnmounted(() => {
             :auto-size="{ minRows: 2, maxRows: 6 }"
             placeholder="中间证书链（可选）"
           />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
+    <a-modal
+      v-model:visible="configModal"
+      title="ACME 账户设置"
+      :width="560"
+      :ok-loading="configSaving"
+      ok-text="保存"
+      cancel-text="取消"
+      :mask-closable="false"
+      :on-before-ok="saveConfig"
+    >
+      <a-form :model="acmeConfig" layout="vertical">
+        <a-form-item label="联系邮箱">
+          <a-input v-model="acmeConfig.email" placeholder="ops@example.com（可选）" allow-clear />
+          <template #extra>注册 ACME 账户时提交；所有证书任务共用一个账户</template>
+        </a-form-item>
+        <a-form-item label="证书颁发机构（CA）">
+          <a-select v-model="acmeConfig.ca" :options="caOptions" />
+          <template #extra>切换 CA 后，下次签发才会使用新的目录；已有证书不受影响</template>
+        </a-form-item>
+        <a-form-item v-if="acmeConfig.ca === 'custom'" label="自定义目录 URL">
+          <a-input v-model="acmeConfig.caCustomUrl" placeholder="https://acme.example.com/directory" allow-clear />
+        </a-form-item>
+        <a-form-item label="默认密钥类型">
+          <a-select v-model="acmeConfig.keyType" :options="KEY_OPTIONS" />
+          <template #extra>任务里单独设置的密钥类型会覆盖这里</template>
         </a-form-item>
       </a-form>
     </a-modal>
