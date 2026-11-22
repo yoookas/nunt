@@ -209,3 +209,37 @@ func TestConcurrentAddKeepsPairsMatched(t *testing.T) {
 		t.Fatalf("the store does not load after concurrent replacements: %v", err)
 	}
 }
+
+// A directory that cannot be loaded is skipped, but counted so the system page
+// can show it instead of hiding the problem.
+func TestOpenCountsBrokenEntries(t *testing.T) {
+	dir := t.TempDir()
+	good, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	certPEM, keyPEM := selfSignedPair(t, "good")
+	if _, err := good.Add([]string{"good.example.com"}, certPEM, keyPEM, "manual", "", false); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	// A directory with a certificate but no key must be skipped.
+	broken := filepath.Join(dir, "broken.example.com")
+	if err := os.MkdirAll(broken, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(broken, "cert.pem"), certPEM, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if got := reopened.LoadErrors(); got != 1 {
+		t.Fatalf("loadErrors = %d, want 1", got)
+	}
+	if len(reopened.List()) != 1 {
+		t.Fatalf("the good certificate was not loaded: %d", len(reopened.List()))
+	}
+}

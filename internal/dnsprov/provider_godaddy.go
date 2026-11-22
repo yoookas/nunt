@@ -40,13 +40,15 @@ func registerGoDaddy(r *Registry) {
 		if key == "" || secret == "" {
 			return nil, fmt.Errorf("godaddy: key and secret required")
 		}
-		return &goDaddyProvider{base: newBase(creds), auth: "sso-key " + key + ":" + secret}, nil
+		return &goDaddyProvider{base: newBase(creds), auth: "sso-key " + key + ":" + secret, api: goDaddyAPI}, nil
 	})
 }
 
 type goDaddyProvider struct {
 	base
 	auth string
+	// api is the REST root; tests point it at a local server.
+	api string
 }
 
 func (p *goDaddyProvider) Name() string { return "godaddy" }
@@ -63,14 +65,14 @@ func (p *goDaddyProvider) headers() map[string]string {
 }
 
 // recordURL builds the per name+type endpoint.
-func goDaddyRecordURL(rec Record) string {
+func goDaddyRecordURL(base string, rec Record) string {
 	return fmt.Sprintf("%s/domains/%s/records/%s/%s",
-		goDaddyAPI, url.PathEscape(rootDomain(rec.Domain)), normalizeType(rec.Type), escapeHost(recordName(rec)))
+		base, url.PathEscape(rootDomain(rec.Domain)), normalizeType(rec.Type), escapeHost(recordName(rec)))
 }
 
 // find reads the records stored under one name and type.
 func (p *goDaddyProvider) find(ctx context.Context, rec Record) ([]goDaddyRecord, error) {
-	res, err := p.req(ctx, http.MethodGet, goDaddyRecordURL(rec), "", "", p.headers())
+	res, err := p.req(ctx, http.MethodGet, goDaddyRecordURL(p.api, rec), "", "", p.headers())
 	if err != nil {
 		return nil, fmt.Errorf("godaddy: read record: %w", err)
 	}
@@ -119,7 +121,7 @@ func (p *goDaddyProvider) Set(ctx context.Context, rec Record) error {
 	if err != nil {
 		return fmt.Errorf("godaddy: encode record: %w", err)
 	}
-	res, err := p.req(ctx, http.MethodPut, goDaddyRecordURL(rec), string(body), "application/json", p.headers())
+	res, err := p.req(ctx, http.MethodPut, goDaddyRecordURL(p.api, rec), string(body), "application/json", p.headers())
 	if err != nil {
 		return fmt.Errorf("godaddy: write record: %w", err)
 	}
@@ -141,7 +143,7 @@ func (p *goDaddyProvider) Delete(ctx context.Context, rec Record) error {
 		}
 		body = string(raw)
 	}
-	res, err := p.req(ctx, http.MethodDelete, goDaddyRecordURL(rec), body, "application/json", p.headers())
+	res, err := p.req(ctx, http.MethodDelete, goDaddyRecordURL(p.api, rec), body, "application/json", p.headers())
 	if err != nil {
 		return fmt.Errorf("godaddy: delete record: %w", err)
 	}

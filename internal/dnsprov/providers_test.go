@@ -311,7 +311,7 @@ func TestDESECRRsetURL(t *testing.T) {
 		{Record{Domain: "example.com", SubDomain: "*", Type: "A"}, desecAPI + "/domains/example.com/rrsets/%2A/A/"},
 	}
 	for _, tc := range cases {
-		if got := desecRRsetURL(tc.rec); got != tc.want {
+		if got := desecRRsetURL(desecAPI, tc.rec); got != tc.want {
 			t.Errorf("desecRRsetURL(%+v) = %q, want %q", tc.rec, got, tc.want)
 		}
 	}
@@ -321,12 +321,12 @@ func TestDESECRRsetURL(t *testing.T) {
 }
 
 func TestGoDaddyRecordURL(t *testing.T) {
-	got := goDaddyRecordURL(Record{Domain: "example.com", SubDomain: "www", Type: "a"})
+	got := goDaddyRecordURL(goDaddyAPI, Record{Domain: "example.com", SubDomain: "www", Type: "a"})
 	want := goDaddyAPI + "/domains/example.com/records/A/www"
 	if got != want {
 		t.Errorf("goDaddyRecordURL = %q, want %q", got, want)
 	}
-	got = goDaddyRecordURL(Record{Domain: "example.com", SubDomain: "@", Type: "TXT"})
+	got = goDaddyRecordURL(goDaddyAPI, Record{Domain: "example.com", SubDomain: "@", Type: "TXT"})
 	want = goDaddyAPI + "/domains/example.com/records/TXT/@"
 	if got != want {
 		t.Errorf("goDaddyRecordURL apex = %q, want %q", got, want)

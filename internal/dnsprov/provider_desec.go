@@ -32,13 +32,15 @@ func registerDESEC(r *Registry) {
 		if token == "" {
 			return nil, fmt.Errorf("desec: token required")
 		}
-		return &desecProvider{base: newBase(creds), token: token}, nil
+		return &desecProvider{base: newBase(creds), token: token, api: desecAPI}, nil
 	})
 }
 
 type desecProvider struct {
 	base
 	token string
+	// api is the REST root; tests point it at a local server.
+	api string
 }
 
 func (p *desecProvider) Name() string { return "desec" }
@@ -65,8 +67,8 @@ func desecSubname(rec Record) string {
 }
 
 // rrsetURL builds the RRset endpoint for one record.
-func desecRRsetURL(rec Record) string {
-	parts := []string{desecAPI, "domains", url.PathEscape(rootDomain(rec.Domain)), "rrsets"}
+func desecRRsetURL(base string, rec Record) string {
+	parts := []string{base, "domains", url.PathEscape(rootDomain(rec.Domain)), "rrsets"}
 	if sub := desecSubname(rec); sub != "" {
 		parts = append(parts, escapeHost(sub))
 	}
@@ -76,7 +78,7 @@ func desecRRsetURL(rec Record) string {
 
 // find returns the RRset when it exists, nil when the API answers 404.
 func (p *desecProvider) find(ctx context.Context, rec Record) (*desecRRset, error) {
-	res, err := p.req(ctx, http.MethodGet, desecRRsetURL(rec), "", "", p.headers())
+	res, err := p.req(ctx, http.MethodGet, desecRRsetURL(p.api, rec), "", "", p.headers())
 	if err != nil {
 		return nil, fmt.Errorf("desec: read rrset: %w", err)
 	}
@@ -123,7 +125,7 @@ func (p *desecProvider) Set(ctx context.Context, rec Record) error {
 	if existing != nil {
 		method = http.MethodPut
 	}
-	res, err := p.req(ctx, method, desecRRsetURL(rec), string(body), "application/json", p.headers())
+	res, err := p.req(ctx, method, desecRRsetURL(p.api, rec), string(body), "application/json", p.headers())
 	if err != nil {
 		return fmt.Errorf("desec: write rrset: %w", err)
 	}
@@ -134,7 +136,7 @@ func (p *desecProvider) Set(ctx context.Context, rec Record) error {
 }
 
 func (p *desecProvider) Delete(ctx context.Context, rec Record) error {
-	res, err := p.req(ctx, http.MethodDelete, desecRRsetURL(rec), "", "", p.headers())
+	res, err := p.req(ctx, http.MethodDelete, desecRRsetURL(p.api, rec), "", "", p.headers())
 	if err != nil {
 		return fmt.Errorf("desec: delete rrset: %w", err)
 	}

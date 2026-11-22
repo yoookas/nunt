@@ -46,6 +46,9 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 		"dataDir":   s.opts.DataDir,
 		"webRules":  len(cfg.Web.Rules),
 		"modules":   s.opts.Registry.Statuses(),
+		// Certificates that are present on disk plus the ones that could not
+		// be loaded at startup (they are skipped, never fatal).
+		"certs": s.certInfo(),
 		// The listen address really in use, the value stored in config.json and
 		// where the effective value came from ("env" or "config"). The env
 		// variable name is included so the UI can point at the right override.
@@ -57,6 +60,17 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 		// requests it rejected since start up.
 		"adminAllowList": s.adminAllowListInfo(),
 	})
+}
+
+// certInfo summarises the certificate store for the system page.
+func (s *Server) certInfo() map[string]any {
+	out := map[string]any{"count": 0, "loadErrors": 0}
+	if s.opts.Certs == nil {
+		return out
+	}
+	out["count"] = len(s.opts.Certs.List())
+	out["loadErrors"] = s.opts.Certs.LoadErrors()
+	return out
 }
 
 // currentAdminListen reports the address that is really in use. The listener

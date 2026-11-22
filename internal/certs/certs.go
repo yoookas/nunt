@@ -48,6 +48,9 @@ type Store struct {
 	mu      sync.RWMutex
 	writeMu sync.Mutex
 	items   map[string]*entry
+	// loadErrors counts the directories that could not be loaded at startup,
+	// so a silently skipped certificate shows up in the system information.
+	loadErrors int
 }
 
 // Open loads (or creates) the certificate directory.
@@ -71,7 +74,9 @@ func Open(dir string) (*Store, error) {
 			continue
 		}
 		if err := s.load(e.Name()); err != nil {
-			// A broken certificate must not stop the service.
+			// A broken certificate must not stop the service, but it must be
+			// visible: the count is reported in the system information.
+			s.loadErrors++
 			continue
 		}
 	}
@@ -91,6 +96,11 @@ func syncDir(path string) {
 
 // Dir returns the certificate directory.
 func (s *Store) Dir() string { return s.dir }
+
+// LoadErrors reports how many stored directories could not be loaded at
+// startup. They are skipped instead of stopping the service, but an operator
+// should still see them.
+func (s *Store) LoadErrors() int { return s.loadErrors }
 
 func (s *Store) load(id string) error {
 	dir := filepath.Join(s.dir, id)
