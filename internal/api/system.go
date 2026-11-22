@@ -365,8 +365,6 @@ func (s *Server) handleImportConfig(w http.ResponseWriter, r *http.Request) {
 		c.ACME = req.Config.ACME
 		c.Storage = req.Config.Storage
 		c.WAF = req.Config.WAF
-		c.Tasks = req.Config.Tasks
-		c.Notify = req.Config.Notify
 		return nil
 	}); err != nil {
 		if moved {
@@ -416,11 +414,6 @@ func maskConfigSecrets(cfg *model.Config) {
 			cfg.Storage.Mounts[i].Password = maskSentinel
 		}
 	}
-	for i := range cfg.Notify.Webhooks {
-		for k, v := range cfg.Notify.Webhooks[i].Headers {
-			cfg.Notify.Webhooks[i].Headers[k] = secret.Mask(v)
-		}
-	}
 }
 
 func restoreSecrets(old, next *model.Config) {
@@ -467,149 +460,8 @@ func restoreSecrets(old, next *model.Config) {
 			m.Password = oldMounts[m.ID]
 		}
 	}
-	oldHooks := map[string]model.Webhook{}
-	for _, w := range old.Notify.Webhooks {
-		oldHooks[w.ID] = w
-	}
-	for i := range next.Notify.Webhooks {
-		wh := &next.Notify.Webhooks[i]
-		if prev, ok := oldHooks[wh.ID]; ok {
-			for k, v := range wh.Headers {
-				if isMasked(v) {
-					wh.Headers[k] = prev.Headers[k]
-				}
-			}
-		}
-	}
 }
 
 func isMasked(v string) bool {
 	return v == "" || v == maskSentinel || strings.Contains(v, "********")
-}
-
-// ---------------------------------------------------------------------------
-// notifications
-// ---------------------------------------------------------------------------
-
-func (s *Server) registerNotify() {
-	g := s.mux.Group("/api/v1/notify")
-	g.Get("/webhooks", s.handleListWebhooks)
-	g.Put("/webhooks", s.handleSaveWebhooks)
-	g.Post("/webhooks/test", s.handleTestWebhook)
-}
-
-// maskWebhookHeaders replaces every secret header value with the mask, so a
-// response can never hand the plaintext credentials back to the browser.
-func maskWebhookHeaders(hooks []model.Webhook) {
-	for i := range hooks {
-		for k, v := range hooks[i].Headers {
-			hooks[i].Headers[k] = secret.Mask(v)
-		}
-	}
-}
-
-func (s *Server) handleListWebhooks(w http.ResponseWriter, r *http.Request) {
-	hooks := s.opts.Cfg.Snapshot().Notify.Webhooks
-	maskWebhookHeaders(hooks)
-	rest.OK(w, hooks)
-}
-
-func (s *Server) handleSaveWebhooks(w http.ResponseWriter, r *http.Request) {
-	if !requireAdmin(w, r) {
-		return
-	}
-	var req []model.Webhook
-	if !jsonBody(w, r, &req) {
-		return
-	}
-	old := s.opts.Cfg.Snapshot().Notify.Webhooks
-	prev := map[string]model.Webhook{}
-	for _, w := range old {
-		prev[w.ID] = w
-	}
-	for i := range req {
-		if req[i].ID == "" {
-			req[i].ID = model.NewID()
-		}
-		for k, v := range req[i].Headers {
-			if isMasked(v) {
-				if p, ok := prev[req[i].ID]; ok {
-					req[i].Headers[k] = p.Headers[k]
-				}
-			}
-		}
-	}
-	if err := s.opts.Cfg.Update(func(c *model.Config) error {
-		c.Notify.Webhooks = req
-		return nil
-	}); err != nil {
-		rest.Fail(w, http.StatusBadRequest, "无法保存通知配置：%s", err)
-		return
-	}
-	s.audit(r, "notify.save", "count", len(req))
-	saved := s.opts.Cfg.Snapshot().Notify.Webhooks
-	maskWebhookHeaders(saved)
-	rest.OK(w, saved)
-}
-
-// resolveWebhookSecrets fills a webhook from its stored copy: masked header
-// values and an empty URL come from the saved entry with the same id.
-func resolveWebhookSecrets(req model.Webhook, stored map[string]model.Webhook) model.Webhook {
-	prev, ok := stored[req.ID]
-	if !ok {
-		return req
-	}
-	if req.URL == "" {
-		req.URL = prev.URL
-	}
-	merged := make(map[string]string, len(prev.Headers)+len(req.Headers))
-	for k, v := range prev.Headers {
-		merged[k] = v
-	}
-	for k, v := range req.Headers {
-		if isMasked(v) {
-			// An unknown masked header cannot be resolved; keep the mask so the
-			// caller refuses the request instead of silently dropping it.
-			if _, ok := prev.Headers[k]; !ok {
-				merged[k] = v
-			}
-			continue
-		}
-		merged[k] = v
-	}
-	req.Headers = merged
-	return req
-}
-
-func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request) {
-	if !requireAdmin(w, r) {
-		return
-	}
-	var req model.Webhook
-	if !jsonBody(w, r, &req) {
-		return
-	}
-	// The list endpoint only hands out masked headers, so a test either sends
-	// the stored webhook id or the masked values; both are resolved against the
-	// stored configuration before anything leaves the process.
-	stored := map[string]model.Webhook{}
-	for _, hook := range s.opts.Cfg.Snapshot().Notify.Webhooks {
-		stored[hook.ID] = hook
-	}
-	req = resolveWebhookSecrets(req, stored)
-	if req.URL == "" {
-		rest.Fail(w, http.StatusBadRequest, "请填写 URL")
-		return
-	}
-	for k, v := range req.Headers {
-		if isMasked(v) {
-			rest.Fail(w, http.StatusBadRequest, "请求头 %s 还没有保存，无法测试", k)
-			return
-		}
-	}
-	if err := s.opts.Notify.SendTest(req); err != nil {
-		rest.Fail(w, http.StatusBadGateway, "发送失败：%s", err)
-		return
-	}
-	rest.OK(w, map[string]any{"status": "sent"})
 }

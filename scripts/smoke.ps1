@@ -53,7 +53,7 @@ try {
   $headers = @{ 'X-CSRF-Token' = $csrf }
   foreach ($path in @('/api/v1/system/info', '/api/v1/modules', '/api/v1/web/rules', '/api/v1/forward/rules',
       '/api/v1/ddns/rules', '/api/v1/ddns/providers', '/api/v1/acme/certificates', '/api/v1/waf/config',
-      '/api/v1/task/items', '/api/v1/storage/mounts', '/api/v1/notify/webhooks', '/api/v1/auth/sessions')) {
+      '/api/v1/storage/mounts', '/api/v1/auth/sessions')) {
     try {
       $null = Invoke-RestMethod -Uri "$base$path" -WebSession $session -Headers $headers
       Write-Host ("  OK   " + $path)

@@ -18,8 +18,8 @@
 | 维度 | 内网 | 公网 |
 | --- | --- | --- |
 | 谁在连接 | 已知网段里的设备 | 全互联网的扫描器、爬虫、恶意机器人；上线后**几分钟内**就会被扫到 80/443/3113 |
-| 管理面价值 | 和业务面差不多 | **最高价值目标**：拿到管理面 = 拿到全部规则、全部凭据（DDNS/WebDAV/Webhook）、全部文件挂载。管理面一旦暴露且只靠密码，唯一防线就是密码强度与登录锁定 |
-| 每条规则 | 一条配错的规则顶多内网可达 | 每条规则都是一个被扫描入口；错配（匿名文件服务、无认证反代到内网管理口、端口转发当成开放中继）会立刻被利用 |
+| 管理面价值 | 和业务面差不多 | **最高价值目标**：拿到管理面 = 拿到全部规则、全部凭据（DDNS/挂载）、全部文件挂载。管理面一旦暴露且只靠密码，唯一防线就是密码强度与登录锁定 |
+| 每条规则 | 一条配错的规则顶多内网可达 | 每条规则都是一个被扫描入口；错配（匿名静态托管、无认证反代到内网管理口、端口转发当成开放中继）会立刻被利用 |
 | 证书 | 自签/忽略告警也能用 | **证书过期 = 全站不可用**：浏览器直接拦截，没有「继续访问」；ACME 续期失败必须在到期前被发现 |
 | WAF | 误报能自己忍 | **WAF 误报会掉业务**：拦掉的是真实用户与真实交易，且往往在下班后/半夜才被发现 |
 | 失败模式 | 服务挂了重启即可 | 被入侵后要面对数据泄露、被当作跳板、被加进黑名单；恢复成本远大于一次重启 |
@@ -27,8 +27,8 @@
 由此得到三条设计取向，本文其余部分都围绕它们：
 
 1. **管理面与业务面物理/网络隔离**，而不是靠一个密码区分（第 2 节）。
-2. **默认拒绝**：没显式声明放行的能力，不对外提供（第 3 节，含文件服务的配置校验）。
-3. **先观察后强制**：任何会拒绝流量的开关（WAF、请求体策略）都先跑观察期（第 4 节）。
+2. **默认拒绝**：没显式声明放行的能力，不对外提供（第 3 节）。
+3. **先观察后强制**：任何会拒绝流量的开关（WAF）都先跑观察期（第 4 节）。
 
 ---
 
@@ -67,7 +67,7 @@
 5. 打开 **WAF 管理面保护**（`waf.enable=true` 且 `waf.adminProtect=true`），让后台接口本身也过 CRS；
 6. `system.adminAllowIps` 作为**应用内**的第二道闸（见下）。
 
-另可选：`web.rules[].tls.hsts=true`，以及用计划任务/通知监控登录失败。
+另可选：`web.rules[].tls.hsts=true`，以及定期检查登录日志。
 
 ### `system.adminAllowIps` 的实际行为（写文档时的代码事实）
 
@@ -92,32 +92,8 @@
 - `web.rules[].path` 用精确路径，避免整站都被一条规则接走。
 - 不用的规则**删掉**，不要只把 `enable` 改成 `false` 留在配置里（配置本身就是攻击面与误操作面）。
 - 静态托管不要随手打开目录列表（`static.listing`）：列表会把不打算公开的文件名、备份文件、`.git` 之类暴露出去。
-- 计划任务的 shell 能力保持关闭（`tasks.allowShell=false`），公网实例上不建议打开。
 
-### 3.2 WebDAV 必须认证
-
-**这是配置校验强制的**：类型为 `webdav` 的 Web 规则，如果**既没有启用的 BasicAuth**（`basicAuth.enable=true` 且 `users` 非空）**也没有 IP 白名单**（`access.mode="allow"` 且 `access.ips` 非空），保存/更新配置会直接失败，报错形如：
-
-```
-web rule "文件": type webdav exposes the file storage without authentication,
-enable BasicAuth for this rule (basicAuth.enable with at least one user)
-or set the access control to allow + IP list
-```
-
-放行方式二选一（也可以都配）：
-
-| 方式 | 配置 | 适用 |
-| --- | --- | --- |
-| BasicAuth | `basicAuth.enable=true` + 至少一个 `users` 条目 | 需要给外部用户/设备访问 |
-| IP 白名单 | `access.mode="allow"` + `access.ips`（CIDR 或单 IP） | 只给内网/VPN/回源段访问，最省事也最安全 |
-
-注意几个容易踩的点：
-
-- `access.mode="deny"` **不算**白名单：deny 只是拒绝列出的地址，其它地址仍然放行，因此不满足校验；
-- `basicAuth.enable=false`、或 enable 了但 `users` 为空，都不算；
-- 文件服务默认就不该匿名：匿名可写的 WebDAV 等于把一个不需要密码的网盘挂到公网，扫描器有现成的指纹与利用工具。
-
-### 3.3 端口转发：ACL + 并发上限
+### 3.2 端口转发：ACL + 并发上限
 
 每条 `forward` 规则都应当：
 
@@ -130,7 +106,7 @@ or set the access control to allow + IP list
 - **不要把端口转发指向内网管理口**（如路由器 22/80、数据库、Docker socket、其它设备的管理页面）；这是「内网穿透」类事故最常见的成因；
 - 明确知道自己开的是什么端口：`445`、`3389`、`6379`、`2375` 这类端口在公网上被扫到就会被爆破。
 
-### 3.4 反向代理：速率与体积极限 + 上游约束
+### 3.3 反向代理：速率与体积极限 + 上游约束
 
 - 每条对外代理规则设置：
   - `proxy.rateLimitPerSec`：单客户端每秒请求数上限（0 = 不限速，按业务压测定一个不误伤的值）；
@@ -141,7 +117,7 @@ or set the access control to allow + IP list
 - 该剥离的响应头（`Server`、内部路径、调试头）用 `proxy.respHeaders` 裁掉，减少信息泄漏；
 - 不需要出站流量的规则就别开 WAF body 检查之外的额外功能，保持链路简单。
 
-### 3.5 CDN / 前置代理：隐藏源站 + 只放行回源段
+### 3.4 CDN / 前置代理：隐藏源站 + 只放行回源段
 
 - 源站 IP 一旦暴露，前面套多少层都白搭：**源站只允许 CDN 回源段访问**（用本机防火墙 + 云安全组；nunt 侧可在规则上再加一层 `access.ips` 白名单）；
 - 只放行 CDN 官方公布的回源网段，并随 CDN 更新（部分厂商提供自动更新的源站白名单）；
@@ -149,7 +125,7 @@ or set the access control to allow + IP list
 - 回源建议走 HTTPS + 自定义回源头校验，避免有人直接以源站 IP 发请求；
 - 上 CDN 后，日志与访问控制里的客户端 IP 会变成 CDN 节点地址——白名单、限速、封禁全部要按「CDN 转发后的真实 IP」重新验证一遍。
 
-### 3.6 持续守卫（CI）
+### 3.5 持续守卫（CI）
 
 - `.github/workflows/ci.yml`：`gofmt` 检查、`go vet`、`go test`、构建二进制与镜像；
 - 同文件里的 **`govulncheck` job 是阻塞的**（不设 `continue-on-error`）：依赖里存在「可达的已知漏洞」时 CI 直接失败——面向公网的服务不该把这种发现降级成警告；
@@ -184,13 +160,11 @@ or set the access control to allow + IP list
       （`internal/api/allowlist.go`，行为见第 2 节）；「只监听回环」是部署动作，勾选后仍须自己把 `adminListen` 改掉并从外网确认端口不可达（判据见第 6 节）
 - [x] 端口转发加每规则最大连接数 + 每 IP 连接上限 —— **代码已实现并有测试**（`maxConns` 默认 1024、`maxConnsPerIP` 默认 64、UDP 会话上限 1024）
 - [x] 反向代理加每规则速率限制 + 请求体上限 —— **代码已实现并有测试**（`proxy.rateLimitPerSec` / `proxy.maxBodyBytes`）
-- [x] WebDAV 默认要求认证（未配认证时显式拒绝）—— **代码已实现并有测试**：保存配置即被拒绝（fail-closed），见第 3.2 节
 - [ ] ACME 对真实 CA（先 staging 再正式）实测签发 + 续期 + 热加载 —— **保持未勾**：代码在，真实 CA 没跑过（见第 7 节第 2 条）
-- [x] CI 加 govulncheck + Dependabot —— **已实现**：阻塞式 `govulncheck` job + `.github/dependabot.yml`（见第 3.6 节）
+- [x] CI 加 govulncheck + Dependabot —— **已实现**：阻塞式 `govulncheck` job + `.github/dependabot.yml`（见第 3.5 节）
 - [x] 容器契约在 CI 的真实 docker daemon 上验证通过 —— **已验证**：`docker-smoke.yml` 于 2026-10-15 首次全绿，覆盖镜像构建、
       以 uid 1000 运行、`setcap` 允许绑定低端口、`/data` 下 `config.json`/`secret.key` 权限 600、Dockerfile 的 HEALTHCHECK 变为
-      `healthy`、管理 UI 与静态资源可访问、用日志里的随机密码登录并拉到模块列表。该轮同时修掉两个真实缺陷（WebDAV 上传字节计数
-      的数据竞争；`GET /api/v1/modules` 因子树模式返回 301 而非数据）
+      `healthy`、管理 UI 与静态资源可访问、用日志里的随机密码登录并拉到模块列表。该轮同时修掉一个真实缺陷（`GET /api/v1/modules` 因子树模式返回 301 而非数据）
 - [ ] 在目标主机上实跑 `docker compose up`（host）—— **保持未勾**：CI 只做了 `docker compose config` 解析与直接 `docker run`，
       真正的 `compose up`（含卷权限、host 网络下的端口占用）仍需在你自己的机器或服务器上跑一次（见第 7 节第 1 条）
 
@@ -200,7 +174,6 @@ or set the access control to allow + IP list
 ### P1（上线前应有）
 
 - [ ] CDN/前置代理 + 源站回源白名单
-- [ ] 通知渠道打通（证书到期、模块异常、WAF 拦截突增）
 - [ ] 24h soak + 并发压测（含 gRPC 流式与 WebSocket 长连接）
 - [ ] 备份/恢复与升级回滚各演练一次
 
@@ -220,15 +193,13 @@ or set the access control to allow + IP list
 | AdminAllowIPs 强制执行 | 把 `adminAllowIps` 设成非本机网段 → 立刻 403（登录页与静态资源同样 403）；`/healthz` 仍 200；概览里的 `adminAllowList.blocked` 增长；再把 `adminListen` 改为 `127.0.0.1:3113`，从外网 `nmap`/`curl` 确认端口不可达 |
 | 端口转发并发上限 | 用 `maxConns`/`maxConnsPerIP` 设小值（如 5 / 2），多开连接观察：超出被拒并落访问日志；连接释放后能恢复；UDP 规则超过 1024 会话被丢弃并记日志 |
 | 反代速率/体积极限 | `proxy.rateLimitPerSec` 设小值后用 `ab`/`hey` 打，确认超限返回限流响应且不误伤正常速率；`proxy.maxBodyBytes` 设 1MiB 后上传 2MiB 被拒、1MiB 通过 |
-| WebDAV 认证 | 新建 webdav 规则不配认证 → 保存被拒（错误信息见 3.2）；配 BasicAuth 或白名单后保存成功；匿名请求实际返回 401/403 |
-| ACME 真实 CA | staging 上完成一次完整签发 + 到期前自动续期 + 不重启热加载（浏览器证书指纹变化）；再在正式 CA 上重复一次；证书过期前有通知 |
+| ACME 真实 CA | staging 上完成一次完整签发 + 到期前自动续期 + 不重启热加载（浏览器证书指纹变化）；再在正式 CA 上重复一次 |
 | govulncheck + Dependabot | CI 上 `govulncheck` job 真实跑过一次并绿；故意引入一个已知漏洞版本时 job 变红；仓库 Insights → Dependency graph 能看到 Dependabot 的 PR |
 | 真实 Docker（compose up） | `docker compose -f docker-compose.yml up -d --build` 在目标主机上跑通一次；`docker-smoke.yml` 在 CI 上真实执行过一次并绿 |
 | CDN + 回源白名单 | 直接访问源站 IP 被拒（非 CDN 回源段）；经 CDN 正常；日志里看到真实客户端 IP；安全组/防火墙规则可复现导出 |
-| 告警打通 | 主动制造事件（证书剩余天数告急、模块异常退出、WAF 拦截突增）→ 通知渠道收到；且不会重复轰炸 |
 | soak + 压测 | 24h 连续运行无内存/goroutine/连接泄漏（对比前后 RSS 与统计）；压测达到预期 QPS 且 P99 达标；gRPC 流式与 WebSocket 长连接各跑一轮 |
 | 备份/恢复与回滚 | 从备份恢复到一个干净主机能起来（含证书与凭据可用）；把版本回滚到上一版并确认配置可读（`version` 字段向后兼容） |
-| 真实 CA / 真实 DNS 联调 | 见「ACME 真实 CA」一行；DNS 侧另需：用真实账号跑一次 DDNS 更新（记录出现在服务商控制台）与一次 ACME dns-01 签发，失败路径（错凭据、错域名）也各跑一次并确认有通知 |
+| 真实 CA / 真实 DNS 联调 | 见「ACME 真实 CA」一行；DNS 侧另需：用真实账号跑一次 DDNS 更新（记录出现在服务商控制台）与一次 ACME dns-01 签发，失败路径（错凭据、错域名）也各跑一次 |
 
 ---
 
@@ -243,43 +214,10 @@ or set the access control to allow + IP list
 5. **前端未真机浏览器验证**：管理界面只做过静态资源可访问性检查（HTTP 200），没有在真实浏览器里逐页点过（尤其是 WAF 规则编辑、SSE 日志这几处）。
 6. **管理面白名单未在真实公网验证**：`adminAllowIps` 的强制逻辑有单测覆盖，但没有在真实公网环境（含 CDN/第三方反代 + `trustProxy`）验证过取到的客户端 IP 是否就是期望值。
 7. **WAF 误报率未知**：CRS 在真实业务流量下的误报率没有数据；`paranoiaLevel`、`inboundThreshold` 等参数目前是按经验值设的。
-   **非 full 占比告警也还没在真实流量下发过**：阈值门限、每小时一次的去重、样本下限都有单测覆盖，但「真实业务下占比多少算异常」需要你自己定（先设一个值跑一周，再按收到的告警调）。
 8. **TLS 配置未经第三方扫描**：TLS 1.2+ / ECDHE 套件是代码里的约束，但没有用 SSL Labs 之类工具实测过评级，也没有验证 OCSP/证书链在移动端与老设备上的兼容性。
 
 ---
 
-## 8. 迁移：现存的匿名 WebDAV 配置
+## 8. 附：一句话版本
 
-### 为什么会保存失败
-
-WebDAV 的认证校验是 **fail-closed** 的：只要规则没有「启用的 BasicAuth」或「allow + IP 白名单」，**保存配置**就会被拒绝。这是刻意的——匿名可写的 WebDAV 在公网上等于一个免密网盘。
-
-### 具体行为（很重要）
-
-- **启动时不会因为这条规则拒绝配置**：`config.Load` 只做 `Normalize`，不做 `Validate`。也就是说，磁盘上已有的匿名 WebDAV 规则在升级后会**照旧继续提供服务**，直到你下一次保存任何配置。
-- **写入时会被拒绝**：之后任何一次配置保存（改规则、开关模块、改设置、计划任务改配置……）只要配置里还带着匿名 WebDAV 规则，就会失败并返回上面的错误信息，改动不会落盘。
-- 因此这条校验挡的是「新的/被改动的配置」，**不是运行时的兜底**。如果你现在的规则是匿名 WebDAV，请主动去加认证，不要等它报错。
-
-### 迁移步骤（3 步）
-
-1. 打开「Web 服务」页，编辑目标 webdav 规则；
-2. 二选一（也可都配）：
-   - **BasicAuth**：勾选「启用 Basic 认证」，至少添加一个用户名 + 密码（保存时会做 argon2id 哈希）；
-   - **IP 白名单**：把「访问控制」模式设为 `allow`，在 IP 列表里填允许的网段，例如 `192.168.1.0/24`、`10.0.0.0/8`、`100.64.0.0/10`（Tailscale）、`::1`、`127.0.0.1`；
-3. 保存。若保存成功但你还想确认「真的挡住了」，用手机流量 / 外网主机访问该规则的地址，应当看到 401（BasicAuth）或 403（白名单）。
-
-### 常见坑
-
-| 现象 | 原因 |
-| --- | --- |
-| 配了白名单仍报错 | 模式写成了 `deny`；deny 不是白名单，必须选 `allow` |
-| 勾了 BasicAuth 仍报错 | `enable` 没勾上，或者用户列表是空的 |
-| 保存成功但外网仍能访问 | 白名单里填了过宽的网段（如 `0.0.0.0/0`、`::/0`），等于没限制 |
-| 反代到 WebDAV，但规则认证没生效 | 认证配在**被反代的规则**上没用——要配在**对外那条规则**上 |
-| 只想临时关掉这个站点 | 直接删除该规则，或给它配 `allow + 127.0.0.1`；校验只看声明，不看你是否真会访问 |
-
----
-
-## 9. 附：一句话版本
-
-> 管理面进隧道（或反代 + TLS + BasicAuth + 白名单 + adminProtect）；只开必要路由；WebDAV 必须认证；端口转发配 ACL 与并发上限；反代配速率与体积上限；WAF 先 LogOnly 再 block；证书先 staging 再正式；上线后按 P0 → P1 → P2 逐条验证，**没验证过的就当它不存在**。
+> 管理面进隧道（或反代 + TLS + BasicAuth + 白名单 + adminProtect）；只开必要路由；端口转发配 ACL 与并发上限；反代配速率与体积上限；WAF 先 LogOnly 再 block；证书先 staging 再正式；上线后按 P0 → P1 → P2 逐条验证，**没验证过的就当它不存在**。

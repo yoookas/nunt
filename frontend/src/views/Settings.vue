@@ -662,7 +662,7 @@ async function onImportFile(event) {
   }
   Modal.confirm({
     title: '导入配置',
-    content: '导入会覆盖当前的系统、Web、转发、动态域名、证书、存储、WAF、任务与通知配置，确定继续吗？',
+    content: '导入会覆盖当前的系统、Web、转发、动态域名、证书、存储与 WAF 配置，确定继续吗？',
     okText: '导入',
     cancelText: '取消',
     okButtonProps: { status: 'danger' },

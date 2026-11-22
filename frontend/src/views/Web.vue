@@ -8,7 +8,6 @@ const TYPE_OPTIONS = [
   { value: 'proxy', label: '反向代理' },
   { value: 'redirect', label: '重定向' },
   { value: 'static', label: '静态托管' },
-  { value: 'webdav', label: 'WebDAV' },
 ]
 
 const TYPE_LABEL = TYPE_OPTIONS.reduce((out, item) => {
@@ -20,7 +19,6 @@ const TYPE_COLOR = {
   proxy: 'arcoblue',
   redirect: 'orange',
   static: 'green',
-  webdav: 'cyan',
 }
 
 const TLS_OPTIONS = [
@@ -304,13 +302,6 @@ function blankForm() {
     staticListing: false,
     staticSPA: false,
     staticCache: 0,
-    filesMountId: '',
-    filesRoot: '/',
-    filesReadOnly: false,
-    filesUpload: false,
-    filesDelete: false,
-    filesMkdir: false,
-    filesRename: false,
   }
 }
 
@@ -391,13 +382,6 @@ function openEdit(rule) {
     staticListing: !!stat.listing,
     staticSPA: !!stat.spa,
     staticCache: num(stat.cacheSeconds, 0),
-    filesMountId: files.mountId || '',
-    filesRoot: files.root || '/',
-    filesReadOnly: !!files.readOnly,
-    filesUpload: !!files.allowUpload,
-    filesDelete: !!files.allowDelete,
-    filesMkdir: !!files.allowMkdir,
-    filesRename: !!files.allowRename,
   })
   formVisible.value = true
 }
@@ -437,12 +421,6 @@ async function saveRule() {
   if (type === 'static') {
     if (!form.staticMountId.trim() && !form.staticRoot.trim()) {
       Message.warning('静态托管规则必须填写存储挂载或本地目录')
-      return
-    }
-  }
-  if (type === 'webdav') {
-    if (!form.filesMountId.trim() && !form.filesRoot.trim()) {
-      Message.warning('文件服务规则必须填写存储挂载或根目录')
       return
     }
   }
@@ -538,16 +516,6 @@ async function saveRule() {
       listing: !!form.staticListing,
       spa: !!form.staticSPA,
       cacheSeconds: num(form.staticCache, 0),
-    }
-  } else {
-    payload.files = {
-      mountId: form.filesMountId.trim(),
-      root: form.filesRoot.trim() || '/',
-      readOnly: !!form.filesReadOnly,
-      allowUpload: !!form.filesUpload,
-      allowDelete: !!form.filesDelete,
-      allowMkdir: !!form.filesMkdir,
-      allowRename: !!form.filesRename,
     }
   }
 
@@ -966,46 +934,6 @@ onMounted(() => {
             <a-form-item label="单页应用模式">
               <a-switch v-model="form.staticSPA" />
               <div class="hint">找不到文件时回退到 index.html</div>
-            </a-form-item>
-          </div>
-        </template>
-
-        <template v-else>
-          <div class="section-title">WebDAV</div>
-          <div class="form-grid">
-            <a-form-item label="存储挂载">
-              <a-select
-                v-model="form.filesMountId"
-                :options="mountOptions"
-                allow-create
-                allow-search
-                placeholder="选择存储挂载"
-              />
-            </a-form-item>
-            <a-form-item label="根目录">
-              <a-input v-model="form.filesRoot" placeholder="/" allow-clear />
-              <div class="hint">未选择挂载时使用该目录</div>
-            </a-form-item>
-            <a-form-item label="只读">
-              <a-switch v-model="form.filesReadOnly" />
-              <div class="hint">只读会禁止所有写操作</div>
-            </a-form-item>
-            <a-form-item label="上传">
-              <a-switch v-model="form.filesUpload" />
-            </a-form-item>
-            <a-form-item label="删除">
-              <a-switch v-model="form.filesDelete" />
-            </a-form-item>
-            <a-form-item label="新建目录">
-              <a-switch v-model="form.filesMkdir" />
-            </a-form-item>
-            <a-form-item label="重命名">
-              <a-switch v-model="form.filesRename" />
-            </a-form-item>
-            <a-form-item class="span-2">
-              <div class="notice">
-                WebDAV 必须配置 BasicAuth 或 IP 白名单，否则运行时会拒绝所有请求（403）。
-              </div>
             </a-form-item>
           </div>
         </template>

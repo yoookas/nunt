@@ -9,8 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/nunt/nunt/internal/model"
 )
 
 // Messages shown to a visitor whose request was refused. The user facing text
@@ -18,10 +16,6 @@ import (
 const (
 	rateLimitMessage = "请求过于频繁，请稍后重试"
 	bodyLimitMessage = "请求体过大"
-	// fileGuardMessage answers a file service that carries no access control at
-	// all. The configuration layer rejects such a rule as well; this is the
-	// depth in defence for a configuration that reached the runtime anyway.
-	fileGuardMessage = "该文件服务未配置任何访问控制，已拒绝"
 )
 
 // Housekeeping of the request rate limiter. Buckets are swept lazily while a
@@ -265,37 +259,4 @@ func (w *Web) noteBodyRejected(r *rule, req *http.Request, limit int64) {
 	w.countersMu.Unlock()
 	w.logger().Warn("web: request body rejected",
 		"rule", r.name, "method", req.Method, "path", req.URL.Path, "limit", limit)
-}
-
-// ---------------------------------------------------------------------------
-// file service guard
-// ---------------------------------------------------------------------------
-
-// webDAVUnprotected reports whether a WebDAV rule is reachable without
-// any credential or address restriction. Reading and writing the mounted
-// storage must never be anonymous, so such a rule is refused even when it
-// reached the runtime without passing the configuration check.
-func (r *rule) webDAVUnprotected() bool {
-	if r.spec.Type != model.WebTypeWebDAV {
-		return false
-	}
-	if basicAuthEnabled(r.spec.BasicAuth) {
-		return false
-	}
-	if r.spec.Access.Mode == model.AccessAllow && len(r.spec.Access.IPs) > 0 {
-		return false
-	}
-	return true
-}
-
-// basicAuthEnabled reports whether a rule carries a usable basic auth list.
-func basicAuthEnabled(auth *model.BasicAuth) bool {
-	return auth != nil && auth.Enable && len(auth.Users) > 0
-}
-
-// warnUnprotectedFileService records the refusal of an unguarded file service.
-func (w *Web) warnUnprotectedFileService(r *rule, req *http.Request) {
-	w.logger().Warn("web: file service without any access control refused",
-		"rule", r.name, "type", r.spec.Type, "client", clientIPString(req, w.trustProxy(w.cfg)),
-		"path", req.URL.Path)
 }

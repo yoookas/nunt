@@ -14,7 +14,6 @@ import (
 	"github.com/nunt/nunt/internal/dnsprov"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
-	"github.com/nunt/nunt/internal/notify"
 	"github.com/nunt/nunt/internal/rest"
 )
 
@@ -340,7 +339,6 @@ func (d *DDNS) runRule(ctx context.Context, ruleID string) {
 	if err != nil {
 		message := "credentials: " + err.Error()
 		st.record(false, message)
-		d.deps.Notify.Emit(notify.EventDDNSError, rule.Name, message, map[string]any{"rule": rule.Name})
 		return
 	}
 
@@ -348,7 +346,6 @@ func (d *DDNS) runRule(ctx context.Context, ruleID string) {
 	if err != nil {
 		message := "provider: " + err.Error()
 		st.record(false, message)
-		d.deps.Notify.Emit(notify.EventDDNSError, rule.Name, message, map[string]any{"rule": rule.Name})
 		return
 	}
 
@@ -415,12 +412,10 @@ func (d *DDNS) runRule(ctx context.Context, ruleID string) {
 	if failed {
 		summary = strings.Join(messages, "; ")
 		st.record(false, summary)
-		d.deps.Notify.Emit(notify.EventDDNSError, rule.Name, summary, map[string]any{"rule": rule.Name})
 		return
 	}
 	if len(changed) > 0 {
 		summary = "updated " + strings.Join(changed, ", ")
-		d.deps.Notify.Emit(notify.EventDDNSUpdate, rule.Name, summary, map[string]any{"rule": rule.Name})
 	}
 	st.record(true, summary)
 }

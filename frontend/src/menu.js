@@ -7,8 +7,6 @@ export const menu = [
   { name: 'ddns', path: '/ddns', title: '动态域名', icon: 'IconCloud' },
   { name: 'acme', path: '/acme', title: '证书', icon: 'IconSafe' },
   { name: 'waf', path: '/waf', title: 'WAF', icon: 'IconFire' },
-  { name: 'task', path: '/task', title: '计划任务', icon: 'IconSchedule' },
-  { name: 'notify', path: '/notify', title: '通知', icon: 'IconNotification' },
   { name: 'storage', path: '/storage', title: '存储', icon: 'IconStorage' },
   { name: 'logs', path: '/logs', title: '日志', icon: 'IconFile' },
   { name: 'settings', path: '/settings', title: '设置', icon: 'IconSettings' },

@@ -17,7 +17,6 @@ const (
 	WebTypeProxy    = "proxy"
 	WebTypeRedirect = "redirect"
 	WebTypeStatic   = "static"
-	WebTypeWebDAV   = "webdav"
 )
 
 // TLS modes for a web rule.
@@ -46,8 +45,6 @@ type Config struct {
 	ACME    ACMEConfig    `json:"acme"`
 	Storage StorageConfig `json:"storage"`
 	WAF     WAFConfig     `json:"waf"`
-	Tasks   TaskConfig    `json:"tasks"`
-	Notify  NotifyConfig  `json:"notify"`
 }
 
 // SystemConfig holds global options.
@@ -120,7 +117,6 @@ type WebRule struct {
 	Proxy     *ProxyTarget `json:"proxy,omitempty"`
 	Redirect  *RedirectTgt `json:"redirect,omitempty"`
 	Static    *StaticTgt   `json:"static,omitempty"`
-	Files     *FilesTgt    `json:"files,omitempty"`
 	Remark    string       `json:"remark,omitempty"`
 	CreatedAt time.Time    `json:"createdAt"`
 	UpdatedAt time.Time    `json:"updatedAt"`
@@ -192,17 +188,6 @@ type StaticTgt struct {
 	Listing      bool     `json:"listing"`
 	SPA          bool     `json:"spa"`
 	CacheSeconds int      `json:"cacheSeconds,omitempty"`
-}
-
-// FilesTgt configures the storage and the permissions of a WebDAV rule.
-type FilesTgt struct {
-	MountID     string `json:"mountId,omitempty"`
-	Root        string `json:"root,omitempty"`
-	ReadOnly    bool   `json:"readOnly"`
-	AllowUpload bool   `json:"allowUpload"`
-	AllowDelete bool   `json:"allowDelete"`
-	AllowMkdir  bool   `json:"allowMkdir"`
-	AllowRename bool   `json:"allowRename"`
 }
 
 // ---------------------------------------------------------------------------
@@ -379,61 +364,6 @@ type WAFConfig struct {
 // ---------------------------------------------------------------------------
 // Scheduled tasks & notifications
 // ---------------------------------------------------------------------------
-
-// TaskConfig is the scheduler configuration.
-type TaskConfig struct {
-	Items []Task `json:"items"`
-	// AllowShell must be enabled explicitly before a "shell.exec" task action
-	// may run; every other action type works without it.
-	AllowShell bool `json:"allowShell"`
-}
-
-// Task is one cron scheduled job.
-type Task struct {
-	ID      string       `json:"id"`
-	Name    string       `json:"name"`
-	Enable  bool         `json:"enable"`
-	Cron    string       `json:"cron"`
-	Actions []TaskAction `json:"actions"`
-	Remark  string       `json:"remark,omitempty"`
-}
-
-// Task action types.
-const (
-	ActionModuleToggle = "module.toggle"
-	ActionRuleToggle   = "rule.toggle"
-	ActionHTTP         = "http.request"
-	ActionShell        = "shell.exec"
-	ActionNotify       = "notify.webhook"
-)
-
-// TaskAction is a single step of a task.
-type TaskAction struct {
-	Type    string            `json:"type"`
-	Target  string            `json:"target,omitempty"`
-	Value   string            `json:"value,omitempty"`
-	URL     string            `json:"url,omitempty"`
-	Method  string            `json:"method,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Body    string            `json:"body,omitempty"`
-	Command string            `json:"command,omitempty"`
-}
-
-// NotifyConfig holds outbound notification targets.
-type NotifyConfig struct {
-	Webhooks []Webhook `json:"webhooks,omitempty"`
-}
-
-// Webhook is a generic notification endpoint (JSON POST).
-type Webhook struct {
-	ID      string            `json:"id"`
-	Name    string            `json:"name"`
-	Enable  bool              `json:"enable"`
-	URL     string            `json:"url"`
-	Method  string            `json:"method,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Events  []string          `json:"events,omitempty"`
-}
 
 // NewID returns a short random identifier.
 func NewID() string {

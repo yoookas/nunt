@@ -135,19 +135,14 @@ func compileRule(r model.WebRule, index int) (*rule, error) {
 // it, so a broken rule cannot take a whole listener down.
 func checkRuleStorage(r model.WebRule) error {
 	switch r.Type {
-	case model.WebTypeStatic, model.WebTypeWebDAV:
+	case model.WebTypeStatic:
 	default:
 		return nil
 	}
-	var mountID, root string
-	switch {
-	case r.Static != nil:
-		mountID, root = strings.TrimSpace(r.Static.MountID), strings.TrimSpace(r.Static.Root)
-	case r.Files != nil:
-		mountID, root = strings.TrimSpace(r.Files.MountID), strings.TrimSpace(r.Files.Root)
-	default:
+	if r.Static == nil {
 		return errors.New("storage settings are required")
 	}
+	mountID, root := strings.TrimSpace(r.Static.MountID), strings.TrimSpace(r.Static.Root)
 	if mountID == "" && root == "" {
 		return errors.New("a mount or a root directory is required")
 	}
@@ -262,14 +257,6 @@ func (rt *router) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		http.Error(rec, "route is not available", http.StatusServiceUnavailable)
 		return
 	}
-	// A file service that nobody guards must not be served at all. This is the
-	// runtime half of the configuration check; both refuse the same rules.
-	if r.webDAVUnprotected() {
-		rt.web.warnUnprotectedFileService(r, req)
-		http.Error(rec, fileGuardMessage, http.StatusForbidden)
-		return
-	}
-
 	ctx := withRule(req.Context(), r)
 	req = req.WithContext(ctx)
 

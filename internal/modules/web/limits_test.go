@@ -21,7 +21,6 @@ import (
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/mounts"
 	"github.com/nunt/nunt/internal/secret"
-	"github.com/nunt/nunt/internal/security"
 )
 
 // ---------------------------------------------------------------------------
@@ -291,112 +290,6 @@ func TestModuleProxyBodyLimit(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// WebDAV storage
-// ---------------------------------------------------------------------------
-
-// serveRule pushes one request through the router of a hand built rule.
-func serveRule(t *testing.T, raw model.WebRule, mutate func(*http.Request)) *httptest.ResponseRecorder {
-	t.Helper()
-	raw.Files = &model.FilesTgt{Root: t.TempDir()}
-	compiled, err := compileRule(raw, 0)
-	if err != nil {
-		t.Fatalf("compile %s: %v", raw.Type, err)
-	}
-	compiled.site = &webSite{handler: http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
-		rw.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(rw, "served")
-	})}
-	w := &Web{}
-	rt := newRouter(w, ":8080")
-	rt.setMatcher(newMatcher(":8080", []*rule{compiled}))
-
-	req := httptest.NewRequest(http.MethodGet, "http://example.com/files/", nil)
-	req.RemoteAddr = "127.0.0.1:45678"
-	if mutate != nil {
-		mutate(req)
-	}
-	rec := httptest.NewRecorder()
-	rt.ServeHTTP(rec, req)
-	return rec
-}
-
-func TestRouterRefusesUnguardedWebDAV(t *testing.T) {
-	for _, typ := range []string{model.WebTypeWebDAV} {
-		raw := mkRule(t, "files", "example.com", "/files", 0, typ)
-		rec := serveRule(t, raw, nil)
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("%s without access control status = %d, want 403", typ, rec.Code)
-		}
-		if !strings.Contains(rec.Body.String(), "该文件服务未配置任何访问控制，已拒绝") {
-			t.Fatalf("%s refusal body = %q", typ, rec.Body.String())
-		}
-	}
-
-	// An allow list that only denies addresses is not an access control.
-	denyList := mkRule(t, "files", "example.com", "/files", 0, model.WebTypeWebDAV)
-	denyList.Access = model.Access{Mode: model.AccessDeny, IPs: []string{"203.0.113.0/24"}}
-	if rec := serveRule(t, denyList, nil); rec.Code != http.StatusForbidden {
-		t.Fatalf("a deny list must not count as an access control: %d", rec.Code)
-	}
-	// Neither is an allow list without addresses.
-	emptyAllow := mkRule(t, "files", "example.com", "/files", 0, model.WebTypeWebDAV)
-	emptyAllow.Access = model.Access{Mode: model.AccessAllow}
-	if rec := serveRule(t, emptyAllow, nil); rec.Code != http.StatusForbidden {
-		t.Fatalf("an empty allow list must not count as an access control: %d", rec.Code)
-	}
-
-	// Other rule types are untouched by the guard.
-	static := mkRule(t, "static", "example.com", "/files", 0, model.WebTypeStatic)
-	static.Static = &model.StaticTgt{Root: t.TempDir()}
-	if rec := serveRule(t, static, nil); rec.Code != http.StatusOK {
-		t.Fatalf("a static rule must not need authentication: %d", rec.Code)
-	}
-}
-
-func TestRouterServesGuardedWebDAV(t *testing.T) {
-	hash, err := security.HashPassword("s3cret")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Basic authentication lets the request through; the guard must not answer
-	// 403 in front of it.
-	guarded := mkRule(t, "files", "example.com", "/files", 0, model.WebTypeWebDAV)
-	guarded.BasicAuth = &model.BasicAuth{Enable: true, Users: []model.BasicAuthUser{{Username: "alice", Password: hash}}}
-	anonymous := serveRule(t, guarded, nil)
-	if anonymous.Code != http.StatusUnauthorized {
-		t.Fatalf("anonymous status = %d, want 401 from the basic auth handler", anonymous.Code)
-	}
-	authenticated := serveRule(t, guarded, func(req *http.Request) { req.SetBasicAuth("alice", "s3cret") })
-	if authenticated.Code != http.StatusOK {
-		t.Fatalf("authenticated status = %d, want 200", authenticated.Code)
-	}
-
-	// An allow list of exactly this client is an accepted access control.
-	allowed := mkRule(t, "dav", "example.com", "/files", 0, model.WebTypeWebDAV)
-	allowed.Access = model.Access{Mode: model.AccessAllow, IPs: []string{"127.0.0.1"}}
-	if rec := serveRule(t, allowed, nil); rec.Code != http.StatusOK {
-		t.Fatalf("allow listed client status = %d, want 200", rec.Code)
-	}
-	// A client outside the allow list is rejected by the address filter.
-	outsider := serveRule(t, allowed, func(req *http.Request) { req.RemoteAddr = "198.51.100.9:45678" })
-	if outsider.Code != http.StatusForbidden {
-		t.Fatalf("a client outside the allow list status = %d, want 403", outsider.Code)
-	}
-
-	// Basic authentication without a user is not an access control.
-	empty := mkRule(t, "files", "example.com", "/files", 0, model.WebTypeWebDAV)
-	empty.BasicAuth = &model.BasicAuth{Enable: true}
-	compiled, err := compileRule(empty, 0)
-	if err == nil {
-		t.Fatal("basic auth without users must be rejected at compile time")
-	}
-	if compiled != nil && !compiled.webDAVUnprotected() {
-		t.Fatal("basic auth without users must not count as an access control")
-	}
-}
-
-// ---------------------------------------------------------------------------
 // rule toggle
 // ---------------------------------------------------------------------------
 
@@ -410,8 +303,8 @@ func TestToggleReportsValidationFailure(t *testing.T) {
 		Version: config.CurrentVersion,
 		Users:   []model.User{{ID: "u1", Username: "admin", Role: "admin", Enabled: true}},
 		Web: model.WebConfig{Rules: []model.WebRule{{
-			ID: "rule-files", Name: "files", Enable: false, Type: model.WebTypeWebDAV,
-			Listen: []string{":8080"}, Path: "/files", Files: &model.FilesTgt{Root: t.TempDir()},
+			ID: "rule-broken", Name: "broken", Enable: false, Type: model.WebTypeStatic,
+			Listen: []string{":8080"}, Path: "/broken",
 		}}},
 	}
 	data, err := json.Marshal(seed)
@@ -439,7 +332,7 @@ func TestToggleReportsValidationFailure(t *testing.T) {
 		return rec
 	}
 
-	rec := toggle("rule-files")
+	rec := toggle("rule-broken")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("toggling a rule that fails validation status = %d (%s), want 400", rec.Code, rec.Body.String())
 	}

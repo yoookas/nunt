@@ -9,18 +9,11 @@ import (
 
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/netutil"
-	"github.com/nunt/nunt/internal/notify"
 	"github.com/nunt/nunt/internal/secret"
 )
 
 // source marks every certificate stored by this module.
 const source = "acme"
-
-// notifyAliases keep the notify event names in one place.
-const (
-	notifyCertIssued = notify.EventCertIssued
-	notifyCertFailed = notify.EventCertFailed
-)
 
 // Challenge types as stored in model.CertJob.Challenge. The configuration
 // normaliser of internal/config writes the short form and the ACME server uses

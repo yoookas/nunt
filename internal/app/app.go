@@ -19,7 +19,6 @@ import (
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/mounts"
-	"github.com/nunt/nunt/internal/notify"
 	"github.com/nunt/nunt/internal/secret"
 	"github.com/nunt/nunt/internal/security"
 	"github.com/nunt/nunt/internal/store"
@@ -27,7 +26,6 @@ import (
 	"github.com/nunt/nunt/internal/modules/acme"
 	"github.com/nunt/nunt/internal/modules/ddns"
 	"github.com/nunt/nunt/internal/modules/forward"
-	"github.com/nunt/nunt/internal/modules/task"
 	"github.com/nunt/nunt/internal/modules/waf"
 	"github.com/nunt/nunt/internal/modules/web"
 )
@@ -48,7 +46,6 @@ type App struct {
 	box         *secret.Box
 	certs       *certs.Store
 	mounts      *mounts.Manager
-	notify      *notify.Service
 	registry    *module.Registry
 	sessions    *security.SessionStore
 	api         *api.Server
@@ -107,7 +104,6 @@ func New(opts Options) (*App, error) {
 	}
 	a.certs = certStore
 	a.mounts = mounts.New(cfg, box, logger.With("component", "mounts"))
-	a.notify = notify.New(cfg, logger.With("component", "notify"))
 	a.sessions = security.NewSessionStore()
 
 	a.registry = module.NewRegistry()
@@ -116,7 +112,6 @@ func New(opts Options) (*App, error) {
 		Log:      hub,
 		Certs:    certStore,
 		Mounts:   a.mounts,
-		Notify:   a.notify,
 		Box:      box,
 		DataDir:  opts.DataDir,
 		Registry: a.registry,
@@ -129,7 +124,6 @@ func New(opts Options) (*App, error) {
 	a.registry.MustRegister(web.New(deps))
 	a.registry.MustRegister(forward.New(deps))
 	a.registry.MustRegister(ddns.New(deps))
-	a.registry.MustRegister(task.New(deps))
 
 	adminWAF := func(next http.Handler) http.Handler {
 		mod, ok := a.registry.Get("waf")
@@ -149,7 +143,6 @@ func New(opts Options) (*App, error) {
 		Registry: a.registry,
 		Certs:    certStore,
 		Mounts:   a.mounts,
-		Notify:   a.notify,
 		Box:      box,
 		Sessions: a.sessions,
 		DataDir:  opts.DataDir,
@@ -236,7 +229,6 @@ func (a *App) Shutdown() {
 		}
 	}
 	a.registry.StopAll(ctx)
-	a.notify.Close()
 	a.sessions.Close()
 	a.log.Close()
 }

@@ -53,11 +53,9 @@ func (w *Web) reuseSite(r *rule) {
 	r.site = cached.site
 }
 
-// storeSite remembers the handler of a rule for the next reconfiguration. A
-// site that carries its own closer is never cached: the closer is released
-// when the rule is replaced, so the handler must not be reused.
+// storeSite remembers the handler of a rule for the next reconfiguration.
 func (w *Web) storeSite(r *rule) {
-	if r.site == nil || r.site.closer != nil {
+	if r.site == nil {
 		return
 	}
 	w.siteCache[r.id] = cachedSite{key: r.siteKey, site: r.site}
@@ -84,101 +82,22 @@ type cachedSite struct {
 }
 
 // webSite bundles the handler of a rule with the resources that have to be
-// released when the rule disappears from the configuration. A site that owns
-// storage (a file browser or WebDAV root) releases it only after the requests
-// that are still running have finished.
+// released when the service stops. The storage of a static rule stays open
+// after the rule is replaced because a request that is already running may
+// still read from it.
 type webSite struct {
 	handler   http.Handler
-	closer    func() error
 	upstreams []string
 	// static holds the lazily opened file system of a static rule.
 	static *staticFS
-
-	mu       sync.Mutex
-	inflight int
-	closed   bool
-	released bool
 }
 
-// guard keeps requests from running after the site was closed.
-func (s *webSite) guard(h http.Handler) http.Handler {
-	if s.closer == nil {
-		return h
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.mu.Lock()
-		if s.closed {
-			s.mu.Unlock()
-			http.Error(w, "route is not available", http.StatusServiceUnavailable)
-			return
-		}
-		s.inflight++
-		s.mu.Unlock()
-		defer func() {
-			s.mu.Lock()
-			s.inflight--
-			done := s.closed && s.inflight == 0
-			s.mu.Unlock()
-			if done {
-				s.release()
-			}
-		}()
-		h.ServeHTTP(w, r)
-	})
-}
-
-// release gives up the owned resources exactly once.
-func (s *webSite) release() {
-	s.mu.Lock()
-	if s.released {
-		s.mu.Unlock()
-		return
-	}
-	s.released = true
-	closer, static := s.closer, s.static
-	s.mu.Unlock()
-	if static != nil {
-		static.close()
-	}
-	if closer != nil {
-		_ = closer()
-	}
-}
-
-// close releases the resources of a site, waiting for in flight requests when
-// the site owns storage.
+// close releases the resources of a site.
 func (s *webSite) close() {
-	if s == nil {
+	if s == nil || s.static == nil {
 		return
 	}
-	s.detach()
-}
-
-// detach marks the site as closed. A site that owns storage keeps it open until
-// the requests that are already running have finished reading from it.
-func (s *webSite) detach() {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	s.closed = true
-	done := s.inflight == 0
-	s.mu.Unlock()
-	if done {
-		s.release()
-	}
-}
-
-// storageSite wraps a handler that owns a storage handle. Such a site is never
-// cached (storeSite skips closers): the handle belongs to one rule build and is
-// released by detach once the requests that are running have finished.
-func (w *Web) storageSite(handler http.Handler) *webSite {
-	ws := &webSite{handler: handler}
-	if closer, ok := handler.(io.Closer); ok {
-		ws.closer = closer.Close
-		ws.handler = ws.guard(handler)
-	}
-	return ws
+	s.static.close()
 }
 
 // buildSite creates the business handler of a rule.
@@ -190,12 +109,6 @@ func (w *Web) buildSite(r *rule, cfg *model.Config) (*webSite, error) {
 		return w.redirectSite(r)
 	case model.WebTypeStatic:
 		return w.staticSite(r)
-	case model.WebTypeWebDAV:
-		handler, err := w.dav.Site(r.spec)
-		if err != nil {
-			return nil, fmt.Errorf("rule %q: %w", r.name, err)
-		}
-		return w.storageSite(handler), nil
 	default:
 		return nil, fmt.Errorf("rule %q: unsupported type %q", r.name, r.spec.Type)
 	}

@@ -17,8 +17,8 @@ Set-Location D:\Desktop\nunt; go build ./...
 并行开发期间其他包可能暂时编译不过，**只需要保证自己负责的包编译通过**；最后统一由主开发者执行 `go build ./...`。
 
 已批准依赖（不要引入其它第三方依赖）：
-`golang.org/x/crypto`（argon2/acme）、`golang.org/x/net`（webdav、http2）、
-`github.com/corazawaf/coraza/v3`、`github.com/corazawaf/coraza-coreruleset/v4`、`github.com/robfig/cron/v3`。
+`golang.org/x/crypto`（argon2/acme）、`golang.org/x/net`（http2）、
+`github.com/corazawaf/coraza/v3`、`github.com/corazawaf/coraza-coreruleset/v4`。
 需要新依赖时先在结果里说明，不要直接 `go get`。
 
 ## 2. 代码风格
@@ -45,7 +45,6 @@ Set-Location D:\Desktop\nunt; go build ./...
 | `internal/vfs` | 安全文件系统 | `FS` 接口、`OpenLocal(dir,label,readOnly)`、`Clean`、`Entry` |
 | `internal/mounts` | 存储挂载 | `Manager.Get(id) (vfs.FS, model.Mount, error)`、`Manager.Local(root,label,ro)`、`Find/List/Test` |
 | `internal/certs` | 证书仓库 | `Store.GetCertificate`、`Add`、`List`、`Delete`、`Has`、`TLSConfig()` |
-| `internal/notify` | 通知 | `Service.Emit(event, title, message, fields)`，事件名见包内常量 |
 | `internal/security` | 安全原语 | `HashPassword/VerifyPassword`、`RandomToken`、`Limiter`、`RateLimiter` |
 | `internal/dnsprov` | DNS 提供商 | `Registry.New(id, creds)`、`Provider.Set/Delete`、`Default()` |
 | `internal/httpc.PublicIP` | 获取公网 IP | `PublicIP(ctx, "4"|"6", extraURLs)` |
@@ -88,11 +87,11 @@ Lucky v1.10.8 源码（Go module 缓存里已下载好）：
 
 | 负责人 | 目录 | 内容 |
 | --- | --- | --- |
-| A | `internal/modules/web` | 监听器管理、Host/Path 路由、反向代理（WebSocket、负载均衡、路径重写）、重定向、静态托管（含目录列表/SPA）、访问控制、BasicAuth、TLS（自动证书/指定证书/HSTS）、访问日志缓冲。调用 `webdav.Service.Site`、`waf.WAF.Middleware` |
-| B | `internal/modules/forward`、`internal/modules/task` | TCP/UDP 端口转发（连接计数、访问控制、日志）、cron 计划任务（模块开关、规则开关、HTTP 请求、webhook、shell 需配置显式开启） |
+| A | `internal/modules/web` | 监听器管理、Host/Path 路由、反向代理（WebSocket、负载均衡、路径重写）、重定向、静态托管（含目录列表/SPA）、访问控制、BasicAuth、TLS（自动证书/指定证书/HSTS）、访问日志缓冲。调用 `waf.WAF.Middleware` |
+| B | `internal/modules/forward` | TCP/UDP 端口转发（连接计数、访问控制、日志） |
 | C | `internal/modules/ddns`、`internal/dnsprov/*` | DDNS 规则调度、公网 IP 探测（网卡/URL/静态）、自定义回调、各家 DNS 提供商 |
 | D | `internal/modules/acme` | ACME 账号与订单（`golang.org/x/crypto/acme`）、http-01 / dns-01、证书入库、续期循环 |
-| E | `internal/modules/webdav`、`internal/mounts/webdav.go` | WebDAV 服务端（基于 `golang.org/x/net/webdav` + vfs 适配器）、远程 WebDAV 挂载后端 |
+| E | `internal/mounts/webdav.go` | 远程 WebDAV 挂载后端（供静态托管的存储使用） |
 | F | `internal/modules/waf` | Coraza v3 引擎、CRS 内置规则、自定义规则、按规则开关、拦截统计与日志、管理接口 |
 | G/H | `frontend/` 与 `internal/webui/assets` | Vue 3 + Arco Design 管理界面（构建产物提交） |
 
@@ -127,7 +126,7 @@ frontend/
     ├── menu.js             # 侧栏导航（路由名 + Arco 图标名）
     ├── format.js           # 字节/时长/时间格式化
     ├── layout/AppLayout.vue
-    └── views/*.vue         # 11 个页面 + Login + PasswordChange
+    └── views/*.vue         # 9 个页面 + Login + PasswordChange
 ```
 
 ### 7.3 页面契约
@@ -147,4 +146,4 @@ cd frontend && npm run dev        # 开发服务器，API 代理到 127.0.0.1:31
 ```
 
 `make web` 等价于前两条命令。构建后用 `npm run smoke --prefix frontend` 跑 jsdom 冒烟：
-它加载**真实构建产物**，用假 API 把 12 个路由逐个挂载，任何未捕获异常都会让命令非零退出。
+它加载**真实构建产物**，用假 API 把 10 个路由逐个挂载，任何未捕获异常都会让命令非零退出。

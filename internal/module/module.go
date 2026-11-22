@@ -17,7 +17,6 @@ import (
 	"github.com/nunt/nunt/internal/logging"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/mounts"
-	"github.com/nunt/nunt/internal/notify"
 	"github.com/nunt/nunt/internal/rest"
 	"github.com/nunt/nunt/internal/secret"
 )
@@ -98,7 +97,6 @@ type Deps struct {
 	Log      *logging.Hub
 	Certs    *certs.Store
 	Mounts   *mounts.Manager
-	Notify   *notify.Service
 	Box      *secret.Box
 	DataDir  string
 	Registry *Registry

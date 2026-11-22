@@ -160,8 +160,6 @@ const routes = [
   ['/ddns', '动态域名'],
   ['/acme', '证书'],
   ['/waf', 'WAF'],
-  ['/task', '计划任务'],
-  ['/notify', '通知'],
   ['/storage', '存储'],
   ['/logs', '日志'],
   ['/settings', '设置'],

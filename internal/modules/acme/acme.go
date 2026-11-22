@@ -45,9 +45,6 @@ const (
 	// maxConcurrentIssues bounds how many orders run at the same time, so a
 	// batch of due certificates cannot hammer the CA.
 	maxConcurrentIssues = 2
-	// failureNotifyInterval is the minimum gap between two failure
-	// notifications for the same job.
-	failureNotifyInterval = 24 * time.Hour
 	// checkInterval is how often the renewal loop wakes up.
 	checkInterval = 12 * time.Hour
 	// initialDelay staggers the first check after Start.
@@ -105,9 +102,6 @@ type ACME struct {
 type attempt struct {
 	count int
 	next  time.Time
-	// notified is when the failure was last reported, so a job that keeps
-	// failing does not send a notification on every retry.
-	notified time.Time
 }
 
 // flightCall is one in-flight issuance shared by concurrent callers.
@@ -355,20 +349,12 @@ func (a *ACME) runJob(ctx context.Context, job model.CertJob, automatic bool) {
 	req := newRequest(cfg, job)
 	_, err := a.issue(ctx, req)
 	if err != nil {
-		notify := a.recordFailure(job.ID, err)
-		if notify {
-			a.deps.Notify.Emit(notifyCertFailed, "certificate issuance failed",
-				fmt.Sprintf("%s: %s", jobLabel(job), err),
-				map[string]any{"jobId": job.ID, "domains": job.Domains, "automatic": automatic})
-		}
+		a.recordFailure(job.ID, err)
 		a.log.Error("certificate issuance failed", "job", job.Name, "error", err)
 		a.refreshStats(cfg)
 		return
 	}
 	a.recordSuccess(job.ID)
-	a.deps.Notify.Emit(notifyCertIssued, "certificate issued",
-		fmt.Sprintf("%s: certificate stored", jobLabel(job)),
-		map[string]any{"jobId": job.ID, "domains": job.Domains, "automatic": automatic})
 	a.SetError(nil)
 	a.log.Info("certificate issued", "job", job.Name, "domains", job.Domains)
 	a.refreshStats(cfg)
@@ -389,11 +375,8 @@ func (a *ACME) jobLock(id string) *sync.Mutex {
 	return mu
 }
 
-// recordFailure stores the backoff of a failing job and reports whether the
-// failure should be announced: the first one, and then at most once per
-// failureNotifyInterval, so a permanently broken job does not notify on every
-// retry.
-func (a *ACME) recordFailure(id string, err error) bool {
+// recordFailure stores the backoff of a failing job.
+func (a *ACME) recordFailure(id string, err error) {
 	now := time.Now()
 	a.schedMu.Lock()
 	at := a.attempts[id]
@@ -403,10 +386,6 @@ func (a *ACME) recordFailure(id string, err error) bool {
 	}
 	at.count++
 	at.next = now.Add(jitter(backoff(at.count)))
-	notify := at.notified.IsZero() || now.Sub(at.notified) >= failureNotifyInterval
-	if notify {
-		at.notified = now
-	}
 	delay := time.Until(at.next)
 	a.schedMu.Unlock()
 
@@ -415,7 +394,6 @@ func (a *ACME) recordFailure(id string, err error) bool {
 	a.lastErr = err.Error()
 	a.statMu.Unlock()
 	a.SetDetail(fmt.Sprintf("retrying in %s", delay.Round(time.Minute)))
-	return notify
 }
 
 // acquireIssue takes one of the global issuance slots.
@@ -549,20 +527,12 @@ func (a *ACME) ensureOnce(ctx context.Context, names []string) error {
 	defer a.releaseIssue()
 	_, err := a.issue(ctx, req)
 	if err != nil {
-		notify := a.recordFailure(job.ID, err)
+		a.recordFailure(job.ID, err)
 		a.SetError(fmt.Errorf("issue for %v: %w", names, err))
-		if notify {
-			a.deps.Notify.Emit(notifyCertFailed, "on demand certificate failed",
-				fmt.Sprintf("%s: %s", jobLabel(job), err),
-				map[string]any{"jobId": job.ID, "domains": names})
-		}
 		return err
 	}
 	a.recordSuccess(job.ID)
 	a.SetError(nil)
-	a.deps.Notify.Emit(notifyCertIssued, "certificate issued",
-		fmt.Sprintf("%s: certificate stored", jobLabel(job)),
-		map[string]any{"jobId": job.ID, "domains": names})
 	a.refreshStats(cfg)
 	return nil
 }

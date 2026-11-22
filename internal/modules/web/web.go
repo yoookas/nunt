@@ -21,7 +21,6 @@ import (
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/modules/waf"
-	"github.com/nunt/nunt/internal/modules/webdav"
 	"github.com/nunt/nunt/internal/netutil"
 	"github.com/nunt/nunt/internal/rest"
 )
@@ -35,7 +34,6 @@ type Web struct {
 	deps *module.Deps
 	log  *slog.Logger
 
-	dav *webdav.Service
 	// waf is the firewall instance registered in the module registry; the web
 	// module shares it instead of building a second engine, so the rule level
 	// counters land on the instance the admin API and the WAF page report.
@@ -169,7 +167,6 @@ func New(deps *module.Deps) *Web {
 	w := &Web{
 		deps:       deps,
 		log:        deps.Logger("web"),
-		dav:        webdav.New(deps),
 		waf:        sharedWAF(deps),
 		bindings:   map[string]*listener{},
 		tlsAddrs:   map[string]bool{},
@@ -411,7 +408,7 @@ func (w *Web) apply(ctx context.Context, cfg *model.Config) error {
 		w.reuseSite(r)
 	}
 	w.mu.Lock()
-	dropped := w.forgetSites(keep)
+	w.forgetSites(keep)
 	w.mu.Unlock()
 
 	// Bring the wanted listeners up one by one so that one busy port cannot
@@ -500,13 +497,6 @@ func (w *Web) apply(ctx context.Context, cfg *model.Config) error {
 	w.mu.Unlock()
 	w.SetDetail(fmt.Sprintf("%d listener(s), %d rule(s)", total, len(compiled)))
 
-	// Handlers of removed rules are released without closing their storage:
-	// a request that is already running may still read from it. Stop and
-	// Mounts.Invalidate release the file systems themselves.
-	for _, s := range dropped {
-		s.detach()
-	}
-
 	// The most useful error wins: an unusable rule explains a missing site
 	// better than a listener that could not bind.
 	switch {
@@ -572,15 +562,12 @@ func (w *Web) collectSitesLocked() []*webSite {
 	return out
 }
 
-// releaseSites detaches the sites of rules that are gone. The storage of a
-// static rule stays open because a request that is already being served may
-// still read from it; Mounts.Invalidate and Stop release it instead.
+// releaseSites drops the sites of rules that are gone. The storage of a static
+// rule stays open because a request that is already being served may still read
+// from it; Stop closes it.
 func (w *Web) releaseSites(rules []*rule) {
 	for _, r := range rules {
-		if r.site != nil {
-			r.site.detach()
-			r.site = nil
-		}
+		r.site = nil
 	}
 }
 

@@ -40,8 +40,10 @@ func TestConcurrentUpdatesDoNotLoseChanges(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			if err := store.Update(func(c *model.Config) error {
-				c.Tasks.Items = append(c.Tasks.Items, model.Task{
-					ID: fmt.Sprintf("t-%d", i), Name: "x", Cron: "0 3 * * *", Enable: true,
+				c.Web.Rules = append(c.Web.Rules, model.WebRule{
+					ID: fmt.Sprintf("r-%d", i), Name: "x", Type: model.WebTypeProxy,
+					Listen: []string{":0"},
+					Proxy:  &model.ProxyTarget{Targets: []string{"http://127.0.0.1:8080"}},
 				})
 				return nil
 			}); err != nil {
@@ -50,8 +52,8 @@ func TestConcurrentUpdatesDoNotLoseChanges(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	if got := len(store.Snapshot().Tasks.Items); got != n {
-		t.Fatalf("%d updates produced %d tasks", n, got)
+	if got := len(store.Snapshot().Web.Rules); got != n {
+		t.Fatalf("%d updates produced %d rules", n, got)
 	}
 }
 

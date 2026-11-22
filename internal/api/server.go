@@ -21,7 +21,6 @@ import (
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/mounts"
 	"github.com/nunt/nunt/internal/netutil"
-	"github.com/nunt/nunt/internal/notify"
 	"github.com/nunt/nunt/internal/rest"
 	"github.com/nunt/nunt/internal/secret"
 	"github.com/nunt/nunt/internal/security"
@@ -39,7 +38,6 @@ type Options struct {
 	Registry *module.Registry
 	Certs    *certs.Store
 	Mounts   *mounts.Manager
-	Notify   *notify.Service
 	Box      *secret.Box
 	Sessions *security.SessionStore
 	DataDir  string
@@ -393,7 +391,6 @@ func (s *Server) register() {
 	s.registerSystem()
 	s.registerStorage()
 	s.registerModules()
-	s.registerNotify()
 	s.registerEvents()
 
 	// Every module that exposes REST endpoints mounts them on the same mux so

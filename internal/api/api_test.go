@@ -15,7 +15,6 @@ import (
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/mounts"
-	"github.com/nunt/nunt/internal/notify"
 	"github.com/nunt/nunt/internal/secret"
 	"github.com/nunt/nunt/internal/security"
 )
@@ -67,7 +66,6 @@ func newTestEnv(t *testing.T) *testEnv {
 		Registry: registry,
 		Certs:    certStore,
 		Mounts:   mounts.New(store, box, hub.Logger()),
-		Notify:   notify.New(store, hub.Logger()),
 		Box:      box,
 		Sessions: sessions,
 		DataDir:  dir,

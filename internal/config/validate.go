@@ -159,15 +159,6 @@ func Normalize(c *model.Config) {
 			m.Type = model.MountLocal
 		}
 	}
-	for i := range c.Tasks.Items {
-		t := &c.Tasks.Items[i]
-		if t.ID == "" {
-			t.ID = model.NewID()
-		}
-		if t.Cron == "" {
-			t.Cron = "0 3 * * *"
-		}
-	}
 }
 
 // Validate rejects configurations that would break the service.
@@ -178,9 +169,6 @@ func Validate(c *model.Config) error {
 	for _, r := range c.Web.Rules {
 		if len(r.Listen) == 0 {
 			return fmt.Errorf("web rule %q: at least one listen address is required", displayName(r.Name, r.ID))
-		}
-		if err := requireWebDAVAuth(&r); err != nil {
-			return err
 		}
 		if r.Proxy != nil {
 			if r.Proxy.RateLimitPerSec < 0 {
@@ -207,10 +195,6 @@ func Validate(c *model.Config) error {
 		case model.WebTypeStatic:
 			if r.Static == nil {
 				return fmt.Errorf("web rule %q: static settings are required", displayName(r.Name, r.ID))
-			}
-		case model.WebTypeWebDAV:
-			if r.Files == nil {
-				return fmt.Errorf("web rule %q: WebDAV storage settings are required", displayName(r.Name, r.ID))
 			}
 		default:
 			return fmt.Errorf("web rule %q: unknown type %q", displayName(r.Name, r.ID), r.Type)
@@ -269,28 +253,6 @@ func Validate(c *model.Config) error {
 		}
 	}
 	return nil
-}
-
-// requireWebDAVAuth rejects WebDAV rules that would be reachable by anybody:
-// they read and write the mounted storage, so every anonymous visitor would be
-// an anonymous storage account. Such a rule must be gated by basic
-// authentication or by an allow list of client addresses. Both checks are
-// deliberately made on the stored configuration, not on the runtime state, so a
-// rule cannot be activated later through a toggle that skips validation.
-func requireWebDAVAuth(r *model.WebRule) error {
-	if r.Type != model.WebTypeWebDAV {
-		return nil
-	}
-	if basicAuthHasUsers(r.BasicAuth) {
-		return nil
-	}
-	if r.Access.Mode == model.AccessAllow && len(r.Access.IPs) > 0 {
-		return nil
-	}
-	return fmt.Errorf("web rule %q: type %s exposes the file storage without authentication, "+
-		"enable BasicAuth for this rule (basicAuth.enable with at least one user) "+
-		"or set the access control to allow + IP list",
-		displayName(r.Name, r.ID), r.Type)
 }
 
 // basicAuthHasUsers reports whether the rule carries a usable basic auth list.
