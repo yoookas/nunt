@@ -399,6 +399,7 @@ func (s *Server) clientIP(r *http.Request) net.IP {
 func (s *Server) register() {
 	s.registerAuth()
 	s.registerSystem()
+	s.registerSystemHealth()
 	s.registerLogs()
 	s.registerModules()
 	s.registerEvents()

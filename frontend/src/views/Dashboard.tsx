@@ -4,6 +4,7 @@ import { Activity, Boxes, Cpu, Globe, HardDrive, Server } from 'lucide-react'
 import { api, errorText } from '../api'
 import { fmtBytes, fmtDuration, fmtTime } from '../format'
 import {
+  AlertBox,
   DataTable,
   LoadingBlock,
   Page,
@@ -29,24 +30,38 @@ interface LogEntry {
   msg: string
 }
 
+interface HealthProblem {
+  level: 'danger' | 'warning'
+  title: string
+  detail: string
+}
+
+interface Health {
+  certs: { total: number; expired: number; expiring7: number; expiring30: number; nextDays?: number }
+  problems: HealthProblem[]
+}
+
 export default function Dashboard() {
   const [info, setInfo] = useState<any>(null)
   const [stats, setStats] = useState<any>(null)
   const [modules, setModules] = useState<ModuleStatus[]>([])
+  const [health, setHealth] = useState<Health | null>(null)
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(true)
 
   const load = async () => {
     setLoading(true)
     try {
-      const [infoData, statsData, moduleData, logData] = await Promise.all([
+      const [infoData, statsData, moduleData, logData, healthData] = await Promise.all([
         api.get('/api/v1/system/info'),
         api.get('/api/v1/system/stats'),
         api.get('/api/v1/modules'),
         api.get('/api/v1/system/logs', { limit: 30 }),
+        api.get('/api/v1/system/health').catch(() => null),
       ])
       setInfo(infoData)
       setStats(statsData)
+      setHealth(healthData)
       setModules(Array.isArray(moduleData) ? moduleData : [])
       setLogs(Array.isArray(logData?.entries) ? logData.entries : [])
     } catch (err) {
@@ -118,6 +133,20 @@ export default function Dashboard() {
         <LoadingBlock />
       ) : (
         <div className="space-y-6">
+          {health?.problems?.length ? (
+            <div className="space-y-2">
+              {health.problems.map((problem, index) => (
+                <AlertBox
+                  key={`${problem.title}-${index}`}
+                  status={problem.level === 'danger' ? 'danger' : 'warning'}
+                  title={problem.title}
+                >
+                  {problem.detail}
+                </AlertBox>
+              ))}
+            </div>
+          ) : null}
+
           <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
             <StatCard
               icon={<Server size={16} />}
@@ -135,7 +164,13 @@ export default function Dashboard() {
               icon={<Globe size={16} />}
               label="Web 路由"
               value={String(info?.webRules ?? '-')}
-              hint={`证书 ${info?.certs?.count ?? 0} 张`}
+              hint={
+                health?.certs
+                  ? `证书 ${health.certs.total} 张${
+                      typeof health.certs.nextDays === 'number' ? ` · 最近到期 ${health.certs.nextDays} 天` : ''
+                    }`
+                  : `证书 ${info?.certs?.count ?? 0} 张`
+              }
             />
             <StatCard
               icon={<Cpu size={16} />}
