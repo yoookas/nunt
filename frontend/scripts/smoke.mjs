@@ -205,8 +205,17 @@ if (!newListener) {
   const before = errors.length
   newListener.click()
   await sleep(500)
-  if (!window.document.querySelector('[data-slot*="drawer"], [data-slot*="dialog"]')) {
-    failures.push('/web: listener drawer did not open')
+  // Forms must open as a centered modal: a Drawer anchors itself to the left
+  // edge and looks broken on a wide screen.
+  if (!window.document.querySelector('[data-slot="modal-dialog"]')) {
+    failures.push('/web: the listener form did not open as a modal')
+  }
+  if (window.document.querySelector('[data-slot="drawer-dialog"]')) {
+    failures.push('/web: the listener form opened as a drawer')
+  }
+  const container = window.document.querySelector('[data-slot="modal-container"]')
+  if (container && container.getAttribute('data-placement') !== 'center') {
+    failures.push(`/web: modal placement is "${container.getAttribute('data-placement')}", want "center"`)
   }
   const fresh = errors.splice(before)
   if (fresh.length) failures.push(`/web drawer: ${fresh.join(' | ')}`)

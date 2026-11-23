@@ -6,13 +6,13 @@ import {
   Card,
   Chip,
   Description,
-  Drawer,
   EmptyState,
   Input,
   Label,
   ListBox,
   Menu,
   MenuItem,
+  Modal,
   NumberField,
   Select,
   Skeleton,
@@ -333,20 +333,22 @@ export function FormModal({
   footer?: ReactNode
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'full'
 }) {
+  // A form is a dialog, not a side sheet: Modal centers it on screen. The
+  // Drawer component used here before anchored itself to the left edge.
   return (
-    <Drawer isOpen={open} onOpenChange={(isOpen: boolean) => !isOpen && onClose()}>
-      <Drawer.Backdrop>
-        <Drawer.Content>
-          <Drawer.Dialog className={size === 'xl' || size === 'full' ? 'sm:max-w-3xl' : 'sm:max-w-xl'}>
-            <Drawer.Header>
-              <Drawer.Heading>{title}</Drawer.Heading>
-            </Drawer.Header>
-            <Drawer.Body>{children}</Drawer.Body>
-            {footer ? <Drawer.Footer>{footer}</Drawer.Footer> : null}
-          </Drawer.Dialog>
-        </Drawer.Content>
-      </Drawer.Backdrop>
-    </Drawer>
+    <Modal isOpen={open} onOpenChange={(isOpen: boolean) => !isOpen && onClose()}>
+      <Modal.Backdrop>
+        <Modal.Container placement="center" scroll="inside" size="lg">
+          <Modal.Dialog className={size === 'xl' || size === 'full' ? 'sm:max-w-3xl' : 'sm:max-w-xl'}>
+            <Modal.Header>
+              <Modal.Heading>{title}</Modal.Heading>
+            </Modal.Header>
+            <Modal.Body>{children}</Modal.Body>
+            {footer ? <Modal.Footer>{footer}</Modal.Footer> : null}
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+    </Modal>
   )
 }
 

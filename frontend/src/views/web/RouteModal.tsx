@@ -477,7 +477,6 @@ export default function RouteModal({
         </div>
       }
     >
-      <div className="max-h-[70vh] overflow-y-auto pr-1">
         <div className="grid grid-cols-1 gap-x-4 gap-y-3 md:grid-cols-2">
           <Section title="基本信息" />
           <TextInput
@@ -900,7 +899,6 @@ export default function RouteModal({
             hint="关闭后该路由完全不经过 WAF"
           />
         </div>
-      </div>
     </FormModal>
   )
 }
