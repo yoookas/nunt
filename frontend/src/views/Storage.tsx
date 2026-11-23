@@ -589,7 +589,7 @@ export default function Storage() {
     <Page>
       <PageHeader
         title="存储"
-        sub="本地目录与远程 WebDAV 挂载，供文件站点与 WebDAV 规则引用"
+        sub="本地目录与远程 WebDAV 挂载，作为静态托管的只读存储后端"
         actions={
           <>
             <Button variant="secondary" isDisabled={loading} onPress={() => void load()}>
@@ -870,7 +870,7 @@ export default function Storage() {
         confirmText={deleting ? '删除中…' : '删除'}
         content={
           <>
-            确定删除挂载「{deleteTarget?.name || deleteTarget?.id || ''}」吗？引用它的文件站点与 WebDAV
+            确定删除挂载「{deleteTarget?.name || deleteTarget?.id || ''}」吗？引用它的静态托管
             规则会立即失效。
           </>
         }

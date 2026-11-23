@@ -199,7 +199,7 @@ internal/api        管理后台 REST API + SSE
 internal/config     配置仓库（原子写、校验、订阅）
 internal/model      全部持久化类型
 internal/module     模块接口与注册表
-internal/modules/   各功能模块（web / forward / ddns / acme / waf / task / webdav）
+internal/modules/   各功能模块（web / forward / ddns / acme / waf）
 internal/dnsprov    DNS 提供商（DDNS 与 ACME DNS-01 共用）
 internal/certs      证书仓库（SNI 热加载）
 internal/ip2region  IP 地理库（ip2region xdb：国家/省份）

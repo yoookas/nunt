@@ -327,7 +327,7 @@ type CertJob struct {
 // Storage mounts
 // ---------------------------------------------------------------------------
 
-// StorageConfig holds the mounts shared by static/files/webdav rules.
+// StorageConfig holds the storage mounts used by static web hosting.
 type StorageConfig struct {
 	Mounts []Mount `json:"mounts"`
 }
