@@ -26,21 +26,24 @@ const (
 	// tencentContentType is both sent and signed; the API rejects a different
 	// value in the canonical request.
 	tencentContentType = "application/json"
-	// tencentSignedHeaders lists the headers covered by the signature.
-	tencentSignedHeaders = "content-type;host;x-tc-action"
+	// tencentSignedHeaders lists the headers covered by the signature. The
+	// official SDK signs exactly these two; X-TC-Action travels unsigned. It
+	// used to be listed here without being part of the canonical headers,
+	// which made every request fail with AuthFailure.SignatureFailure.
+	tencentSignedHeaders = "content-type;host"
 )
 
 func registerTencent(r *Registry) {
 	r.Register(Meta{
 		ID:    "tencent",
-		Title: "腾讯云 DNSPod",
+		Title: "腾讯云 DNS（DNSPod）",
 		Fields: []Field{
 			{
 				Key:         "secretid",
 				Label:       "SecretId",
 				Required:    true,
 				Placeholder: "AKID...",
-				Help:        "腾讯云控制台「访问管理 → API 密钥管理」中的 SecretId。",
+				Help:        "腾讯云控制台「访问管理 → API 密钥管理」的 SecretId（AKID 开头），不是 DNSPod 账号的 Token ID。",
 			},
 			{
 				Key:         "secretkey",
@@ -48,10 +51,10 @@ func registerTencent(r *Registry) {
 				Secret:      true,
 				Required:    true,
 				Placeholder: "SecretKey",
-				Help:        "与 SecretId 配对，仅在创建时显示一次。",
+				Help:        "与 SecretId 配对的 SecretKey；域名需要在「DNS 解析 DNSPod」里托管。",
 			},
 		},
-		AuthNote: "腾讯云 API 3.0（TC3-HMAC-SHA256），子账号需要 DNSPod 的解析读写权限。",
+		AuthNote: "腾讯云 API 3.0（TC3-HMAC-SHA256），凭据是腾讯云 API 密钥（SecretId/SecretKey），不是 DNSPod 个人版的登录 Token；子账号需要「DNS 解析 DNSPod」的解析读写权限。",
 	}, func(creds Credentials) (Provider, error) {
 		id := strings.TrimSpace(creds["secretid"])
 		key := strings.TrimSpace(creds["secretkey"])
@@ -214,11 +217,16 @@ func (p *tencentProvider) Delete(ctx context.Context, rec Record) error {
 
 // tc3Authorization builds the Authorization header of a Tencent Cloud API 3.0
 // request (TC3-HMAC-SHA256).
-func tc3Authorization(secretID, secretKey, service, host string, ts int64, body string) string {
-	date := time.Unix(ts, 0).UTC().Format("2006-01-02")
+// tc3CanonicalRequest is the canonical request of a TC3-HMAC-SHA256 POST.
+func tc3CanonicalRequest(host, body string) string {
 	canonicalHeaders := "content-type:" + tencentContentType + "\n" +
 		"host:" + host + "\n"
-	canonicalRequest := "POST\n/\n\n" + canonicalHeaders + "\n" + tencentSignedHeaders + "\n" + sha256Hex(body)
+	return "POST\n/\n\n" + canonicalHeaders + "\n" + tencentSignedHeaders + "\n" + sha256Hex(body)
+}
+
+func tc3Authorization(secretID, secretKey, service, host string, ts int64, body string) string {
+	date := time.Unix(ts, 0).UTC().Format("2006-01-02")
+	canonicalRequest := tc3CanonicalRequest(host, body)
 	scope := date + "/" + service + "/tc3_request"
 	stringToSign := "TC3-HMAC-SHA256\n" + strconv.FormatInt(ts, 10) + "\n" + scope + "\n" + sha256Hex(canonicalRequest)
 

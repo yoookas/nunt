@@ -2,11 +2,10 @@ package dnsprov
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -30,8 +29,19 @@ type tencentCall struct {
 }
 
 func (f *tencentFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	raw, _ := io.ReadAll(r.Body)
 	var payload map[string]any
-	_ = json.NewDecoder(r.Body).Decode(&payload)
+	_ = json.Unmarshal(raw, &payload)
+	// Behave like the API: a signature that does not cover exactly the
+	// headers it claims to cover is rejected, which is what a missing or
+	// mismatched signed header looks like in production.
+	if code := f.verifySignature(r, raw); code != "" {
+		_ = json.NewEncoder(w).Encode(map[string]any{"Response": map[string]any{
+			"RequestId": "test-request",
+			"Error":     map[string]any{"Code": code, "Message": "The provided credentials could not be validated."},
+		}})
+		return
+	}
 	call := tencentCall{
 		Action:      r.Header.Get("X-TC-Action"),
 		Auth:        r.Header.Get("Authorization"),
@@ -40,8 +50,8 @@ func (f *tencentFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Host:        r.Host,
 		Payload:     payload,
 	}
-	raw, _ := json.Marshal(payload)
-	call.Body = string(raw)
+	body, _ := json.Marshal(payload)
+	call.Body = string(body)
 
 	f.mu.Lock()
 	f.calls = append(f.calls, call)
@@ -80,6 +90,64 @@ func (f *tencentFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		resp["RecordId"] = f.nextID
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"Response": resp})
+}
+
+// secrets maps the test SecretId to its key.
+var tencentTestSecrets = map[string]string{"AKIDTEST": "testsecret"}
+
+// verifySignature rebuilds the canonical request from the headers that actually
+// arrived and checks the signature, returning the API error code on failure.
+func (f *tencentFake) verifySignature(r *http.Request, body []byte) string {
+	auth := r.Header.Get("Authorization")
+	const prefix = "TC3-HMAC-SHA256 "
+	if !strings.HasPrefix(auth, prefix) {
+		return "AuthFailure.SignatureFailure"
+	}
+	var credential, signedHeaders, signature string
+	for _, part := range strings.Split(strings.TrimPrefix(auth, prefix), ",") {
+		part = strings.TrimSpace(part)
+		switch {
+		case strings.HasPrefix(part, "Credential="):
+			credential = strings.TrimPrefix(part, "Credential=")
+		case strings.HasPrefix(part, "SignedHeaders="):
+			signedHeaders = strings.TrimPrefix(part, "SignedHeaders=")
+		case strings.HasPrefix(part, "Signature="):
+			signature = strings.TrimPrefix(part, "Signature=")
+		}
+	}
+	credentialParts := strings.Split(credential, "/")
+	if len(credentialParts) != 4 || credentialParts[2] != tencentService || credentialParts[3] != "tc3_request" {
+		return "AuthFailure.SignatureFailure"
+	}
+	secretKey, ok := tencentTestSecrets[credentialParts[0]]
+	if !ok {
+		return "AuthFailure.SecretIdNotFound"
+	}
+	canonicalHeaders := ""
+	for _, name := range strings.Split(signedHeaders, ";") {
+		var value string
+		switch name {
+		case "content-type":
+			value = r.Header.Get("Content-Type")
+		case "host":
+			value = r.Host
+		case "x-tc-action":
+			value = strings.ToLower(r.Header.Get("X-TC-Action"))
+		default:
+			return "AuthFailure.SignatureFailure"
+		}
+		canonicalHeaders += name + ":" + value + "\n"
+	}
+	canonicalRequest := r.Method + "\n" + r.URL.Path + "\n\n" + canonicalHeaders + "\n" + signedHeaders + "\n" + sha256Hex(string(body))
+	scope := credentialParts[1] + "/" + tencentService + "/tc3_request"
+	stringToSign := "TC3-HMAC-SHA256\n" + r.Header.Get("X-TC-Timestamp") + "\n" + scope + "\n" + sha256Hex(canonicalRequest)
+	key := hmacSHA256([]byte("TC3"+secretKey), credentialParts[1])
+	key = hmacSHA256(key, tencentService)
+	key = hmacSHA256(key, "tc3_request")
+	if hex.EncodeToString(hmacSHA256(key, stringToSign)) != signature {
+		return "AuthFailure.SignatureFailure"
+	}
+	return ""
 }
 
 func (f *tencentFake) actions() []string {
@@ -209,34 +277,38 @@ func TestTencentRequestShapeAndSignature(t *testing.T) {
 	if call.Host != strings.TrimPrefix(strings.TrimPrefix(tencentEndpoint, "http://"), "https://") {
 		t.Fatalf("host = %q", call.Host)
 	}
-	wantAuth := testTC3Auth("AKIDTEST", "testsecret", tencentService, call.Host, ts, call.Body)
-	if call.Auth != wantAuth {
-		t.Fatalf("authorization mismatch\n got %s\nwant %s", call.Auth, wantAuth)
-	}
 	if !strings.HasPrefix(call.Auth, "TC3-HMAC-SHA256 Credential=AKIDTEST/") {
 		t.Fatalf("authorization = %q", call.Auth)
+	}
+	if !strings.Contains(call.Auth, "SignedHeaders=content-type;host,") {
+		t.Fatalf("signed headers must be content-type;host, got %q", call.Auth)
 	}
 }
 
 // testTC3Auth is an independent implementation of the published TC3
 // authorization algorithm, used to check the provider.
-func testTC3Auth(secretID, secretKey, service, host string, ts int64, body string) string {
-	hash := func(b []byte) string { sum := sha256.Sum256(b); return hex.EncodeToString(sum[:]) }
-	mac := func(key []byte, msg string) []byte {
-		h := hmac.New(sha256.New, key)
-		h.Write([]byte(msg))
-		return h.Sum(nil)
+// The golden values below were produced by an independent implementation
+// (Python hmac/hashlib) from the documented canonical request. They pin the
+// exact canonical form, which is where the signature failure came from: the
+// signed-header list has to match the headers in the canonical request.
+func TestTencentCanonicalRequestAndSignature(t *testing.T) {
+	const body = `{"Domain":"example.com","Limit":100,"RecordType":"TXT","Subdomain":"_acme-challenge"}`
+	const host = "dnspod.tencentcloudapi.com"
+	canonical := tc3CanonicalRequest(host, body)
+	wantCanonical := "POST\n/\n\n" +
+		"content-type:application/json\n" +
+		"host:dnspod.tencentcloudapi.com\n" +
+		"\n" +
+		"content-type;host\n" +
+		"01eb36d4abe0c35b38fe57d1a7d8f0d4525fd5a86acb6afa5bf1520b217abe81"
+	if canonical != wantCanonical {
+		t.Fatalf("canonical request mismatch:\n got %q\nwant %q", canonical, wantCanonical)
 	}
-	date := time.Unix(ts, 0).UTC().Format("2006-01-02")
-	canonicalHeaders := "content-type:" + tencentContentType + "\nhost:" + host + "\n"
-	canonicalRequest := "POST\n/\n\n" + canonicalHeaders + "\n" + tencentSignedHeaders + "\n" + hash([]byte(body))
-	scope := date + "/" + service + "/tc3_request"
-	stringToSign := "TC3-HMAC-SHA256\n" + fmt.Sprint(ts) + "\n" + scope + "\n" + hash([]byte(canonicalRequest))
-	key := mac([]byte("TC3"+secretKey), date)
-	key = mac(key, service)
-	key = mac(key, "tc3_request")
-	signature := hex.EncodeToString(mac(key, stringToSign))
-	return "TC3-HMAC-SHA256 Credential=" + secretID + "/" + scope + ", SignedHeaders=" + tencentSignedHeaders + ", Signature=" + signature
+	auth := tc3Authorization("AKIDTEST", "testsecret", tencentService, host, 1700000000, body)
+	want := "TC3-HMAC-SHA256 Credential=AKIDTEST/2023-11-14/dnspod/tc3_request, SignedHeaders=content-type;host, Signature=8b60cb3ab21af2556bcdceeae3050f045edb6e60fbcbf0751f54f109e6b4d0a0"
+	if auth != want {
+		t.Fatalf("authorization mismatch\n got %s\nwant %s", auth, want)
+	}
 }
 
 func TestTencentAPIErrorIsReported(t *testing.T) {
