@@ -207,7 +207,11 @@ jobs:
           FILE="nunt-${VERSION}-oci.tar.gz"
           gzip -9 -c "/tmp/nunt-${VERSION}-oci.tar" > "/tmp/${FILE}"
           ls -lh "/tmp/${FILE}"
-          gh release upload "$VERSION" "/tmp/${FILE}" --clobber
+          # The finalize job collects every *.tar.gz.sha256 into SHA256SUMS;
+          # without this line the OCI archive is the one download with no
+          # published checksum.
+          sha256sum "/tmp/${FILE}" | sed "s#/tmp/##" > "/tmp/${FILE}.sha256"
+          gh release upload "$VERSION" "/tmp/${FILE}" "/tmp/${FILE}.sha256" --clobber
 
   # ---------------------------------------------------------------------------
   # Collect every checksum into one SHA256SUMS file and finish the notes.
