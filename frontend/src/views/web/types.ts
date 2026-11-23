@@ -71,7 +71,6 @@ export interface RedirectTarget {
 }
 
 export interface StaticTarget {
-  mountId?: string
   root?: string
   index?: string[]
   listing?: boolean
@@ -118,17 +117,6 @@ export interface Certificate {
   keyType?: string
   daysLeft?: number
   expired?: boolean
-}
-
-export interface Mount {
-  id: string
-  name: string
-  enable?: boolean
-  type?: string
-  root?: string
-  url?: string
-  readOnly?: boolean
-  remark?: string
 }
 
 export interface AccessEntry {
@@ -273,8 +261,7 @@ export function targetText(rule: WebRule): string {
     return `${redirect?.to || '-'} [${redirect?.status || 302}]`
   }
   if (rule.type === 'static') {
-    const stat = rule.static
-    return stat?.mountId ? `挂载: ${stat.mountId}` : stat?.root || '-'
+    return rule.static?.root || '-'
   }
   return '-'
 }

@@ -4,7 +4,6 @@ import {
   Cloud,
   Flame,
   Globe,
-  HardDrive,
   LayoutDashboard,
   ScrollText,
   Settings,
@@ -24,7 +23,6 @@ export const menu: MenuItem[] = [
   { path: '/ddns', title: '动态域名', icon: Cloud },
   { path: '/acme', title: '证书', icon: ShieldCheck },
   { path: '/waf', title: 'WAF', icon: Flame },
-  { path: '/storage', title: '存储', icon: HardDrive },
   { path: '/logs', title: '日志', icon: ScrollText },
   { path: '/settings', title: '设置', icon: Settings },
 ]

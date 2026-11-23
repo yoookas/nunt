@@ -14,7 +14,6 @@ import (
 	"github.com/nunt/nunt/internal/logging"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
-	"github.com/nunt/nunt/internal/mounts"
 	"github.com/nunt/nunt/internal/secret"
 	"github.com/nunt/nunt/internal/security"
 )
@@ -65,7 +64,6 @@ func newTestEnv(t *testing.T) *testEnv {
 		Log:      hub,
 		Registry: registry,
 		Certs:    certStore,
-		Mounts:   mounts.New(store),
 		Box:      box,
 		Sessions: sessions,
 		DataDir:  dir,
@@ -105,7 +103,7 @@ func (e *testEnv) do(t *testing.T, method, path string, body any, cookies []*htt
 
 func TestUnauthenticatedRequestsAreRejected(t *testing.T) {
 	env := newTestEnv(t)
-	for _, path := range []string{"/api/v1/system/info", "/api/v1/auth/session", "/api/v1/storage/mounts"} {
+	for _, path := range []string{"/api/v1/system/info", "/api/v1/auth/session"} {
 		rec := env.do(t, http.MethodGet, path, nil, nil, nil)
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("GET %s must be 401 without credentials, got %d", path, rec.Code)

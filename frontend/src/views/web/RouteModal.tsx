@@ -28,7 +28,6 @@ import {
   type AccessMode,
   type BasicAuthUser,
   type Certificate,
-  type Mount,
   type ProxyTarget,
   type RedirectTarget,
   type RouteType,
@@ -77,7 +76,6 @@ interface RouteForm {
   redirectTo: string
   redirectStatus: number
   redirectKeep: boolean
-  staticMountId: string
   staticRoot: string
   staticIndex: string
   staticListing: boolean
@@ -120,7 +118,6 @@ function blankForm(): RouteForm {
     redirectTo: '',
     redirectStatus: 302,
     redirectKeep: false,
-    staticMountId: '',
     staticRoot: '',
     staticIndex: 'index.html',
     staticListing: false,
@@ -147,7 +144,6 @@ export default function RouteModal({
   rule,
   listeners,
   certificates,
-  mounts,
   defaultListenerId,
   onClose,
   onSaved,
@@ -156,7 +152,6 @@ export default function RouteModal({
   rule: WebRule | null
   listeners: WebListenerView[]
   certificates: Certificate[]
-  mounts: Mount[]
   defaultListenerId: string
   onClose: () => void
   onSaved: () => void
@@ -226,7 +221,6 @@ export default function RouteModal({
       redirectTo: redirect?.to || '',
       redirectStatus: num(redirect?.status, 302) || 302,
       redirectKeep: !!redirect?.keepPath,
-      staticMountId: stat?.mountId || '',
       staticRoot: stat?.root || '',
       staticIndex: (Array.isArray(stat?.index) ? stat?.index ?? [] : []).join(' '),
       staticListing: !!stat?.listing,
@@ -248,16 +242,6 @@ export default function RouteModal({
       ),
     }))
   }
-
-  const mountOptionList: SelectOption[] = [
-    { value: 'none', label: '（不使用挂载，直接使用本地目录）' },
-    ...mounts
-      .filter((mount) => mount.enable !== false)
-      .map((mount) => ({
-        value: mount.id,
-        label: `${mount.name || mount.id}${mount.type ? `（${mount.type}）` : ''}`,
-      })),
-  ]
 
   const save = async () => {
     const name = form.name.trim()
@@ -281,8 +265,8 @@ export default function RouteModal({
       toast.warning('重定向路由必须填写目标地址')
       return
     }
-    if (type === 'static' && !form.staticMountId.trim() && !form.staticRoot.trim()) {
-      toast.warning('静态托管路由必须填写存储挂载或本地目录')
+    if (type === 'static' && !form.staticRoot.trim()) {
+      toast.warning('静态托管路由必须填写本机目录')
       return
     }
 
@@ -391,7 +375,6 @@ export default function RouteModal({
       }
     } else if (type === 'static') {
       payload.static = {
-        mountId: form.staticMountId.trim(),
         root: form.staticRoot.trim(),
         index: form.staticIndex
           .split(/\s+/)
@@ -630,21 +613,13 @@ export default function RouteModal({
           {form.type === 'static' ? (
             <>
               <Section title="静态托管" />
-              <SelectInput
-                label="存储挂载"
-                value={form.staticMountId || 'none'}
-                onChange={(value) =>
-                  patch({ staticMountId: value === 'none' ? '' : value })
-                }
-                options={mountOptionList}
-                hint="选择一个存储挂载，或直接使用下面的本地目录"
-              />
               <TextInput
                 label="本地目录"
                 value={form.staticRoot}
                 onChange={(value) => patch({ staticRoot: value })}
                 placeholder="例如 /var/www/site"
-                hint="未选择挂载时使用该目录"
+                hint="本机目录，必须存在且服务进程可读"
+                required
               />
               <TextInput
                 label="索引文件"

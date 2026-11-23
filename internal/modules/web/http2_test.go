@@ -27,7 +27,6 @@ import (
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/modules/waf"
-	"github.com/nunt/nunt/internal/mounts"
 )
 
 // testDeps wires the minimum a web module needs. The firewall is registered
@@ -42,7 +41,6 @@ func testDeps(t *testing.T, store *config.Store) *module.Deps {
 	deps := &module.Deps{
 		Cfg:      store,
 		Certs:    certStore,
-		Mounts:   mounts.New(store),
 		DataDir:  filepath.Dir(store.Path()),
 		Registry: module.NewRegistry(),
 	}

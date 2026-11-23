@@ -169,15 +169,6 @@ func Normalize(c *model.Config) {
 		}
 	}
 	c.System.IP2RegionDB = strings.TrimSpace(c.System.IP2RegionDB)
-	for i := range c.Storage.Mounts {
-		m := &c.Storage.Mounts[i]
-		if m.ID == "" {
-			m.ID = model.NewID()
-		}
-		if m.Type == "" {
-			m.Type = model.MountLocal
-		}
-	}
 }
 
 // Validate rejects configurations that would break the service.
@@ -279,14 +270,6 @@ func Validate(c *model.Config) error {
 			if _, ok := dnsprov.Default().Meta(j.DNSProvider); !ok {
 				return fmt.Errorf("certificate job %q: unknown DNS provider %q", displayName(j.Name, j.ID), j.DNSProvider)
 			}
-		}
-	}
-	for _, m := range c.Storage.Mounts {
-		if m.Type != model.MountLocal {
-			return fmt.Errorf("mount %q: unsupported type %q (only %q is supported)", displayName(m.Name, m.ID), m.Type, model.MountLocal)
-		}
-		if strings.TrimSpace(m.Root) == "" {
-			return fmt.Errorf("mount %q: local root path is required", displayName(m.Name, m.ID))
 		}
 	}
 	return nil

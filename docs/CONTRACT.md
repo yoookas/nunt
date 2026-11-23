@@ -43,7 +43,6 @@ Set-Location D:\Desktop\nunt; go build ./...
 | `internal/secret` | 凭据加密 | `Box.Seal/Open/SealMap/OpenMap`、`Mask`（脱敏展示） |
 | `internal/httpc` | 出站 HTTP | `httpc.New(timeout, insecure)`、`httpc.Do`、`httpc.GetJSON`、`httpc.PublicIP` |
 | `internal/vfs` | 安全文件系统 | `FS` 接口、`OpenLocal(dir,label,readOnly)`、`Clean`、`Entry` |
-| `internal/mounts` | 存储挂载 | `Manager.Get(id) (vfs.FS, model.Mount, error)`、`Manager.Local(root,label,ro)`、`Find/List/Test` |
 | `internal/certs` | 证书仓库 | `Store.GetCertificate`、`Add`、`List`、`Delete`、`Has`、`TLSConfig()` |
 | `internal/security` | 安全原语 | `HashPassword/VerifyPassword`、`RandomToken`、`Limiter`、`RateLimiter` |
 | `internal/dnsprov` | DNS 提供商 | `Registry.New(id, creds)`、`Provider.Set/Delete`、`Default()` |
@@ -163,4 +162,4 @@ cd frontend && npm run dev        # 开发服务器，API 代理到 127.0.0.1:31
 ```
 
 `make web` 等价于前两条命令。构建后用 `npm run smoke --prefix frontend` 跑 jsdom 冒烟：
-它加载**真实构建产物**，用假 API 把 9 个路由逐个挂载，任何未捕获异常都会让命令非零退出。
+它加载**真实构建产物**，用假 API 把 8 个路由逐个挂载，任何未捕获异常都会让命令非零退出。

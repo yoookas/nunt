@@ -27,7 +27,6 @@ import {
   tlsModeOf,
   type Certificate,
   type ListResponse,
-  type Mount,
   type WebListenerView,
   type WebRule,
 } from './web/types'
@@ -72,7 +71,6 @@ export default function Web() {
   const [listeners, setListeners] = useState<WebListenerView[]>([])
   const [rules, setRules] = useState<WebRule[]>([])
   const [certificates, setCertificates] = useState<Certificate[]>([])
-  const [mounts, setMounts] = useState<Mount[]>([])
 
   const [selectedListenerId, setSelectedListenerId] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
@@ -133,20 +131,11 @@ export default function Web() {
   }, [])
 
   const loadOptions = useCallback(async () => {
-    const [mountResult, certResult] = await Promise.allSettled([
-      api.get<Mount[]>('/api/v1/storage/mounts'),
-      api.get<ListResponse<Certificate>>('/api/v1/acme/certificates'),
-    ])
-    if (mountResult.status === 'fulfilled') {
-      const list = Array.isArray(mountResult.value) ? mountResult.value : []
-      setMounts(list.filter((mount) => mount.enable !== false))
-    } else {
-      toast.danger(errorText(mountResult.reason))
-    }
-    if (certResult.status === 'fulfilled') {
-      setCertificates(Array.isArray(certResult.value?.items) ? certResult.value.items : [])
-    } else {
-      toast.danger(errorText(certResult.reason))
+    try {
+      const data = await api.get<ListResponse<Certificate>>('/api/v1/acme/certificates')
+      setCertificates(Array.isArray(data?.items) ? data.items : [])
+    } catch (err) {
+      toast.danger(errorText(err))
     }
   }, [])
 
@@ -190,7 +179,6 @@ export default function Web() {
         ...(Array.isArray(rule.domains) ? rule.domains : []),
         ...(Array.isArray(proxy?.targets) ? proxy?.targets ?? [] : []),
         redirect?.to,
-        stat?.mountId,
         stat?.root,
       ]
         .filter(Boolean)
@@ -700,7 +688,6 @@ export default function Web() {
         rule={routeModal.rule}
         listeners={listeners}
         certificates={certificates}
-        mounts={mounts}
         defaultListenerId={defaultListenerId}
         onClose={() => setRouteModal({ open: false, rule: null })}
         onSaved={() => void refreshAll()}

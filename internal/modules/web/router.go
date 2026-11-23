@@ -103,14 +103,10 @@ func checkRuleStorage(r model.WebRule) error {
 		return nil
 	}
 	if r.Static == nil {
-		return errors.New("storage settings are required")
+		return errors.New("static settings are required")
 	}
-	mountID, root := strings.TrimSpace(r.Static.MountID), strings.TrimSpace(r.Static.Root)
-	if mountID == "" && root == "" {
-		return errors.New("a mount or a root directory is required")
-	}
-	if mountID != "" && strings.ContainsAny(mountID, "\\/") {
-		return errors.New("invalid mount id")
+	if strings.TrimSpace(r.Static.Root) == "" {
+		return errors.New("a root directory is required")
 	}
 	return nil
 }

@@ -101,10 +101,9 @@ function fixture(path) {
   if (path === '/api/v1/system/logs' || path === '/api/v1/web/logs' || path === '/api/v1/forward/logs') return { entries: [] }
   if (path === '/api/v1/ddns/providers') return []
   if (path === '/api/v1/modules') return []
-  if (path === '/api/v1/storage/mounts') return []
   if (path === '/api/v1/acme/certificates') return { items: [] }
   if (path === '/api/v1/web/listeners') return { items: [] }
-  if (path.endsWith('/items') || path.endsWith('/rules') || path.endsWith('/jobs') || path.endsWith('/mounts') || path.endsWith('/webhooks') || path.endsWith('/users') || path.endsWith('/tokens') || path.endsWith('/sessions') || path.endsWith('/shares')) {
+  if (path.endsWith('/items') || path.endsWith('/rules') || path.endsWith('/jobs') || path.endsWith('/webhooks') || path.endsWith('/users') || path.endsWith('/tokens') || path.endsWith('/sessions') || path.endsWith('/shares')) {
     return { items: [] }
   }
   return {}
@@ -159,7 +158,6 @@ const routes = [
   ['/ddns', '动态域名'],
   ['/acme', '证书'],
   ['/waf', 'WAF'],
-  ['/storage', '存储'],
   ['/logs', '日志'],
   ['/settings', '设置'],
 ]
@@ -187,8 +185,8 @@ window.dispatchEvent(new window.HashChangeEvent('hashchange'))
 window.dispatchEvent(new window.PopStateEvent('popstate'))
 await sleep(400)
 const navItems = window.document.querySelectorAll('[data-slot="menu-item"]')
-if (navItems.length < 9) {
-  failures.push(`sidebar: expected 9 menu items, found ${navItems.length}`)
+if (navItems.length < 8) {
+  failures.push(`sidebar: expected 8 menu items, found ${navItems.length}`)
 }
 
 // Drawer forms are part of the HeroUI design system; open one and make sure it

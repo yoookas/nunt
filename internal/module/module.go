@@ -17,7 +17,6 @@ import (
 	"github.com/nunt/nunt/internal/ip2region"
 	"github.com/nunt/nunt/internal/logging"
 	"github.com/nunt/nunt/internal/model"
-	"github.com/nunt/nunt/internal/mounts"
 	"github.com/nunt/nunt/internal/rest"
 	"github.com/nunt/nunt/internal/secret"
 )
@@ -97,7 +96,6 @@ type Deps struct {
 	Cfg      *config.Store
 	Log      *logging.Hub
 	Certs    *certs.Store
-	Mounts   *mounts.Manager
 	Box      *secret.Box
 	DataDir  string
 	Registry *Registry

@@ -19,7 +19,6 @@ import (
 	"github.com/nunt/nunt/internal/logging"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
-	"github.com/nunt/nunt/internal/mounts"
 	"github.com/nunt/nunt/internal/secret"
 	"github.com/nunt/nunt/internal/security"
 	"github.com/nunt/nunt/internal/store"
@@ -46,7 +45,6 @@ type App struct {
 	log         *logging.Hub
 	box         *secret.Box
 	certs       *certs.Store
-	mounts      *mounts.Manager
 	geo         *ip2region.Service
 	registry    *module.Registry
 	sessions    *security.SessionStore
@@ -105,7 +103,6 @@ func New(opts Options) (*App, error) {
 		return nil, err
 	}
 	a.certs = certStore
-	a.mounts = mounts.New(cfg)
 	a.sessions = security.NewSessionStore()
 	a.geo = ip2region.New()
 	if err := a.geo.Configure(cfg.Snapshot().System.IP2RegionDB); err != nil {
@@ -117,7 +114,6 @@ func New(opts Options) (*App, error) {
 		Cfg:      cfg,
 		Log:      hub,
 		Certs:    certStore,
-		Mounts:   a.mounts,
 		Box:      box,
 		DataDir:  opts.DataDir,
 		Registry: a.registry,
@@ -149,7 +145,6 @@ func New(opts Options) (*App, error) {
 		Log:      hub,
 		Registry: a.registry,
 		Certs:    certStore,
-		Mounts:   a.mounts,
 		Box:      box,
 		Sessions: a.sessions,
 		DataDir:  opts.DataDir,

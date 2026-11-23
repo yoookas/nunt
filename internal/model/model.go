@@ -43,7 +43,6 @@ type Config struct {
 	Forward ForwardConfig `json:"forward"`
 	DDNS    DDNSConfig    `json:"ddns"`
 	ACME    ACMEConfig    `json:"acme"`
-	Storage StorageConfig `json:"storage"`
 	WAF     WAFConfig     `json:"waf"`
 }
 
@@ -202,10 +201,9 @@ type RedirectTgt struct {
 	KeepPath bool   `json:"keepPath"`
 }
 
-// StaticTgt serves a directory (or mounted storage) as static files.
+// StaticTgt serves a local directory as static files.
 type StaticTgt struct {
 	Root         string   `json:"root,omitempty"`
-	MountID      string   `json:"mountId,omitempty"`
 	Index        []string `json:"index,omitempty"`
 	Listing      bool     `json:"listing"`
 	SPA          bool     `json:"spa"`
@@ -321,30 +319,6 @@ type CertJob struct {
 	RenewDays    int               `json:"renewDays,omitempty"`
 	Remark       string            `json:"remark,omitempty"`
 	CreatedAt    time.Time         `json:"createdAt"`
-}
-
-// ---------------------------------------------------------------------------
-// Storage mounts
-// ---------------------------------------------------------------------------
-
-// StorageConfig holds the storage mounts used by static web hosting.
-type StorageConfig struct {
-	Mounts []Mount `json:"mounts"`
-}
-
-// MountLocal is the only supported storage backend: a directory on disk.
-const MountLocal = "local"
-
-// Mount is a storage backend addressable by id.
-type Mount struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Enable    bool      `json:"enable"`
-	Type      string    `json:"type"`
-	Root      string    `json:"root,omitempty"`
-	ReadOnly  bool      `json:"readOnly"`
-	Remark    string    `json:"remark,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
 }
 
 // ---------------------------------------------------------------------------

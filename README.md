@@ -17,7 +17,7 @@
 | **ACME 自动证书** | 基于 `golang.org/x/crypto/acme` 自研签发流程，支持 http-01 / dns-01 / tls-alpn-01，DNS-01 复用 DDNS 的提供商；**http-01 / tls-alpn-01 复用 web 的 :80 / :443 监听**（端口被自家规则占用也能签发），自动续期（默认剩余 30 天，上限 30 天），证书热加载、无需重启；统一使用 Let's Encrypt；证书页可配置账户邮箱与默认密钥类型；支持手动上传证书；证书可备注，并可导出为 zip（证书链 + 私钥）用于备份迁移 |
 | **Coraza WAF** | 内嵌 OWASP CRS 规则集，支持检测/拦截模式、PL 等级、入站/出站阈值、规则文件勾选、自定义 SecLang 规则、请求体上限、拦截日志与在线测试；可保护管理后台本身 |
 
-管理界面：概览、Web 服务、端口转发、动态域名、证书、存储、WAF、日志、设置。
+管理界面：概览、Web 服务、端口转发、动态域名、证书、WAF、日志、设置。
 
 ---
 
@@ -139,7 +139,7 @@ data/
 └── logs/            # 运行日志（按大小轮转，保留 3 份）
 ```
 
-- 所有敏感字段（DDNS/DNS 凭据、挂载密码、BasicAuth 密码）**加密存储**；
+- 所有敏感字段（DDNS/DNS 凭据、BasicAuth 密码）**加密存储**；
 - API 返回时统一脱敏为 `********`，保存时该掩码表示「不修改」；
 - 导出配置会自动脱敏，可直接用于备份或分享排障。
 
@@ -205,7 +205,6 @@ internal/certs      证书仓库（SNI 热加载）
 internal/ip2region  IP 地理库（ip2region xdb：国家/省份）
 internal/ipfilter    访问控制过滤器（CIDR + 国家/省份）
 internal/vfs        安全文件系统抽象（os.Root）
-internal/mounts     存储挂载（本地目录）
 internal/security   密码、会话、限流
 internal/rest       路由与 JSON 工具
 internal/webui      管理界面构建产物（go:embed，源码在 frontend/）
@@ -244,7 +243,7 @@ pwsh -File scripts/listen-rebind.ps1
 # 前端：安装依赖、构建、再构建二进制
 npm ci --prefix frontend
 npm run build --prefix frontend
-npm run smoke --prefix frontend   # jsdom 冒烟：10 个路由逐个挂载，捕获运行时错误
+npm run smoke --prefix frontend   # jsdom 冒烟：8 个路由逐个挂载，捕获运行时错误
 go build -o nunt.exe ./cmd/nunt
 ```
 

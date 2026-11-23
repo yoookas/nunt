@@ -19,7 +19,6 @@ import (
 	"github.com/nunt/nunt/internal/config"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
-	"github.com/nunt/nunt/internal/mounts"
 )
 
 // ---------------------------------------------------------------------------
@@ -33,7 +32,6 @@ func newTestModule(t *testing.T, listener model.WebListener, rules ...model.WebR
 	store := testConfigStoreWithListener(t, listener, rules...)
 	deps := &module.Deps{
 		Cfg:      store,
-		Mounts:   mounts.New(store),
 		DataDir:  filepath.Dir(store.Path()),
 		Registry: module.NewRegistry(),
 	}

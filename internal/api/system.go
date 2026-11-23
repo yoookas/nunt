@@ -370,7 +370,6 @@ func (s *Server) handleImportConfig(w http.ResponseWriter, r *http.Request) {
 		c.Forward = req.Config.Forward
 		c.DDNS = req.Config.DDNS
 		c.ACME = req.Config.ACME
-		c.Storage = req.Config.Storage
 		c.WAF = req.Config.WAF
 		return nil
 	}); err != nil {

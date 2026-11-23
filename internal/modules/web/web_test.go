@@ -16,7 +16,6 @@ import (
 	"github.com/nunt/nunt/internal/config"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
-	"github.com/nunt/nunt/internal/mounts"
 	"github.com/nunt/nunt/internal/security"
 	"github.com/nunt/nunt/internal/vfs"
 )
@@ -918,7 +917,6 @@ func TestModuleStartServesAndStopCloses(t *testing.T) {
 	store := testConfigStoreWithListener(t, testListener("l1", []string{addr}, model.TLSModeOff), raw)
 	deps := &module.Deps{
 		Cfg:      store,
-		Mounts:   mounts.New(store),
 		DataDir:  filepath.Dir(store.Path()),
 		Registry: module.NewRegistry(),
 	}
@@ -1017,7 +1015,6 @@ func TestModuleReloadReplacesListeners(t *testing.T) {
 	store := testConfigStoreWithListener(t, testListener("l1", []string{first}, model.TLSModeOff), rule)
 	deps := &module.Deps{
 		Cfg:      store,
-		Mounts:   mounts.New(store),
 		DataDir:  filepath.Dir(store.Path()),
 		Registry: module.NewRegistry(),
 	}
@@ -1068,7 +1065,6 @@ func TestModuleRuleValidation(t *testing.T) {
 	store := testConfigStore(t)
 	deps := &module.Deps{
 		Cfg:      store,
-		Mounts:   mounts.New(store),
 		DataDir:  filepath.Dir(store.Path()),
 		Registry: module.NewRegistry(),
 	}

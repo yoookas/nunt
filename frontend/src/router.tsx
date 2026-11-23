@@ -11,7 +11,6 @@ const Forward = lazy(() => import('./views/Forward'))
 const Ddns = lazy(() => import('./views/Ddns'))
 const Acme = lazy(() => import('./views/Acme'))
 const Waf = lazy(() => import('./views/Waf'))
-const Storage = lazy(() => import('./views/Storage'))
 const Logs = lazy(() => import('./views/Logs'))
 const Settings = lazy(() => import('./views/Settings'))
 
@@ -57,7 +56,6 @@ const router = createHashRouter([
           { path: 'ddns', element: <Ddns /> },
           { path: 'acme', element: <Acme /> },
           { path: 'waf', element: <Waf /> },
-          { path: 'storage', element: <Storage /> },
           { path: 'logs', element: <Logs /> },
           { path: 'settings', element: <Settings /> },
           { path: 'password', element: <PasswordChange /> },

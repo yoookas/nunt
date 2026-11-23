@@ -230,30 +230,17 @@ func (w *Web) staticSite(r *rule) (*webSite, error) {
 	if target == nil {
 		return nil, fmt.Errorf("rule %q: static settings are required", r.name)
 	}
-	store := &staticFS{label: r.name}
-	switch {
-	case target.MountID != "":
-		store.label = "mount " + target.MountID
-		store.open = func() (vfs.FS, func(), error) {
-			fsys, _, release, err := w.deps.Mounts.Get(target.MountID)
-			return fsys, release, err
+	root := strings.TrimSpace(target.Root)
+	if root == "" {
+		return nil, fmt.Errorf("rule %q: a root directory is required", r.name)
+	}
+	store := &staticFS{label: root}
+	store.open = func() (vfs.FS, func(), error) {
+		fsys, err := vfs.OpenLocal(root, r.name, true)
+		if err != nil {
+			return nil, nil, err
 		}
-	case strings.TrimSpace(target.Root) != "":
-		root := strings.TrimSpace(target.Root)
-		store.label = root
-		store.open = func() (vfs.FS, func(), error) {
-			fsys, err := w.deps.Mounts.Local(root, r.name, true)
-			if err != nil {
-				return nil, nil, err
-			}
-			release := func() {}
-			if c, ok := fsys.(io.Closer); ok {
-				release = func() { _ = c.Close() }
-			}
-			return fsys, release, nil
-		}
-	default:
-		return nil, fmt.Errorf("rule %q: a mount or a root directory is required", r.name)
+		return fsys, func() { _ = fsys.Close() }, nil
 	}
 
 	index := target.Index

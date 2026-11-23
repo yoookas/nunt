@@ -1788,7 +1788,7 @@ export default function Settings() {
       <ConfirmModal
         open={importCandidate !== null}
         title="导入配置"
-        content="导入会覆盖当前的系统、Web、转发、动态域名、证书、存储与 WAF 配置，确定继续吗？"
+        content="导入会覆盖当前的系统、Web、转发、动态域名、证书与 WAF 配置，确定继续吗？"
         danger
         confirmText="导入"
         onCancel={() => setImportCandidate(null)}

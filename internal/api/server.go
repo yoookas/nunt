@@ -20,7 +20,6 @@ import (
 	"github.com/nunt/nunt/internal/logging"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
-	"github.com/nunt/nunt/internal/mounts"
 	"github.com/nunt/nunt/internal/netutil"
 	"github.com/nunt/nunt/internal/rest"
 	"github.com/nunt/nunt/internal/secret"
@@ -38,7 +37,6 @@ type Options struct {
 	Log      *logging.Hub
 	Registry *module.Registry
 	Certs    *certs.Store
-	Mounts   *mounts.Manager
 	Box      *secret.Box
 	Sessions *security.SessionStore
 	DataDir  string
@@ -391,7 +389,6 @@ func (s *Server) clientIP(r *http.Request) net.IP {
 func (s *Server) register() {
 	s.registerAuth()
 	s.registerSystem()
-	s.registerStorage()
 	s.registerModules()
 	s.registerEvents()
 
