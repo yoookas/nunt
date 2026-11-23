@@ -494,3 +494,103 @@ func scanFileReverse(path string, fn func(line []byte) bool) error {
 	}
 	return nil
 }
+
+// SeriesPoint aggregates one time bucket.
+type SeriesPoint struct {
+	Time      time.Time `json:"time"`
+	Total     int64     `json:"total"`
+	Errors4xx int64     `json:"errors4xx"`
+	Errors5xx int64     `json:"errors5xx"`
+	Bytes     int64     `json:"bytes"`
+}
+
+// MaxSeriesBuckets bounds the response size of one series request.
+const MaxSeriesBuckets = 1440
+
+// Series aggregates the records matching q into fixed buckets. Empty buckets
+// inside the requested range are returned as zeros so the caller can draw a
+// continuous chart; the range defaults to the last 24 hours when q.From is
+// zero, and to q.From + 24h when q.To is zero.
+func (s *Store) Series(q Query, bucket time.Duration) ([]SeriesPoint, error) {
+	q = normalizeQuery(q)
+	if bucket < time.Minute {
+		bucket = time.Minute
+	}
+	now := time.Now()
+	if q.To.IsZero() {
+		q.To = now
+	}
+	if q.From.IsZero() {
+		q.From = q.To.Add(-24 * time.Hour)
+	}
+	if q.To.Before(q.From) {
+		return []SeriesPoint{}, nil
+	}
+	count := int(q.To.Sub(q.From)/bucket) + 1
+	if count > MaxSeriesBuckets {
+		return nil, fmt.Errorf("time range covers %d buckets, at most %d allowed", count, MaxSeriesBuckets)
+	}
+
+	s.flush()
+	files, err := s.Files()
+	if err != nil {
+		return nil, err
+	}
+	fromNanos, toNanos := bounds(q)
+	points := map[int64]*SeriesPoint{}
+	scanned := 0
+	for i := len(files) - 1; i >= 0; i-- {
+		file := files[i]
+		if !fileInRange(file.Day, q) {
+			continue
+		}
+		err := scanFileReverse(filepath.Join(s.dir, file.Name), func(line []byte) bool {
+			if scanned >= maxQueryLines {
+				return false
+			}
+			scanned++
+			var e Entry
+			if err := json.Unmarshal(line, &e); err != nil {
+				return true
+			}
+			if fromNanos > 0 && e.Time.UnixNano() < fromNanos {
+				return true
+			}
+			if toNanos > 0 && e.Time.UnixNano() > toNanos {
+				return true
+			}
+			if !matchEntry(e, q) {
+				return true
+			}
+			key := e.Time.Truncate(bucket).Unix()
+			p, ok := points[key]
+			if !ok {
+				p = &SeriesPoint{Time: time.Unix(key, 0)}
+				points[key] = p
+			}
+			p.Total++
+			p.Bytes += e.Bytes
+			switch {
+			case e.Status >= 500:
+				p.Errors5xx++
+			case e.Status >= 400:
+				p.Errors4xx++
+			}
+			return true
+		})
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", file.Name, err)
+		}
+	}
+
+	start := q.From.Truncate(bucket)
+	out := make([]SeriesPoint, 0, count)
+	for ts := start; !ts.After(q.To); ts = ts.Add(bucket) {
+		if p, ok := points[ts.Unix()]; ok {
+			out = append(out, *p)
+			continue
+		}
+		out = append(out, SeriesPoint{Time: ts})
+	}
+	return out, nil
+}

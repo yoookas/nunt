@@ -36,6 +36,14 @@ interface HealthProblem {
   detail: string
 }
 
+interface SeriesPoint {
+  time: string
+  total: number
+  errors4xx: number
+  errors5xx: number
+  bytes: number
+}
+
 interface Health {
   certs: { total: number; expired: number; expiring7: number; expiring30: number; nextDays?: number }
   problems: HealthProblem[]
@@ -46,22 +54,25 @@ export default function Dashboard() {
   const [stats, setStats] = useState<any>(null)
   const [modules, setModules] = useState<ModuleStatus[]>([])
   const [health, setHealth] = useState<Health | null>(null)
+  const [series, setSeries] = useState<SeriesPoint[]>([])
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(true)
 
   const load = async () => {
     setLoading(true)
     try {
-      const [infoData, statsData, moduleData, logData, healthData] = await Promise.all([
+      const [infoData, statsData, moduleData, logData, healthData, seriesData] = await Promise.all([
         api.get('/api/v1/system/info'),
         api.get('/api/v1/system/stats'),
         api.get('/api/v1/modules'),
         api.get('/api/v1/system/logs', { limit: 30 }),
         api.get('/api/v1/system/health').catch(() => null),
+        api.get('/api/v1/logs/access/series', { bucket: 3600 }).catch(() => null),
       ])
       setInfo(infoData)
       setStats(statsData)
       setHealth(healthData)
+      setSeries(Array.isArray(seriesData?.points) ? seriesData.points : [])
       setModules(Array.isArray(moduleData) ? moduleData : [])
       setLogs(Array.isArray(logData?.entries) ? logData.entries : [])
     } catch (err) {
@@ -74,6 +85,8 @@ export default function Dashboard() {
   useEffect(() => {
     void load()
   }, [])
+
+  const seriesMax = series.reduce((max, point) => Math.max(max, point.total), 0)
 
   const moduleColumns: Column<ModuleStatus>[] = [
     {
@@ -179,6 +192,31 @@ export default function Dashboard() {
               hint={`${stats?.goroutines ?? '-'} goroutines`}
             />
           </div>
+
+          <Section
+            title="请求趋势"
+            description="最近 24 小时，按小时聚合访问日志（无日志时为空）"
+            extra={<span className="text-xs text-muted">峰值 {seriesMax} 次/小时</span>}
+          >
+            {series.length === 0 ? (
+              <div className="px-4 py-6 text-sm text-muted">暂无访问日志</div>
+            ) : (
+              <div className="flex h-28 items-end gap-1 px-4 pb-4" role="img" aria-label="最近 24 小时请求量">
+                {series.map((point) => {
+                  const height = seriesMax > 0 ? Math.max(4, Math.round((point.total / seriesMax) * 100)) : 4
+                  const failed = point.errors5xx > 0
+                  return (
+                    <div
+                      key={point.time}
+                      className={`flex-1 rounded-t ${failed ? 'bg-danger/70' : 'bg-accent/70'}`}
+                      style={{ height: `${height}%` }}
+                      title={`${fmtTime(point.time)} · ${point.total} 次 · 4xx ${point.errors4xx} · 5xx ${point.errors5xx} · ${fmtBytes(point.bytes)}`}
+                    />
+                  )
+                })}
+              </div>
+            )}
+          </Section>
 
           <div className="grid gap-6 xl:grid-cols-3">
             <div className="min-w-0 space-y-6 xl:col-span-2">

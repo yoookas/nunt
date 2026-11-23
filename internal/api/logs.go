@@ -24,6 +24,7 @@ func (s *Server) registerLogs() {
 	g := s.mux.Group("/api/v1/logs")
 	g.Get("/access", s.handleAccessLogs)
 	g.Get("/access/stats", s.handleAccessLogStats)
+	g.Get("/access/series", s.handleAccessLogSeries)
 	g.Get("/access/meta", s.handleAccessLogMeta)
 	g.Get("/access/export", s.handleAccessLogExport)
 	g.Delete("/access", s.handleClearAccessLogs)
@@ -150,6 +151,36 @@ func (s *Server) handleAccessLogStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rest.OK(w, st)
+}
+
+// handleAccessLogSeries returns the request counts per time bucket, which is
+// what the overview chart draws.
+func (s *Server) handleAccessLogSeries(w http.ResponseWriter, r *http.Request) {
+	store := s.logStore()
+	bucket := 3600
+	if raw := strings.TrimSpace(r.URL.Query().Get("bucket")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 60 || n > 3600 {
+			rest.Fail(w, http.StatusBadRequest, "bucket 必须是 60 到 3600 之间的秒数")
+			return
+		}
+		bucket = n
+	}
+	if store == nil {
+		rest.OK(w, map[string]any{"bucket": bucket, "points": []logstore.SeriesPoint{}})
+		return
+	}
+	q, err := accessQuery(r)
+	if err != nil {
+		rest.Fail(w, http.StatusBadRequest, "%s", err)
+		return
+	}
+	points, err := store.Series(q, time.Duration(bucket)*time.Second)
+	if err != nil {
+		rest.Fail(w, http.StatusBadRequest, "读取趋势失败：%s", err)
+		return
+	}
+	rest.OK(w, map[string]any{"bucket": bucket, "points": points})
 }
 
 func (s *Server) handleAccessLogMeta(w http.ResponseWriter, r *http.Request) {

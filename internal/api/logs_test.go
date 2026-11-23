@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -204,5 +205,49 @@ func TestLogDownloadRejectsTraversal(t *testing.T) {
 	rec := env.do(t, http.MethodGet, "/api/v1/system/logs/download?name=nunt.log", nil, cookies, nil)
 	if rec.Code != http.StatusNotFound && rec.Code != http.StatusOK {
 		t.Fatalf("download nunt.log = %d", rec.Code)
+	}
+}
+
+func TestAccessLogSeries(t *testing.T) {
+	env := newTestEnv(t)
+	cookies, _ := login(t, env)
+
+	base := time.Now().Truncate(time.Hour).Add(-2 * time.Hour)
+	seedLogs(t, env,
+		logstore.Entry{Time: base.Add(time.Minute), Source: logstore.SourceWeb, Status: 200, Bytes: 10},
+		logstore.Entry{Time: base.Add(2 * time.Minute), Source: logstore.SourceWeb, Status: 404, Bytes: 5},
+		logstore.Entry{Time: base.Add(61 * time.Minute), Source: logstore.SourceWeb, Status: 502, Bytes: 1},
+	)
+
+	from := base.Format(time.RFC3339)
+	rec := env.do(t, http.MethodGet, "/api/v1/logs/access/series?bucket=3600&from="+url.QueryEscape(from), nil, cookies, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("series = %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Bucket int                    `json:"bucket"`
+		Points []logstore.SeriesPoint `json:"points"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Bucket != 3600 || len(payload.Points) < 3 {
+		t.Fatalf("payload = %+v", payload)
+	}
+	var total int64
+	for _, point := range payload.Points {
+		total += point.Total
+	}
+	if total != 3 {
+		t.Fatalf("total = %d, want 3", total)
+	}
+	if payload.Points[0].Errors4xx+payload.Points[0].Errors5xx != 1 {
+		t.Fatalf("first bucket = %+v", payload.Points[0])
+	}
+
+	// Out of range buckets are rejected rather than producing a huge payload.
+	rec = env.do(t, http.MethodGet, "/api/v1/logs/access/series?bucket=60&from=2020-01-01T00:00:00Z", nil, cookies, nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("huge range = %d, want 400", rec.Code)
 	}
 }
