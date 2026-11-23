@@ -43,3 +43,10 @@ body {
 .data-table-scroll::-webkit-scrollbar {
   height: 6px;
 }
+
+/* Grid items default to min-width:auto, so a wide table can stretch the whole
+   column instead of scrolling inside its wrapper. This is what made the
+   horizontal scroller inactive on phones. */
+.grid > * {
+  min-width: 0;
+}

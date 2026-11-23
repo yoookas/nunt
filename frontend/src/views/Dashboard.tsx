@@ -118,7 +118,7 @@ export default function Dashboard() {
         <LoadingBlock />
       ) : (
         <div className="space-y-6">
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
             <StatCard
               icon={<Server size={16} />}
               label="版本"
@@ -146,7 +146,7 @@ export default function Dashboard() {
           </div>
 
           <div className="grid gap-6 xl:grid-cols-3">
-            <div className="space-y-6 xl:col-span-2">
+            <div className="min-w-0 space-y-6 xl:col-span-2">
               <Section title="模块" description="每个模块的启动状态与最近一次错误" flush>
                 <DataTable
                   items={modules}

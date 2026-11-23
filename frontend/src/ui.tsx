@@ -87,19 +87,19 @@ export function Section({
   const headerActions = actions ?? extra
   const header =
     title || description || headerActions ? (
-      <div className="flex flex-col gap-2 border-b border-border p-4 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border p-4">
         <div className="min-w-0">
           {title ? <div className="text-sm font-semibold sm:text-base">{title}</div> : null}
           {description ? <div className="mt-0.5 text-xs text-muted">{description}</div> : null}
         </div>
         {headerActions ? (
-          <div className="flex flex-wrap items-center gap-2 sm:justify-end">{headerActions}</div>
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{headerActions}</div>
         ) : null}
       </div>
     ) : null
 
   return (
-    <Card className={className}>
+    <Card className={`min-w-0 ${className}`.trim()}>
       {header}
       <Card.Content className={flush ? 'p-0' : 'p-4 sm:p-5'}>{children}</Card.Content>
     </Card>
@@ -122,12 +122,12 @@ export function StatCard({
 }) {
   return (
     <Card>
-      <Card.Content className="flex items-start gap-3 p-4">
-        {icon ? <div className="rounded-lg bg-default p-2 text-foreground">{icon}</div> : null}
+      <Card.Content className="flex items-start gap-2.5 p-3 sm:p-4">
+        {icon ? <div className="rounded-lg bg-default p-1.5 text-foreground sm:p-2">{icon}</div> : null}
         <div className="min-w-0">
-          <div className="text-xs text-muted">{label}</div>
-          <div className="mt-1 truncate text-xl font-semibold">{value}</div>
-          {hint ? <div className="mt-1 text-xs text-muted">{hint}</div> : null}
+          <div className="text-[11px] text-muted sm:text-xs">{label}</div>
+          <div className="mt-0.5 truncate text-lg font-semibold sm:text-xl">{value}</div>
+          {hint ? <div className="mt-0.5 truncate text-[11px] text-muted sm:text-xs">{hint}</div> : null}
         </div>
       </Card.Content>
     </Card>
@@ -171,7 +171,7 @@ export function DataTable<T>({
     )
   }
   return (
-    <div className="data-table-scroll w-full overflow-x-auto overscroll-x-contain">
+    <div className="data-table-scroll w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain">
       <div className="min-w-[600px] sm:min-w-0">
     <Table>
       <Table.Content aria-label={ariaLabel}>

@@ -133,7 +133,7 @@ export default function AppLayout() {
           </Dropdown>
         </Header>
 
-        <main className="min-h-0 flex-1 overflow-auto">
+        <main className="min-h-0 min-w-0 flex-1 overflow-auto">
           <Outlet />
         </main>
       </div>

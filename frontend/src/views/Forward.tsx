@@ -671,7 +671,7 @@ export default function Forward() {
       />
 
       <div className="space-y-6">
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
           <StatCard
             label="转发规则"
             value={rules.length}

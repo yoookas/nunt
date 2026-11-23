@@ -936,7 +936,7 @@ export default function Ddns() {
           </div>
         ) : null}
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
           <StatCard label="DDNS 规则" value={rules.length} hint={`启用 ${summary.enabled} 条`} />
           <StatCard label="已启用" value={summary.enabled} hint="当前参与调度的规则" />
           <StatCard label="累计成功" value={summary.success} hint="来自 /api/v1/ddns/status" />
