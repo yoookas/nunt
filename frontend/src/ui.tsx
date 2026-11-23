@@ -87,7 +87,7 @@ export function Section({
   const headerActions = actions ?? extra
   const header =
     title || description || headerActions ? (
-      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border p-3 sm:p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border p-4">
         <div className="min-w-0">
           {title ? <div className="text-sm font-semibold sm:text-base">{title}</div> : null}
           {description ? <div className="mt-0.5 text-xs text-muted">{description}</div> : null}
@@ -99,9 +99,9 @@ export function Section({
     ) : null
 
   return (
-    <Card className={`min-w-0 gap-0 ${className}`.trim()}>
+    <Card className={`min-w-0 ${className}`.trim()}>
       {header}
-      <Card.Content className={flush ? 'p-0' : 'p-3 sm:p-5'}>{children}</Card.Content>
+      <Card.Content className={flush ? 'p-0' : 'p-4 sm:p-5'}>{children}</Card.Content>
     </Card>
   )
 }
@@ -197,7 +197,7 @@ export function DataTable<T>({
   if (loading) return <TableSkeleton columns={columns.length} />
   if (items.length === 0) {
     return (
-      <EmptyState className="py-5 sm:py-10">
+      <EmptyState className="py-10">
         <EmptyState.Root>
           <div className="text-sm text-muted">{empty}</div>
         </EmptyState.Root>
