@@ -218,6 +218,7 @@ export default function Acme() {
   const [configSaving, setConfigSaving] = useState(false)
 
   const [jobForm, setJobForm] = useState<JobFormState>({ ...EMPTY_JOB, dnsCreds: {} })
+  const [jobAdvanced, setJobAdvanced] = useState(false)
   const [uploadForm, setUploadForm] = useState<UploadFormState>({
     name: '',
     domainsText: '',
@@ -357,6 +358,9 @@ export default function Acme() {
       renewDays: Number(job?.renewDays) || 30,
       remark: job?.remark || '',
     })
+    setJobAdvanced(
+      !!job && (Number(job.renewDays) !== 30 || !!job.remark || (job.dnsResolvers || []).length > 0),
+    )
     setJobOpen(true)
   }
 
@@ -839,6 +843,14 @@ export default function Acme() {
             />
           </div>
 
+          <SwitchInput
+            label="高级选项"
+            value={jobAdvanced}
+            onChange={setJobAdvanced}
+            hint="续期提前天数、备注、DNS 解析服务器；不展开也能正常保存"
+          />
+
+          {jobAdvanced ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <NumberInput
               label="续期提前天数"
@@ -855,6 +867,7 @@ export default function Acme() {
               placeholder="备注（可选）"
             />
           </div>
+          ) : null}
 
           {jobForm.challenge === 'dns' ? (
             <>
@@ -894,6 +907,7 @@ export default function Acme() {
                 </div>
               ) : null}
 
+              {jobAdvanced ? (
               <TextAreaInput
                 label="DNS 解析服务器"
                 value={jobForm.dnsResolversText}
@@ -904,6 +918,7 @@ export default function Acme() {
                 placeholder={'每行一个，例如：\n1.1.1.1:53\n8.8.8.8:53'}
                 hint="校验 TXT 记录时使用的解析服务器，留空使用系统默认"
               />
+              ) : null}
             </>
           ) : null}
         </div>
