@@ -170,6 +170,10 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		rest.Fail(w, http.StatusBadRequest, "管理后台 IP 白名单不合法：%s", err)
 		return
 	}
+	// The address database has its own endpoint (PUT /system/ip2region) and is
+	// no longer edited by the system form. The update below replaces the whole
+	// SystemConfig, so an omitted field would silently wipe the database path.
+	req.IP2RegionDB = s.opts.Cfg.Snapshot().System.IP2RegionDB
 
 	// The listener moves first and the file is written only after the new
 	// address is bound: when the port is occupied, the process lacks the
