@@ -49,6 +49,19 @@ type upstream struct {
 	target string
 }
 
+// Health tracking. An upstream is taken out of rotation after this many
+// consecutive failures and gets another chance after the cooldown; one success
+// (or a successful probe request) puts it back immediately.
+const (
+	upstreamFailThreshold = 3
+	upstreamCooldown      = 30 * time.Second
+)
+
+type upstreamHealth struct {
+	failures int
+	until    time.Time
+}
+
 // balancer picks an upstream for every request.
 type balancer struct {
 	mode      string
@@ -56,13 +69,20 @@ type balancer struct {
 	rr        atomic.Uint64
 	mu        sync.Mutex
 	rnd       *rand.Rand
+	health    map[string]*upstreamHealth
+	now       func() time.Time
 }
 
 func newBalancer(mode string, targets []string) (*balancer, error) {
 	if len(targets) == 0 {
 		return nil, errors.New("no upstream target configured")
 	}
-	b := &balancer{mode: strings.ToLower(strings.TrimSpace(mode)), rnd: rand.New(rand.NewSource(time.Now().UnixNano()))}
+	b := &balancer{
+		mode:   strings.ToLower(strings.TrimSpace(mode)),
+		rnd:    rand.New(rand.NewSource(time.Now().UnixNano())),
+		health: map[string]*upstreamHealth{},
+		now:    time.Now,
+	}
 	for _, raw := range targets {
 		u, err := parseTarget(raw)
 		if err != nil {
@@ -108,21 +128,144 @@ func parseTarget(raw string) (*url.URL, error) {
 	return u, nil
 }
 
-// pick returns the upstream serving a request.
+// pick returns the upstream serving a request, skipping the ones that are
+// currently considered down. When every upstream is down the normal choice is
+// returned anyway: a proxy that refuses to try is worse than one that tries and
+// fails, and it lets the first successful request bring the upstream back.
 func (b *balancer) pick(clientIP string) upstream {
+	start := b.startIndex(clientIP)
+	if up, ok := b.scan(start, ""); ok {
+		return up
+	}
+	// Every upstream looks down: fall back to the strategy's choice so a
+	// recovery is noticed instead of the rule refusing to try at all.
+	return b.upstreams[start%len(b.upstreams)]
+}
+
+// pickExcept is pick with one upstream excluded (used for a retry). It only
+// returns an upstream that is currently healthy.
+func (b *balancer) pickExcept(clientIP, exclude string) (upstream, bool) {
+	return b.scan(b.startIndex(clientIP), exclude)
+}
+
+// scan walks the upstream list from start and returns the first healthy entry
+// that is not excluded.
+func (b *balancer) scan(start int, exclude string) (upstream, bool) {
+	for offset := 0; offset < len(b.upstreams); offset++ {
+		candidate := b.upstreams[(start+offset)%len(b.upstreams)]
+		if candidate.target == exclude {
+			continue
+		}
+		if b.healthy(candidate.target) {
+			return candidate, true
+		}
+	}
+	return upstream{}, false
+}
+
+// startIndex returns the first candidate of the configured strategy.
+func (b *balancer) startIndex(clientIP string) int {
 	switch b.mode {
 	case balanceRandom:
 		b.mu.Lock()
 		i := b.rnd.Intn(len(b.upstreams))
 		b.mu.Unlock()
-		return b.upstreams[i]
+		return i
 	case balanceIPHash:
 		h := fnv.New32a()
 		_, _ = h.Write([]byte(clientIP))
-		return b.upstreams[int(h.Sum32()%uint32(len(b.upstreams)))]
+		return int(h.Sum32() % uint32(len(b.upstreams)))
 	default:
 		i := b.rr.Add(1) - 1
-		return b.upstreams[int(i%uint64(len(b.upstreams)))]
+		return int(i % uint64(len(b.upstreams)))
+	}
+}
+
+// healthy reports whether an upstream may receive traffic.
+func (b *balancer) healthy(target string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	state, ok := b.health[target]
+	if !ok || state.failures < upstreamFailThreshold {
+		return true
+	}
+	return !b.now().Before(state.until)
+}
+
+// report records the outcome of one request: consecutive failures open the
+// circuit for a cooldown, one success closes it.
+func (b *balancer) report(target string, ok bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	state, exists := b.health[target]
+	if !exists {
+		state = &upstreamHealth{}
+		b.health[target] = state
+	}
+	if ok {
+		state.failures = 0
+		state.until = time.Time{}
+		return
+	}
+	state.failures++
+	if state.failures >= upstreamFailThreshold {
+		state.until = b.now().Add(upstreamCooldown)
+	}
+}
+
+// requestAttempt tracks which upstream is serving the current request, so the
+// retry path can hand the report over to the next upstream.
+type requestAttempt struct{ target string }
+
+type attemptKey struct{}
+
+func withAttempt(ctx context.Context, target string) (context.Context, *requestAttempt) {
+	at := &requestAttempt{target: target}
+	return context.WithValue(ctx, attemptKey{}, at), at
+}
+
+func attemptFrom(ctx context.Context) *requestAttempt {
+	at, _ := ctx.Value(attemptKey{}).(*requestAttempt)
+	return at
+}
+
+type balancerKey struct{}
+
+func withBalancer(ctx context.Context, b *balancer) context.Context {
+	return context.WithValue(ctx, balancerKey{}, b)
+}
+
+func balancerFrom(ctx context.Context) *balancer {
+	b, _ := ctx.Value(balancerKey{}).(*balancer)
+	return b
+}
+
+type retriedKey struct{}
+
+func withRetried(ctx context.Context) context.Context {
+	return context.WithValue(ctx, retriedKey{}, true)
+}
+
+func alreadyRetried(ctx context.Context) bool {
+	v, _ := ctx.Value(retriedKey{}).(bool)
+	return v
+}
+
+// retryableRequest reports whether a failed request may be sent to another
+// upstream: only idempotent methods, only transport failures (a timeout would
+// just double the latency) and never an upgraded connection.
+func retryableRequest(req *http.Request, err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) || req.Context().Err() != nil {
+		return false
+	}
+	if isUpgrade(req) {
+		return false
+	}
+	switch req.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -183,8 +326,17 @@ func (w *Web) proxySite(r *rule, cfg *model.Config) (*webSite, error) {
 			return
 		}
 		up := bal.pick(clientIPString(req, w.trustProxy(cfg)))
+		ctx, attempt := withAttempt(req.Context(), up.target)
+		ctx = withBalancer(ctx, bal)
+		req = req.WithContext(ctx)
 		req = req.WithContext(withUpstream(req.Context(), up.target))
-		proxyFor(w, r, up, target).ServeHTTP(rw, req)
+
+		rec := &accessRecorder{ResponseWriter: rw}
+		proxyFor(w, r, up, target).ServeHTTP(rec, req)
+		// 502/503/504 mean the upstream was unreachable or refused to serve;
+		// anything else is a real answer and closes the circuit again.
+		status := rec.status
+		bal.report(attempt.target, status < 502 || status > 504)
 	})
 
 	return &webSite{handler: handler, upstreams: bal.addresses()}, nil
@@ -342,6 +494,20 @@ func buildProxy(w *Web, r *rule, up upstream, target *model.ProxyTarget) *httput
 				// the request and the refusal is already counted.
 				http.Error(rw, bodyLimitMessage, http.StatusRequestEntityTooLarge)
 				return
+			}
+			// One retry on another healthy upstream for idempotent requests.
+			if bal := balancerFrom(req.Context()); bal != nil && !alreadyRetried(req.Context()) &&
+				retryableRequest(req, err) {
+				if next, ok := bal.pickExcept(clientIPString(req, w.trustProxy(w.cfg)), up.target); ok {
+					bal.report(up.target, false)
+					if attempt := attemptFrom(req.Context()); attempt != nil {
+						attempt.target = next.target
+					}
+					w.logger().Warn("web: retrying on another upstream", "rule", r.name,
+						"failed", up.target, "next", next.target, "error", err)
+					proxyFor(w, r, next, target).ServeHTTP(rw, req.WithContext(withRetried(req.Context())))
+					return
+				}
 			}
 			status := http.StatusBadGateway
 			if errors.Is(err, context.DeadlineExceeded) {
