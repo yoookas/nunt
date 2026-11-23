@@ -15,10 +15,13 @@ import (
 // the assertions never race the background goroutine.
 func seedLogs(t *testing.T, env *testEnv, entries ...logstore.Entry) {
 	t.Helper()
+	// Read the counter before appending: the writer goroutine is fast enough
+	// to flush an entry before this function looks at Meta, which made the
+	// target unreachable and the timeout look like a lost record.
+	want := env.logs.Meta().Written + int64(len(entries))
 	for _, e := range entries {
 		env.logs.Append(e)
 	}
-	want := env.logs.Meta().Written + int64(len(entries))
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if env.logs.Meta().Written >= want {

@@ -94,8 +94,10 @@ func TestSubscribersGetIndependentSnapshots(t *testing.T) {
 func TestValidateRejectsUnknownDNSProviders(t *testing.T) {
 	cfg := Default()
 	cfg.Users = []model.User{{ID: "u1", Username: "admin", Role: "admin", Enabled: true}}
+	// Deliberately not a real provider: using a shipped one here broke this
+	// test the day Cloudflare was added.
 	cfg.DDNS.Rules = []model.DDNSRule{{
-		ID: "r1", Name: "home", Enable: true, Domain: "example.com", Provider: "cloudflare",
+		ID: "r1", Name: "home", Enable: true, Domain: "example.com", Provider: "no-such-provider",
 	}}
 	err := Validate(cfg)
 	if err == nil || !strings.Contains(err.Error(), "unknown DNS provider") {
@@ -115,7 +117,7 @@ func TestValidateRejectsUnknownDNSProviders(t *testing.T) {
 
 	cfg.ACME.Jobs = []model.CertJob{{
 		ID: "j1", Name: "cert", Enable: true, Domains: []string{"a.example.com"},
-		Challenge: "dns", DNSProvider: "cloudflare",
+		Challenge: "dns", DNSProvider: "no-such-provider",
 	}}
 	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "unknown DNS provider") {
 		t.Fatalf("an unknown certificate provider was accepted: %v", err)
