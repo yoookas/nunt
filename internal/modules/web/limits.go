@@ -153,7 +153,7 @@ func (w *Web) noteRateLimited(r *rule, req *http.Request, client string) {
 	w.countersMu.Lock()
 	w.rateLimited++
 	w.countersMu.Unlock()
-	w.logger().Warn("web: request rate limit reached",
+	w.logger().Warn("web：请求触发限速",
 		"rule", r.name, "client", client, "method", req.Method, "path", req.URL.Path,
 		"limitPerSec", r.spec.Proxy.RateLimitPerSec)
 }
@@ -257,6 +257,6 @@ func (w *Web) noteBodyRejected(r *rule, req *http.Request, limit int64) {
 	w.countersMu.Lock()
 	w.bodyRejected++
 	w.countersMu.Unlock()
-	w.logger().Warn("web: request body rejected",
+	w.logger().Warn("web：请求体被拒绝",
 		"rule", r.name, "method", req.Method, "path", req.URL.Path, "limit", limit)
 }

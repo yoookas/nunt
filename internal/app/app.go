@@ -25,6 +25,7 @@ import (
 	"github.com/nunt/nunt/internal/secret"
 	"github.com/nunt/nunt/internal/security"
 	"github.com/nunt/nunt/internal/store"
+	"github.com/nunt/nunt/internal/version"
 
 	"github.com/nunt/nunt/internal/modules/acme"
 	"github.com/nunt/nunt/internal/modules/ddns"
@@ -116,7 +117,7 @@ func New(opts Options) (*App, error) {
 	a.sessions = security.NewSessionStore()
 	a.geo = ip2region.New()
 	if err := a.geo.Configure(cfg.Snapshot().System.IP2RegionDB); err != nil {
-		logger.Warn("ip2region: cannot load the database", "error", err)
+		logger.Warn("ip2region：无法加载地址库", "error", err)
 	}
 
 	// The persistent access log lives next to the process log. Opening it
@@ -223,7 +224,7 @@ func (a *App) Registry() *module.Registry { return a.registry }
 func (a *App) Reload() {
 	if a.geo != nil {
 		if err := a.geo.Configure(a.cfg.Snapshot().System.IP2RegionDB); err != nil {
-			a.log.Logger().Warn("ip2region: cannot reload the database", "error", err)
+			a.log.Logger().Warn("ip2region：无法重新加载地址库", "error", err)
 		}
 	}
 	a.registry.Reload(a.cfg.Snapshot())
@@ -234,17 +235,41 @@ func (a *App) Reload() {
 func (a *App) Run(ctx context.Context) error {
 	log := a.log.Logger()
 	if a.adminListen.Source == adminlisten.SourceEnv {
-		log.Info("admin listen address comes from the environment, not config.json",
+		log.Info("管理端监听地址来自环境变量（优先于 config.json）",
 			"addr", a.adminListen.Listen,
 			"env", a.adminListen.EnvVar,
 			"config", a.adminListen.ConfigListen)
 	} else {
-		log.Info("admin listen address comes from the configuration file",
+		log.Info("管理端监听地址来自配置文件",
 			"addr", a.adminListen.Listen,
 			"config", a.adminListen.ConfigListen)
 	}
-	for _, err := range a.registry.StartAll(ctx) {
-		log.Error("module failed to start", "error", err)
+	logAccess := a.cfg.Snapshot().Logs.Access
+	log.Info("访问日志已就绪",
+		"dir", filepath.Join(a.opts.DataDir, "logs", "access"),
+		"persist", logAccess.Persist,
+		"keepDays", logAccess.KeepDays,
+		"maxFileMB", logAccess.MaxFileMB)
+	info := version.Get()
+	log.Info("nunt 已启动",
+		"version", info.Version,
+		"commit", info.Commit,
+		"go", info.GoVersion,
+		"data", a.opts.DataDir,
+		"config", a.opts.ConfigPath)
+	// Start the modules here instead of through Registry.StartAll so every
+	// module reports when it came up and how long it took. The order is the
+	// same (registry order), and a failure does not stop the rest.
+	for _, mod := range a.registry.All() {
+		started := time.Now()
+		if err := mod.Start(ctx); err != nil {
+			log.Error("模块启动失败", "module", mod.Name(), "title", mod.Title(), "error", err)
+			continue
+		}
+		log.Info("模块已启动",
+			"module", mod.Name(),
+			"title", mod.Title(),
+			"duration", time.Since(started).Round(time.Microsecond).String())
 	}
 	a.startBackups(ctx)
 
@@ -254,11 +279,11 @@ func (a *App) Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		log.Info("shutdown requested")
+		log.Info("收到停止信号，开始关闭")
 	case err := <-a.admin.Errors():
 		// Log before Shutdown: Shutdown closes the log hub, so an error reported
 		// after it would be swallowed.
-		log.Error("admin server stopped with an error", "error", err)
+		log.Error("管理端服务异常退出", "error", err)
 		a.Shutdown()
 		return err
 	}
@@ -272,17 +297,19 @@ func (a *App) Shutdown() {
 	defer cancel()
 	if a.admin != nil {
 		if err := a.admin.Close(); err != nil {
-			a.log.Logger().Warn("admin server shutdown", "error", err)
+			a.log.Logger().Warn("管理端服务已关闭", "error", err)
 		}
 	}
 	if a.bgCancel != nil {
 		a.bgCancel()
 	}
 	a.bg.Wait()
+	stopped := time.Now()
 	a.registry.StopAll(ctx)
+	a.log.Logger().Info("模块已全部停止", "duration", time.Since(stopped).Round(time.Millisecond).String())
 	if a.logStore != nil {
 		if err := a.logStore.Close(); err != nil {
-			a.log.Logger().Warn("access log shutdown", "error", err)
+			a.log.Logger().Warn("访问日志写入已停止", "error", err)
 		}
 	}
 	a.sessions.Close()
@@ -324,8 +351,12 @@ func (a *App) runBackup() {
 	}
 	path, err := backup.Create(a.opts.DataDir, dest, cfg.Backup.Keep, time.Now())
 	if err != nil {
-		a.log.Logger().Warn("backup: cannot write an archive", "error", err)
+		a.log.Logger().Warn("备份：无法写入归档", "dir", dest, "error", err)
 		return
 	}
-	a.log.Logger().Info("backup: archive written", "file", path)
+	size := int64(0)
+	if info, statErr := os.Stat(path); statErr == nil {
+		size = info.Size()
+	}
+	a.log.Logger().Info("备份：归档已写入", "file", path, "bytes", size, "keep", cfg.Backup.Keep)
 }

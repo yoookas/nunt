@@ -72,20 +72,20 @@ func (a *ACME) startDNS01(ctx context.Context, client *acme.Client, chal *acme.C
 	if waitErr != nil {
 		removeCtx, removeCancel := context.WithTimeout(context.Background(), time.Minute)
 		if derr := provider.Delete(removeCtx, record); derr != nil {
-			a.log.Warn("cannot remove the TXT record after a failed validation", "record", recName, "error", derr)
+			a.log.Warn("验证失败后无法删除 TXT 记录", "record", recName, "error", derr)
 		}
 		removeCancel()
 		cancel()
 		return nil, fmt.Errorf("dns-01 challenge for %s: %w", domain, waitErr)
 	}
-	a.log.Info("dns-01 record is visible on every resolver", "record", recName, "zone", zone)
+	a.log.Info("dns-01 的 TXT 记录已在所有解析器可见", "record", recName, "zone", zone)
 
 	cleanup := func() {
 		defer cancel()
 		removeCtx, removeCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer removeCancel()
 		if err := provider.Delete(removeCtx, record); err != nil {
-			a.log.Warn("cannot remove the TXT record", "record", recName, "error", err)
+			a.log.Warn("无法删除 TXT 记录", "record", recName, "error", err)
 		}
 	}
 	return cleanup, nil

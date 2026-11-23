@@ -46,6 +46,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	ip := s.clientIP(r).String()
 	limitKey := strings.ToLower(req.Username) + "|" + ip
 	if ok, wait := s.loginLimiter.Allow(limitKey); !ok {
+		s.log.Warn("登录被限流拒绝",
+			"user", req.Username, "ip", ip, "retryAfter", wait.Round(time.Second).String())
 		rest.FailCode(w, http.StatusTooManyRequests, "locked",
 			"失败次数过多，请在 %s 后重试", wait.Round(time.Second))
 		return
@@ -54,7 +56,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	user, found := s.opts.Cfg.FindUser(req.Username)
 	if !found || !user.Enabled || !security.VerifyPassword(user.PasswordHash, req.Password) {
 		lock := s.loginLimiter.Fail(limitKey)
-		s.log.Warn("failed login", "user", req.Username, "ip", ip)
+		reason := "密码错误"
+		switch {
+		case !found:
+			reason = "用户不存在"
+		case !user.Enabled:
+			reason = "用户已停用"
+		}
+		args := []any{"user", req.Username, "ip", ip, "reason", reason}
+		if lock > 0 {
+			args = append(args, "lockedFor", lock.Round(time.Second).String())
+		}
+		s.log.Warn("登录失败", args...)
 		if lock > 0 {
 			rest.FailCode(w, http.StatusTooManyRequests, "locked",
 				"失败次数过多，账号已锁定 %s", lock.Round(time.Second))
@@ -113,7 +126,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user *mode
 		}
 		return nil
 	})
-	s.log.Info("login", "user", user.Username, "ip", ip)
+	s.log.Info("登录成功", "user", user.Username, "ip", ip)
 	rest.OK(w, map[string]any{
 		"username":           user.Username,
 		"csrf":               sess.CSRF,

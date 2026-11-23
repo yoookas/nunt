@@ -83,7 +83,7 @@ func (w *WAF) Start(ctx context.Context) error {
 	w.mu.Unlock()
 
 	if err := w.rebuild(cfg, true); err != nil && w.log != nil {
-		w.log.Error("waf: the rule set cannot be compiled, traffic is not inspected", "error", err)
+		w.log.Error("WAF：规则集编译失败，流量不会被检查", "error", err)
 	}
 	w.wg.Add(1)
 	go w.worker()
@@ -113,7 +113,7 @@ func (w *WAF) Stop(context.Context) error {
 	w.wg.Wait()
 	if eng != nil {
 		if err := eng.close(); err != nil && w.log != nil {
-			w.log.Warn("waf: closing the engine", "error", err)
+			w.log.Warn("WAF：正在关闭引擎", "error", err)
 		}
 	}
 	w.SetRunning(false)
@@ -161,7 +161,7 @@ func (w *WAF) worker() {
 			cfg := w.cfg
 			w.mu.RUnlock()
 			if err := w.rebuild(cfg, false); err != nil && w.log != nil {
-				w.log.Error("waf: the rule set cannot be compiled, keeping the previous engine", "error", err)
+				w.log.Error("WAF：规则集编译失败，继续使用旧引擎", "error", err)
 			}
 		}
 	}
@@ -218,7 +218,7 @@ func (w *WAF) rebuild(cfg model.WAFConfig, force bool) error {
 	w.SetError(nil)
 	w.SetDetail(eng.detail)
 	if w.log != nil {
-		w.log.Info("waf: engine ready", "detail", eng.detail, "mode", eng.cfg.Mode, "logOnly", eng.cfg.LogOnly)
+		w.log.Info("WAF：引擎已就绪", "detail", eng.detail, "mode", eng.cfg.Mode, "logOnly", eng.cfg.LogOnly)
 	}
 	return nil
 }
@@ -280,7 +280,7 @@ func (w *WAF) Middleware(ruleName string, next http.Handler) http.Handler {
 		if err != nil {
 			w.rec.errors.Add(1)
 			if w.log != nil {
-				w.log.Warn("waf: the request could not be inspected", "rule", ruleName, "error", err)
+				w.log.Warn("WAF：请求无法被检查", "rule", ruleName, "error", err)
 			}
 		}
 		if handled {

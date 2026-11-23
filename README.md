@@ -39,8 +39,8 @@ docker compose up -d --build
 ```
 ============================================================
   A new configuration was created.
-  Administrator user : admin
-  Administrator pass : xxxxxxxxxxxxxxxx
+  管理员账号 : admin
+  管理员密码 : xxxxxxxxxxxxxxxx
   Sign in and change it immediately.
 ============================================================
 ```

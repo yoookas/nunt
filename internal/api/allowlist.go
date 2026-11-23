@@ -59,7 +59,7 @@ func newIPAllowList(log *slog.Logger, sys model.SystemConfig) *ipAllowList {
 		nets, err := netutil.ParseIPList([]string{item})
 		if err != nil || len(nets) == 0 {
 			if log != nil {
-				log.Warn("ignoring invalid admin ip allow list entry", "entry", item, "error", err)
+				log.Warn("忽略无效的管理端 IP 白名单条目", "entry", item, "error", err)
 			}
 			continue
 		}
@@ -67,7 +67,7 @@ func newIPAllowList(log *slog.Logger, sys model.SystemConfig) *ipAllowList {
 	}
 	list.failClosed = list.entries > 0 && len(list.nets) == 0
 	if list.failClosed && log != nil {
-		log.Error("admin ip allow list has no valid entry, every admin request will be denied",
+		log.Error("管理端 IP 白名单没有有效条目，所有管理请求都将被拒绝",
 			"entries", list.entries)
 	}
 	return list
@@ -97,7 +97,7 @@ func (s *Server) adminGuard(next http.Handler) http.Handler {
 			return
 		}
 		s.allowDenied.Add(1)
-		s.log.Warn("admin request denied by ip allow list",
+		s.log.Warn("管理端 IP 白名单拒绝了请求",
 			"ip", ipString(ip), "method", r.Method, "path", r.URL.Path)
 		rest.FailCode(w, http.StatusForbidden, "ip_not_allowed", "当前 IP 不在管理后台白名单内")
 	})

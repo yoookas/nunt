@@ -136,7 +136,7 @@ jobs:
           docker exec nunt stat -c %a /data/config.json | grep -qx 600
 
           # the generated administrator password is announced once, and it works
-          password=$(docker logs nunt 2>&1 | sed -n 's/.*Administrator pass : \([^ ]*\).*/\1/p' | head -n1)
+          password=$(docker logs nunt 2>&1 | sed -n 's/.*管理员密码 : \([^ ]*\).*/\1/p' | head -n1)
           test -n "$password"
           echo "password captured: ${#password} chars"
           jq -n --arg u admin --arg p "$password" '{username:$u,password:$p}' > /tmp/login.json

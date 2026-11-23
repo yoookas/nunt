@@ -312,8 +312,14 @@ func (s *Server) audit(r *http.Request, action string, fields ...any) {
 	if id != nil {
 		user = id.Username
 	}
-	args := append([]any{"user", user, "ip", s.clientIP(r).String(), "action", action}, fields...)
-	s.log.Info("admin action", args...)
+	args := append([]any{
+		"user", user,
+		"ip", s.clientIP(r).String(),
+		"action", action,
+		"method", r.Method,
+		"path", r.URL.Path,
+	}, fields...)
+	s.log.Info("管理操作", args...)
 }
 
 var _ = fmt.Sprintf

@@ -32,7 +32,7 @@ const (
 	// moduleName is the module id used by the API and the module registry.
 	moduleName = "acme"
 	// moduleTitle is the short human readable name.
-	moduleTitle = "Certificates"
+	moduleTitle = "证书"
 
 	// defaultRenewDays is used when a job does not set renewDays.
 	defaultRenewDays = 30
@@ -272,7 +272,7 @@ dispatch:
 		case <-ctx.Done():
 			break dispatch
 		}
-		a.log.Info("certificate due for renewal", "job", job.Name, "domains", job.Domains)
+		a.log.Info("证书即将到期，开始续期", "job", job.Name, "domains", job.Domains)
 		a.SetDetail(fmt.Sprintf("renewing certificate for %s", job.Domains[0]))
 		wg.Add(1)
 		go func(job model.CertJob) {
@@ -342,7 +342,7 @@ func (a *ACME) runJob(ctx context.Context, job model.CertJob, automatic bool) {
 
 	cfg := a.deps.Cfg.Snapshot()
 	if err := a.acquireIssue(ctx); err != nil {
-		a.log.Warn("acme: no issuance slot available", "job", job.Name, "error", err)
+		a.log.Warn("ACME：没有空闲的签发槽位", "job", job.Name, "error", err)
 		return
 	}
 	defer a.releaseIssue()
@@ -350,13 +350,13 @@ func (a *ACME) runJob(ctx context.Context, job model.CertJob, automatic bool) {
 	_, err := a.issue(ctx, req)
 	if err != nil {
 		a.recordFailure(job.ID, err)
-		a.log.Error("certificate issuance failed", "job", job.Name, "error", err)
+		a.log.Error("证书签发失败", "job", job.Name, "error", err)
 		a.refreshStats(cfg)
 		return
 	}
 	a.recordSuccess(job.ID)
 	a.SetError(nil)
-	a.log.Info("certificate issued", "job", job.Name, "domains", job.Domains)
+	a.log.Info("证书签发成功", "job", job.Name, "domains", job.Domains)
 	a.refreshStats(cfg)
 }
 

@@ -117,8 +117,16 @@ func (d *DDNS) Start(ctx context.Context) error {
 	d.cron.Start()
 	d.mu.Unlock()
 
+	cfg := d.deps.Cfg.Snapshot()
+	enabled := 0
+	for _, rule := range cfg.DDNS.Rules {
+		if rule.Enable {
+			enabled++
+		}
+	}
+	d.deps.Logger("ddns").Info("DDNS：调度器已启动", "rules", len(cfg.DDNS.Rules), "enabled", enabled)
 	d.SetRunning(true)
-	d.SetDetail("scheduler started")
+	d.SetDetail("调度器已启动")
 	return nil
 }
 
@@ -132,6 +140,7 @@ func (d *DDNS) Stop(context.Context) error {
 	if c != nil {
 		c.Stop()
 	}
+	d.deps.Logger("ddns").Info("DDNS：调度器已停止")
 	d.SetRunning(false)
 	return nil
 }
@@ -178,9 +187,13 @@ func (d *DDNS) applySchedule(cfg *model.Config) {
 		}
 		entryID, err := c.AddFunc(spec, func() { d.runRule(context.Background(), r.ID) })
 		if err != nil {
+			d.deps.Logger("ddns").Error("DDNS：规则的调度表达式无效",
+				"rule", r.Name, "schedule", spec, "error", err)
 			d.SetError(fmt.Errorf("rule %s: invalid schedule %q: %w", r.Name, spec, err))
 			continue
 		}
+		d.deps.Logger("ddns").Debug("DDNS：规则已加入调度",
+			"rule", r.Name, "domain", r.Domain, "schedule", spec, "provider", r.Provider)
 		d.mu.Lock()
 		d.entries[r.ID] = entryID
 		d.stateLocked(r.ID)
@@ -332,20 +345,23 @@ func (d *DDNS) runRule(ctx context.Context, ruleID string) {
 	defer lock.Unlock()
 
 	st := d.state(ruleID)
+	log := d.deps.Logger("ddns")
+	started := time.Now()
+	log.Debug("DDNS：开始执行规则", "rule", rule.Name, "domain", rule.Domain, "provider", rule.Provider)
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	creds, err := d.credentials(rule)
 	if err != nil {
-		message := "credentials: " + err.Error()
-		st.record(false, message)
+		log.Error("DDNS：读取凭据失败", "rule", rule.Name, "error", err)
+		st.record(false, "凭据："+err.Error())
 		return
 	}
 
 	provider, err := dnsprov.Default().New(rule.Provider, creds)
 	if err != nil {
-		message := "provider: " + err.Error()
-		st.record(false, message)
+		log.Error("DDNS：无法初始化 DNS 提供商", "rule", rule.Name, "provider", rule.Provider, "error", err)
+		st.record(false, "提供商："+err.Error())
 		return
 	}
 
@@ -364,7 +380,8 @@ func (d *DDNS) runRule(ctx context.Context, ruleID string) {
 		ip, err := detectIP(ctx, want.get, want.family)
 		if err != nil || ip == "" {
 			failed = true
-			message := fmt.Sprintf("ipv%s: %v", want.family, err)
+			log.Warn("DDNS：无法获取公网地址", "rule", rule.Name, "family", want.family, "error", err)
+			message := fmt.Sprintf("IPv%s：%v", want.family, err)
 			messages = append(messages, message)
 			st.record(false, message)
 			continue
@@ -395,6 +412,8 @@ func (d *DDNS) runRule(ctx context.Context, ruleID string) {
 			}
 			if err := provider.Set(ctx, rec); err != nil {
 				failed = true
+				log.Warn("DDNS：记录更新失败",
+					"rule", rule.Name, "record", rec.FQDN(), "type", want.ipType, "error", err)
 				message := fmt.Sprintf("%s %s: %v", rec.FQDN(), want.ipType, err)
 				messages = append(messages, message)
 				st.record(false, message)
@@ -408,14 +427,24 @@ func (d *DDNS) runRule(ctx context.Context, ruleID string) {
 		}
 	}
 
-	summary := "no change"
+	summary := "无变化"
 	if failed {
 		summary = strings.Join(messages, "; ")
+		log.Warn("DDNS：规则执行失败",
+			"rule", rule.Name, "domain", rule.Domain,
+			"duration", time.Since(started).Round(time.Millisecond).String(),
+			"error", summary)
 		st.record(false, summary)
 		return
 	}
 	if len(changed) > 0 {
-		summary = "updated " + strings.Join(changed, ", ")
+		summary = "已更新 " + strings.Join(changed, "、")
+		log.Info("DDNS：记录已更新",
+			"rule", rule.Name, "domain", rule.Domain, "count", len(changed),
+			"records", strings.Join(changed, "、"),
+			"duration", time.Since(started).Round(time.Millisecond).String())
+	} else {
+		log.Debug("DDNS：公网地址未变化", "rule", rule.Name, "domain", rule.Domain)
 	}
 	st.record(true, summary)
 }

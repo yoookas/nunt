@@ -204,7 +204,7 @@ func TestAdminAllowListFailsClosedWhenNoEntryIsValid(t *testing.T) {
 	if info["restricted"] != true || info["failClosed"] != true {
 		t.Fatalf("an all-invalid list must fail closed: %v", info)
 	}
-	if !hasLog(env, "error", "allow list") {
+	if !hasLog(env, "error", "白名单") {
 		t.Fatal("failing closed must be reported as an error log entry")
 	}
 }

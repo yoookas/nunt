@@ -81,14 +81,14 @@ func main() {
 	}
 
 	log := application.Logger().Logger()
-	log.Info("starting nunt", "version", version.Get().Version, "config", absCfg, "data", absDir)
+	log.Info("启动 nunt", "version", version.Get().Version, "config", absCfg, "data", absDir)
 	if pw := application.InitialPassword(); pw != "" {
 		fmt.Fprintf(os.Stdout, "\n"+
 			"============================================================\n"+
-			"  A new configuration was created.\n"+
-			"  Administrator user : admin\n"+
-			"  Administrator pass : %s\n"+
-			"  Sign in and change it immediately.\n"+
+			"  已生成新的配置文件\n"+
+			"  管理员账号 : admin\n"+
+			"  管理员密码 : %s\n"+
+			"  请立即登录并修改密码\n"+
 			"============================================================\n\n", pw)
 	}
 
@@ -96,10 +96,10 @@ func main() {
 	defer stop()
 
 	if err := application.Run(ctx); err != nil {
-		log.Error("service stopped", "error", err)
+		log.Error("服务已停止", "error", err)
 		os.Exit(1)
 	}
-	log.Info("bye")
+	log.Info("再见")
 }
 
 func fatal(err error) {

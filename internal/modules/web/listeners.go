@@ -132,7 +132,7 @@ func (l *listener) start(plan *listenerPlan) error {
 		l.plain = ln
 		l.mu.Unlock()
 		go l.serve(ln, "http")
-		l.web.logger().Info("web: listener ready", "addr", l.addr, "tls", false, "routes", len(plan.rules))
+		l.web.logger().Info("web：监听器已就绪", "addr", l.addr, "tls", false, "routes", len(plan.rules))
 		return nil
 	}
 
@@ -150,14 +150,14 @@ func (l *listener) start(plan *listenerPlan) error {
 	l.secure = ln
 	l.mu.Unlock()
 	go l.serve(tls.NewListener(ln, tlsCfg), "https")
-	l.web.logger().Info("web: listener ready", "addr", l.addr, "tls", true, "routes", len(plan.rules))
+	l.web.logger().Info("web：监听器已就绪", "addr", l.addr, "tls", true, "routes", len(plan.rules))
 	return nil
 }
 
 func (l *listener) serve(ln net.Listener, scheme string) {
 	err := l.server.Serve(ln)
 	if err != nil && !errors.Is(err, http.ErrServerClosed) && !isClosedError(err) {
-		l.web.log.Error("web: listener stopped", "addr", l.addr, "scheme", scheme, "error", err)
+		l.web.log.Error("web：监听器已停止", "addr", l.addr, "scheme", scheme, "error", err)
 		l.web.SetError(fmt.Errorf("listener %s (%s): %w", l.addr, scheme, err))
 	}
 }
@@ -261,7 +261,7 @@ func (w *Web) resolveCustomCertificates(plans map[string]*listenerPlan) {
 		}
 		info, ok := w.deps.Certs.Get(plan.tls.certID)
 		if !ok {
-			w.logger().Error("web: certificate not found", "listener", plan.addr, "certificate", plan.tls.certID)
+			w.logger().Error("web：找不到证书", "listener", plan.addr, "certificate", plan.tls.certID)
 			w.SetError(fmt.Errorf("listener %q: certificate %q does not exist", plan.addr, plan.tls.certID))
 			continue
 		}

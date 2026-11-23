@@ -172,7 +172,7 @@ func (p *proxy) start() error {
 }
 
 func (p *proxy) logStarted(addr string) {
-	p.f.log.Info("forward: rule listening",
+	p.f.log.Info("转发：规则开始监听",
 		"rule", ruleLabel(p.rule), "protocol", p.proto, "src", addr, "dst", p.rule.DstAddr)
 }
 
@@ -213,7 +213,7 @@ func (p *proxy) close() {
 	for _, s := range sessions {
 		s.close()
 	}
-	p.f.log.Info("forward: rule stopped", "rule", ruleLabel(p.rule), "protocol", p.proto)
+	p.f.log.Info("转发：规则已停止", "rule", ruleLabel(p.rule), "protocol", p.proto)
 }
 
 func (p *proxy) closeConns() {
@@ -304,7 +304,7 @@ func (p *proxy) acceptLoop(ln net.Listener) {
 				}
 				continue
 			}
-			p.f.log.Warn("forward: accept failed", "rule", ruleLabel(p.rule), "error", err)
+			p.f.log.Warn("转发：接受连接失败", "rule", ruleLabel(p.rule), "error", err)
 			if !p.isRunning() {
 				return
 			}
@@ -376,7 +376,7 @@ func (p *proxy) reject(reason string, remote net.Addr) {
 		Target:   p.rule.DstAddr,
 		Result:   "rejected: " + reason,
 	})
-	p.f.log.Warn("forward: connection rejected by a concurrency limit",
+	p.f.log.Warn("转发：连接达到并发上限被拒绝",
 		"rule", ruleLabel(p.rule), "protocol", p.proto, "client", addrString(remote),
 		"reason", reason, "limit", p.limitValue(reason))
 }
@@ -419,7 +419,7 @@ func (p *proxy) handleTCP(src net.Conn, ip string) {
 			Result:   "denied",
 			Duration: time.Since(start),
 		})
-		p.f.log.Warn("forward: connection denied by the access rule",
+		p.f.log.Warn("转发：连接被访问规则拒绝",
 			"rule", ruleLabel(p.rule), "client", client)
 		return
 	}
@@ -439,7 +439,7 @@ func (p *proxy) handleTCP(src net.Conn, ip string) {
 			Result:   "failed: " + err.Error(),
 			Duration: time.Since(start),
 		})
-		p.f.log.Warn("forward: cannot reach the destination",
+		p.f.log.Warn("转发：无法连接目标",
 			"rule", ruleLabel(p.rule), "dst", p.rule.DstAddr, "error", err)
 		return
 	}
@@ -637,7 +637,7 @@ func (p *proxy) udpReadLoop(pc net.PacketConn) {
 				}
 				continue
 			}
-			p.f.log.Warn("forward: udp read failed", "rule", ruleLabel(p.rule), "error", err)
+			p.f.log.Warn("转发：UDP 读取失败", "rule", ruleLabel(p.rule), "error", err)
 			if !p.isRunning() {
 				return
 			}
@@ -661,7 +661,7 @@ func (p *proxy) enqueue(pc net.PacketConn, client net.Addr, data []byte) bool {
 		return true
 	default:
 		if n := p.rejectedQueue.Add(1); n%1000 == 1 && p.f != nil && p.f.log != nil {
-			p.f.log.Warn("forward: the udp worker queue is full, datagrams are dropped",
+			p.f.log.Warn("转发：UDP 工作队列已满，数据报被丢弃",
 				"rule", ruleLabel(p.rule), "dropped", n)
 		}
 		return false
@@ -711,7 +711,7 @@ func (p *proxy) handleUDP(pc net.PacketConn, client net.Addr, data []byte) {
 
 		if !p.allow(client) {
 			p.removeSession(key, sess, "denied")
-			p.f.log.Warn("forward: udp packet denied by the access rule",
+			p.f.log.Warn("转发：UDP 报文被访问规则拒绝",
 				"rule", ruleLabel(p.rule), "client", key)
 			return
 		}
@@ -720,7 +720,7 @@ func (p *proxy) handleUDP(pc net.PacketConn, client net.Addr, data []byte) {
 		conn, err := dialer.Dial(protoUDP, p.rule.DstAddr)
 		if err != nil {
 			p.removeSession(key, sess, "failed: "+err.Error())
-			p.f.log.Warn("forward: cannot reach the udp destination",
+			p.f.log.Warn("转发：无法连接 UDP 目标",
 				"rule", ruleLabel(p.rule), "dst", p.rule.DstAddr, "error", err)
 			return
 		}
@@ -841,7 +841,7 @@ func (p *proxy) rejectDatagram(client string, reason string, limit int) {
 		Target:   p.rule.DstAddr,
 		Result:   "dropped: " + reason,
 	})
-	p.f.log.Warn("forward: udp datagram dropped by a concurrency limit",
+	p.f.log.Warn("转发：UDP 数据报达到并发上限被丢弃",
 		"rule", ruleLabel(p.rule), "client", client, "reason", reason, "limit", limit)
 }
 

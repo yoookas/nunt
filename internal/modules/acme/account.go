@@ -116,7 +116,7 @@ func (m *accountManager) clientFor(ctx context.Context, cfg *model.ACMEConfig) (
 		if err != nil {
 			// The stored registration may belong to another key or may have
 			// been deactivated: register again with the current key.
-			m.log.Warn("acme: stored account is unusable, registering again", "error", err)
+			m.log.Warn("ACME：已保存的账户不可用，重新注册", "error", err)
 			client.KID = ""
 			registered, err = m.register(ctx, client, email)
 			if err != nil {
@@ -138,7 +138,7 @@ func (m *accountManager) clientFor(ctx context.Context, cfg *model.ACMEConfig) (
 	if err := m.syncContact(ctx, email); err != nil {
 		return nil, err
 	}
-	m.log.Info("acme account ready", "directory", directory, "account", registered.URI)
+	m.log.Info("ACME：账户已就绪", "directory", directory, "account", registered.URI)
 	return m.client, nil
 }
 
@@ -204,7 +204,7 @@ func (m *accountManager) loadOrCreateKey() (*ecdsa.PrivateKey, error) {
 	if err := store.WriteFileAtomic(path, block, 0o600); err != nil {
 		return nil, fmt.Errorf("persist account key: %w", err)
 	}
-	m.log.Info("acme account key created", "path", path)
+	m.log.Info("ACME：账户密钥已生成", "path", path)
 	return key, nil
 }
 

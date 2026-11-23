@@ -29,12 +29,12 @@ func (w *Web) accessHandler(r *rule, next http.Handler) http.Handler {
 		ip := netutil.ClientIP(req, trustProxy)
 		allowed, reason := r.filter.Allowed(ip)
 		if !allowed {
-			w.logger().Warn("web: client rejected by ip filter", "rule", r.name, "mode", r.spec.Access.Mode, "ip", ipString(ip), "reason", reason)
+			w.logger().Warn("web：客户端被 IP 过滤拒绝", "rule", r.name, "mode", r.spec.Access.Mode, "ip", ipString(ip), "reason", reason)
 			http.Error(rw, "forbidden", http.StatusForbidden)
 			return
 		}
 		if !netutil.UAAllowed(r.spec.Access.UAMode, r.spec.Access.UAs, req.UserAgent()) {
-			w.logger().Warn("web: client rejected by user agent filter", "rule", r.name, "mode", r.spec.Access.UAMode, "ua", req.UserAgent())
+			w.logger().Warn("web：客户端被 User-Agent 过滤拒绝", "rule", r.name, "mode", r.spec.Access.UAMode, "ua", req.UserAgent())
 			http.Error(rw, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -60,7 +60,7 @@ func (w *Web) basicAuthHandler(r *rule, next http.Handler) http.Handler {
 			next.ServeHTTP(rw, req)
 			return
 		}
-		w.logger().Warn("web: basic authentication failed", "rule", r.name, "user", username,
+		w.logger().Warn("web：基本认证失败", "rule", r.name, "user", username,
 			"ip", clientIPString(req, w.trustProxy(w.cfg)))
 		realm := r.spec.Name
 		if realm == "" {
@@ -104,7 +104,7 @@ func (w *Web) wafHandler(r *rule, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				w.logger().Error("web: waf middleware panicked", "rule", r.name, "panic", rec)
+				w.logger().Error("web：WAF 中间件发生 panic", "rule", r.name, "panic", rec)
 				http.Error(rw, "internal server error", http.StatusInternalServerError)
 			}
 		}()

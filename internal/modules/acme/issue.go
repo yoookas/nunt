@@ -147,7 +147,7 @@ func (a *ACME) issue(ctx context.Context, req request) (Result, error) {
 		if _, err := client.WaitAuthorization(ctx, authz.URI); err != nil {
 			return result, fmt.Errorf("authorization for %s failed: %w", authz.Identifier.Value, err)
 		}
-		a.log.Info("challenge validated", "domain", authz.Identifier.Value, "challenge", req.challenge)
+		a.log.Info("挑战验证通过", "domain", authz.Identifier.Value, "challenge", req.challenge)
 	}
 
 	ready, err := client.WaitOrder(ctx, order.URI)
@@ -264,7 +264,7 @@ func (a *ACME) persistKeyType(req request) {
 		return nil
 	})
 	if err != nil {
-		a.log.Warn("cannot record the certificate key type", "job", req.jobID, "error", err)
+		a.log.Warn("无法记录证书密钥类型", "job", req.jobID, "error", err)
 	}
 }
 
@@ -322,7 +322,7 @@ func verifyChain(certPEM, keyPEM []byte, domains []string, log *slog.Logger) err
 		return fmt.Errorf("the issued certificate is missing the domain(s) %s", strings.Join(missing, ", "))
 	}
 	if log != nil {
-		log.Debug("certificate verified", "domains", domains, "notAfter", leaf.NotAfter.Format(time.RFC3339))
+		log.Debug("证书校验通过", "domains", domains, "notAfter", leaf.NotAfter.Format(time.RFC3339))
 	}
 	return nil
 }

@@ -188,7 +188,7 @@ func buildEngine(cfg model.WAFConfig, log *slog.Logger) (*engine, error) {
 			// A broken embedded rule set must not take the service down: the
 			// engine keeps running with the custom rules only.
 			if log != nil {
-				log.Warn("waf: cannot load the bundled rule set, falling back to custom rules", "error", err)
+				log.Warn("WAF：无法加载内置规则集，回退到仅自定义规则", "error", err)
 			}
 			catalog, version = nil, ""
 		} else {
@@ -200,7 +200,7 @@ func buildEngine(cfg model.WAFConfig, log *slog.Logger) (*engine, error) {
 	for _, f := range cfg.RuleFiles {
 		if err := ruleFileExists(f); err != nil {
 			if log != nil {
-				log.Warn("waf: skipping rule file", "file", f, "error", err)
+				log.Warn("WAF：跳过规则文件", "file", f, "error", err)
 			}
 			continue
 		}
@@ -212,7 +212,7 @@ func buildEngine(cfg model.WAFConfig, log *slog.Logger) (*engine, error) {
 		// A rule that fails to parse must not disable the whole engine: retry
 		// with the custom rules only and report the bundled failure.
 		if log != nil {
-			log.Warn("waf: bundled rule set failed to compile, retrying with custom rules only", "error", err)
+			log.Warn("WAF：内置规则集编译失败，改用仅自定义规则重试", "error", err)
 		}
 		fallback, ferr := compile(cfg, nil, diskFiles, log)
 		if ferr != nil {
@@ -356,7 +356,7 @@ func compile(cfg model.WAFConfig, catalog []ruleFile, diskFiles []string, log *s
 		e.rules = r.RulesCount()
 	}
 	if log != nil {
-		log.Debug("waf: engine compiled", "rules", e.rules, "files", len(catalog)+len(diskFiles), "mode", cfg.Mode)
+		log.Debug("WAF：引擎编译完成", "rules", e.rules, "files", len(catalog)+len(diskFiles), "mode", cfg.Mode)
 	}
 	return e, nil
 }

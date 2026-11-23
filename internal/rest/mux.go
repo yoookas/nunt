@@ -5,6 +5,7 @@ package rest
 
 import (
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -152,7 +153,7 @@ func Recover(log *slog.Logger) Middleware {
 			defer func() {
 				if rec := recover(); rec != nil {
 					if log != nil {
-						log.Error("panic in handler", "path", r.URL.Path, "panic", rec)
+						log.Error("处理请求时发生 panic", "path", r.URL.Path, "panic", rec)
 					}
 					Fail(w, http.StatusInternalServerError, "internal server error")
 				}
@@ -192,8 +193,18 @@ func AccessLog(log *slog.Logger) Middleware {
 			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rec, r)
 			if log != nil {
-				log.Debug("http", "method", r.Method, "path", r.URL.Path, "status", rec.status,
-					"bytes", rec.bytes, "duration", time.Since(start).Round(time.Millisecond).String())
+				host, _, splitErr := net.SplitHostPort(r.RemoteAddr)
+				if splitErr != nil {
+					host = r.RemoteAddr
+				}
+				log.Debug("HTTP 请求",
+					"method", r.Method,
+					"path", r.URL.Path,
+					"host", r.Host,
+					"ip", host,
+					"status", rec.status,
+					"bytes", rec.bytes,
+					"duration", time.Since(start).Round(time.Millisecond).String())
 			}
 		})
 	}

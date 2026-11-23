@@ -178,7 +178,7 @@ func (s *Server) Serve(addr string) error {
 		return err
 	}
 	if s.log != nil {
-		s.log.Info("admin interface listening", "addr", s.Addr())
+		s.log.Info("管理界面开始监听", "addr", s.Addr())
 	}
 	return nil
 }
@@ -270,7 +270,7 @@ func (s *Server) Rebind(addr string) error {
 		s.retire(old)
 	}()
 	if s.log != nil {
-		s.log.Info("admin interface moved", "from", current, "to", normalized)
+		s.log.Info("管理界面已切换监听地址", "from", current, "to", normalized)
 	}
 	return nil
 }
@@ -328,7 +328,7 @@ func (s *Server) retire(old *http.Server) {
 	defer cancel()
 	if err := old.Shutdown(ctx); err != nil {
 		if s.log != nil {
-			s.log.Warn("admin listener shutdown after rebind", "error", err)
+			s.log.Warn("管理监听器在切换后关闭", "error", err)
 		}
 		_ = old.Close()
 	}

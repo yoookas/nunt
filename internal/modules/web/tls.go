@@ -178,7 +178,7 @@ func (w *Web) ensureCertificates(plan *listenerPlan) {
 	}
 	provider, ok := mod.(module.CertProvider)
 	if !ok {
-		w.logger().Debug("web: the acme module does not provide certificates")
+		w.logger().Debug("web：ACME 模块未提供证书服务")
 		return
 	}
 	missing := make([]string, 0, len(domains))
@@ -201,10 +201,10 @@ func (w *Web) ensureCertificates(plan *listenerPlan) {
 			cancel()
 			if err != nil {
 				last = err
-				w.logger().Warn("web: cannot obtain a certificate", "domain", d, "error", err)
+				w.logger().Warn("web：无法获取证书", "domain", d, "error", err)
 				continue
 			}
-			w.logger().Info("web: certificate ready", "domain", d)
+			w.logger().Info("web：证书已就绪", "domain", d)
 		}
 		if last != nil {
 			w.SetError(fmt.Errorf("certificate for %s: %w", domains[0], last))

@@ -178,7 +178,7 @@ func New(deps *module.Deps) *Web {
 		logs:       newLogBuffer(cfg.Web.LogKeep),
 		stopCtx:    context.Background(),
 	}
-	w.Init(deps, "web", "Web service")
+	w.Init(deps, "web", "Web 服务")
 	w.cfg = cfg
 	// Every configuration change is followed by exactly one Reload: the module
 	// API calls it directly, and the settings/import paths go through
@@ -361,7 +361,7 @@ func (w *Web) apply(ctx context.Context, cfg *model.Config) error {
 	compiled, plans, errs := w.compileWeb(cfg)
 	var ruleErr error
 	if len(errs) > 0 {
-		w.logger().Warn("web: some routes were skipped", "count", len(errs), "first", errs[0])
+		w.logger().Warn("web：部分路由被跳过", "count", len(errs), "first", errs[0])
 		ruleErr = fmt.Errorf("%d web route(s) are invalid, first: %w", len(errs), errs[0])
 	}
 	w.resolveCustomCertificates(plans)
@@ -433,7 +433,7 @@ func (w *Web) apply(ctx context.Context, cfg *model.Config) error {
 			}
 			site, err := w.buildSite(r, cfg)
 			if err != nil {
-				w.logger().Error("web: cannot prepare a route", "route", r.name, "error", err)
+				w.logger().Error("web：无法准备路由", "route", r.name, "error", err)
 				if firstErr == nil {
 					firstErr = fmt.Errorf("route %q: %w", r.name, err)
 				}
@@ -472,7 +472,7 @@ func (w *Web) apply(ctx context.Context, cfg *model.Config) error {
 		if l == nil {
 			nl := w.newListener(ctx, addr)
 			if err := nl.start(plan); err != nil {
-				w.logger().Error("web: cannot start listener", "addr", addr, "error", err)
+				w.logger().Error("web：监听器启动失败", "addr", addr, "error", err)
 				if firstErr == nil {
 					firstErr = err
 				}
@@ -522,7 +522,7 @@ func (w *Web) ensureFallbackLocked(ctx context.Context) *listener {
 	l.router.setMatcher(m)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		w.logger().Error("web: cannot open the fallback listener", "error", err)
+		w.logger().Error("web：无法打开兜底监听", "error", err)
 		return nil
 	}
 	l.addr = ln.Addr().String()
@@ -530,7 +530,7 @@ func (w *Web) ensureFallbackLocked(ctx context.Context) *listener {
 	l.plain = ln
 	l.mu.Unlock()
 	go l.serve(ln, "http")
-	w.logger().Info("web: fallback listener ready", "addr", l.addr)
+	w.logger().Info("web：兜底监听已就绪", "addr", l.addr)
 	return l
 }
 
@@ -547,7 +547,7 @@ func (w *Web) compileWeb(cfg *model.Config) ([]*rule, map[string]*listenerPlan, 
 		if auth, on := clientAuthFor(l.TLS.ClientAuth); on {
 			pool, err := clientCAPool(l.TLS.ClientCA)
 			if err != nil {
-				w.logger().Error("web: client certificates disabled", "listener", l.Name, "error", err)
+				w.logger().Error("web：客户端证书校验已关闭", "listener", l.Name, "error", err)
 				w.SetError(fmt.Errorf("listener %q: %w", l.Name, err))
 			} else {
 				tls.clientAuth = auth

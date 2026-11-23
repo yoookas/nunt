@@ -128,7 +128,7 @@ func (w *WAF) handlePutConfig(rw http.ResponseWriter, r *http.Request) {
 			c.WAF = previous
 			return nil
 		}); rerr != nil && w.log != nil {
-			w.log.Error("waf: cannot restore the previous configuration", "error", rerr)
+			w.log.Error("WAF：无法恢复之前的配置", "error", rerr)
 		}
 		_ = w.rebuild(previous, true)
 		rest.Fail(rw, http.StatusBadRequest, "the rule set cannot be compiled: %s", err.Error())

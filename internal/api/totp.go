@@ -214,7 +214,7 @@ func (s *Server) handleTOTPConfirm(w http.ResponseWriter, r *http.Request) {
 	}
 	s.totpPending.delete(user.ID)
 	s.revokeOtherSessions(sess)
-	s.log.Info("totp enabled", "user", user.Username, "ip", s.clientIP(r).String())
+	s.log.Info("已开启 TOTP", "user", user.Username, "ip", s.clientIP(r).String())
 	rest.OK(w, map[string]any{"enabled": true, "recoveryCodes": codes})
 }
 
@@ -244,7 +244,7 @@ func (s *Server) handleTOTPDisable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.revokeOtherSessions(sess)
-	s.log.Info("totp disabled", "user", user.Username, "ip", s.clientIP(r).String())
+	s.log.Info("已关闭 TOTP", "user", user.Username, "ip", s.clientIP(r).String())
 	rest.OK(w, map[string]any{"enabled": false})
 }
 
@@ -274,7 +274,7 @@ func (s *Server) handleTOTPNewRecoveryCodes(w http.ResponseWriter, r *http.Reque
 		rest.Fail(w, http.StatusInternalServerError, "无法保存恢复码：%s", err)
 		return
 	}
-	s.log.Info("totp recovery codes regenerated", "user", user.Username, "ip", s.clientIP(r).String())
+	s.log.Info("已重新生成恢复码", "user", user.Username, "ip", s.clientIP(r).String())
 	rest.OK(w, map[string]any{"recoveryCodes": codes})
 }
 
@@ -296,7 +296,7 @@ func (s *Server) verifyPasswordAndFactor(w http.ResponseWriter, r *http.Request,
 	res := s.checkFactor(user, code, time.Now(), true)
 	if !res.ok {
 		s.loginLimiter.Fail(limitKey)
-		s.log.Warn("second factor rejected", "user", user.Username, "ip", ip, "action", action)
+		s.log.Warn("双因子验证拒绝", "user", user.Username, "ip", ip, "action", action)
 		rest.FailCode(w, http.StatusUnauthorized, "invalid_code", "验证码错误")
 		return false
 	}
@@ -384,7 +384,7 @@ func (s *Server) handleLoginTOTP(w http.ResponseWriter, r *http.Request) {
 	if updated == nil {
 		updated = user
 	}
-	s.log.Info("second factor accepted", "user", user.Username, "ip", ip, "recovery", res.recoveryIndex >= 0)
+	s.log.Info("双因子验证通过", "user", user.Username, "ip", ip, "recovery", res.recoveryIndex >= 0)
 	s.startSession(w, r, updated, ip)
 }
 

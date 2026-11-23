@@ -510,7 +510,7 @@ func buildProxy(w *Web, r *rule, up upstream, target *model.ProxyTarget) *httput
 					if attempt := attemptFrom(req.Context()); attempt != nil {
 						attempt.target = next.target
 					}
-					w.logger().Warn("web: retrying on another upstream", "rule", r.name,
+					w.logger().Warn("web：换一个上游重试", "rule", r.name,
 						"failed", up.target, "next", next.target, "error", err)
 					proxyFor(w, r, next, target).ServeHTTP(rw, req.WithContext(withRetried(req.Context())))
 					return
@@ -520,7 +520,7 @@ func buildProxy(w *Web, r *rule, up upstream, target *model.ProxyTarget) *httput
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
-			w.logger().Warn("web: upstream request failed", "rule", r.name, "upstream", up.target,
+			w.logger().Warn("web：上游请求失败", "rule", r.name, "upstream", up.target,
 				"method", req.Method, "path", req.URL.Path, "error", err)
 			rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			rw.WriteHeader(status)

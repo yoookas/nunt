@@ -233,7 +233,7 @@ func (w *Web) logAccess(r *rule, req *http.Request, rec *accessRecorder, start t
 	w.logs.add(entry)
 	w.persist(entry)
 	if status >= 500 {
-		w.logger().Warn("web: request failed", "rule", r.name, "method", req.Method, "path", entry.Path,
+		w.logger().Warn("web：请求失败", "rule", r.name, "method", req.Method, "path", entry.Path,
 			"status", status, "client", entry.ClientIP)
 	}
 }

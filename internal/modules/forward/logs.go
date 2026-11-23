@@ -194,7 +194,7 @@ func (f *Forward) allow(r model.ForwardRule, remote net.Addr) bool {
 	if allowed {
 		return true
 	}
-	f.log.Warn("forward: source address rejected",
+	f.log.Warn("转发：源地址被拒绝",
 		"rule", ruleLabel(r), "client", addrString(remote), "mode", r.Access.Mode,
 		"reason", reason, "error", m.err)
 	return false

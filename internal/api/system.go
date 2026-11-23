@@ -198,7 +198,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			// back so both agree. The only way this fails is somebody else
 			// taking the old port in the meantime.
 			if rollbackErr := s.rebindAdminListen(previous); rollbackErr != nil {
-				s.log.Error("admin listener rollback failed", "addr", previous, "error", rollbackErr)
+				s.log.Error("管理端监听回滚失败", "addr", previous, "error", rollbackErr)
 			}
 		}
 		rest.Fail(w, http.StatusInternalServerError, "无法保存设置：%s", err)
@@ -379,7 +379,7 @@ func (s *Server) handleImportConfig(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		if moved {
 			if rollbackErr := s.rebindAdminListen(previous); rollbackErr != nil {
-				s.log.Error("admin listener rollback failed", "addr", previous, "error", rollbackErr)
+				s.log.Error("管理端监听回滚失败", "addr", previous, "error", rollbackErr)
 			}
 		}
 		rest.Fail(w, http.StatusBadRequest, "无法导入配置：%s", err)

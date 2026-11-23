@@ -78,7 +78,7 @@ func New(deps *module.Deps) *Forward {
 		proxies: map[string][]*proxy{},
 		access:  newAccessLogger(defaultLogKeep),
 	}
-	f.Init(deps, "forward", "Port forwarding")
+	f.Init(deps, "forward", "端口转发")
 	f.log = deps.Logger("forward")
 	return f
 }
@@ -147,7 +147,7 @@ func (f *Forward) Reload(cfg *model.Config) {
 			continue
 		}
 		if _, err := netutil.NormalizeListen(r.SrcAddr); err != nil {
-			f.log.Error("forward: rule has an invalid source address",
+			f.log.Error("转发：规则的源地址无效",
 				"rule", ruleLabel(r), "src", r.SrcAddr, "error", err)
 			continue
 		}
@@ -203,7 +203,7 @@ func (f *Forward) Reload(cfg *model.Config) {
 		if err := p.start(); err != nil {
 			// A busy port must never take the whole module down; the rule is
 			// reported as not listening both in the log and in the status.
-			f.log.Error("forward: cannot start rule",
+			f.log.Error("转发：规则启动失败",
 				"rule", ruleLabel(p.rule), "protocol", p.proto,
 				"src", p.rule.SrcAddr, "dst", p.rule.DstAddr, "error", err)
 		}
@@ -366,7 +366,7 @@ func (f *Forward) ensure(id, proto string) (*proxy, bool) {
 	f.proxies[id] = append(f.proxies[id], np)
 	f.mu.Unlock()
 	if err := np.start(); err != nil {
-		f.log.Error("forward: cannot start rule on demand",
+		f.log.Error("转发：按需启动规则失败",
 			"rule", ruleLabel(r), "protocol", proto, "src", r.SrcAddr, "error", err)
 		return nil, false
 	}

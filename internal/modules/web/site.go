@@ -265,7 +265,7 @@ func (w *Web) serveStatic(r *rule, store *staticFS, target *model.StaticTgt, ind
 	}
 	fsys, err := store.get()
 	if err != nil {
-		w.logger().Error("web: static storage unavailable", "rule", r.name, "error", err)
+		w.logger().Error("web：静态存储不可用", "rule", r.name, "error", err)
 		http.Error(rw, "storage unavailable", http.StatusInternalServerError)
 		return
 	}
@@ -304,7 +304,7 @@ func (w *Web) serveStatic(r *rule, store *staticFS, target *model.StaticTgt, ind
 		}
 		if target.Listing {
 			if err := w.serveListing(r, fsys, rw, req, upstream); err != nil {
-				w.logger().Warn("web: cannot list directory", "rule", r.name, "path", upstream, "error", err)
+				w.logger().Warn("web：无法列出目录", "rule", r.name, "path", upstream, "error", err)
 				http.Error(rw, "cannot list directory", http.StatusInternalServerError)
 			}
 			return
@@ -339,7 +339,7 @@ func notFound(w *Web, rw http.ResponseWriter, req *http.Request, p string, err e
 		http.NotFound(rw, req)
 		return
 	}
-	w.logger().Warn("web: cannot open static path", "path", p, "error", err)
+	w.logger().Warn("web：无法打开静态路径", "path", p, "error", err)
 	http.Error(rw, "cannot read file", http.StatusInternalServerError)
 }
 
@@ -483,7 +483,7 @@ func (w *Web) serveFile(r *rule, fsys vfs.FS, label string, cacheSeconds int, rw
 		return
 	}
 	if _, err := io.Copy(rw, reader); err != nil {
-		w.logger().Debug("web: static transfer interrupted", "rule", r.name, "storage", label, "path", p, "error", err)
+		w.logger().Debug("web：静态传输中断", "rule", r.name, "storage", label, "path", p, "error", err)
 	}
 }
 

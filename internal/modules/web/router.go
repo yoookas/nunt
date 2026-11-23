@@ -205,7 +205,7 @@ func (rt *router) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	}
 	r := m.Match(req.Host, req.URL.Path)
 	if r == nil {
-		rt.web.logger().Debug("web: no rule matches the request", "listen", rt.addr, "host", req.Host, "path", req.URL.Path)
+		rt.web.logger().Debug("web：没有匹配的路由", "listen", rt.addr, "host", req.Host, "path", req.URL.Path)
 		http.Error(rw, "no route for this host", http.StatusNotFound)
 		return
 	}
@@ -216,7 +216,7 @@ func (rt *router) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	defer func() {
 		if panicValue := recover(); panicValue != nil {
-			rt.web.logger().Error("web: handler panicked", "rule", r.name, "path", req.URL.Path, "panic", panicValue)
+			rt.web.logger().Error("web：处理请求时发生 panic", "rule", r.name, "path", req.URL.Path, "panic", panicValue)
 			if !rec.wrote {
 				http.Error(rec, "internal server error", http.StatusInternalServerError)
 			}
@@ -225,7 +225,7 @@ func (rt *router) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	}()
 
 	if r.site == nil || r.site.handler == nil {
-		rt.web.logger().Warn("web: rule has no handler", "rule", r.name)
+		rt.web.logger().Warn("web：路由没有可用的处理器", "rule", r.name)
 		http.Error(rec, "route is not available", http.StatusServiceUnavailable)
 		return
 	}

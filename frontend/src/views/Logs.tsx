@@ -74,6 +74,8 @@ function attrsText(attrs: Record<string, unknown> | null): string {
   if (!attrs) return ''
   const parts: string[] = []
   for (const [key, value] of Object.entries(attrs)) {
+    // The component has its own column.
+    if (key === 'component') continue
     let text: string
     if (value === null || value === undefined) text = ''
     else if (typeof value === 'object') {
@@ -305,7 +307,7 @@ function RunLogs() {
     if (!min && !key) return entries
     return entries.filter((item) => {
       if (min && (LEVEL_RANK[item.level] || 20) < min) return false
-      if (key && !`${item.msg} ${attrsText(item.attrs)}`.toLowerCase().includes(key)) return false
+      if (key && !`${item.msg} ${String(item.attrs?.component ?? '')} ${attrsText(item.attrs)}`.toLowerCase().includes(key)) return false
       return true
     })
   }, [entries, level, keyword])
@@ -432,9 +434,10 @@ function RunLogs() {
             aria-label="实时日志"
           >
             <div className="min-w-[640px]">
-              <div className="sticky top-0 z-10 grid grid-cols-[170px_90px_minmax(0,1fr)] gap-3 border-b border-border bg-surface px-4 py-2 text-xs font-medium text-muted">
+              <div className="sticky top-0 z-10 grid grid-cols-[150px_70px_120px_minmax(0,1fr)] gap-3 border-b border-border bg-surface px-4 py-2 text-xs font-medium text-muted">
                 <span>时间</span>
                 <span>级别</span>
+                <span>组件</span>
                 <span>内容</span>
               </div>
 
@@ -443,11 +446,14 @@ function RunLogs() {
                 return (
                   <div
                     key={item.seq}
-                    className="grid grid-cols-[170px_90px_minmax(0,1fr)] gap-3 border-b border-border px-4 py-1.5 text-xs hover:bg-default/50"
+                    className="grid grid-cols-[150px_70px_120px_minmax(0,1fr)] gap-3 border-b border-border px-4 py-1.5 text-xs hover:bg-default/50"
                   >
                     <span className="text-muted">{fmtTime(item.time)}</span>
                     <span className={`mono font-semibold ${levelColor(item.level)}`}>
                       {String(item.level || 'info').toUpperCase()}
+                    </span>
+                    <span className="mono truncate text-muted" title={String(item.attrs?.component ?? '')}>
+                      {String(item.attrs?.component ?? '-')}
                     </span>
                     <span className={`mono whitespace-pre-wrap break-words leading-5 ${levelColor(item.level)}`}>
                       {item.msg}
