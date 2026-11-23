@@ -87,7 +87,7 @@ export function Section({
   const headerActions = actions ?? extra
   const header =
     title || description || headerActions ? (
-      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
         <div className="min-w-0">
           {title ? <div className="text-sm font-semibold sm:text-base">{title}</div> : null}
           {description ? <div className="mt-0.5 text-xs text-muted">{description}</div> : null}
@@ -548,6 +548,69 @@ export function SelectInput({
       </Select.Popover>
       {hint ? <Description>{hint}</Description> : null}
     </Select>
+  )
+}
+
+// ToolbarSelect and ToolbarSearch are the compact, label-less controls used
+// inside a card header: a stacked label would make the header taller than the
+// rows it filters.
+export function ToolbarSelect({
+  label,
+  value,
+  onChange,
+  options,
+  className = '',
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  options: SelectOption[]
+  className?: string
+}) {
+  return (
+    <Select
+      selectedKey={value}
+      onSelectionChange={(key) => onChange(key == null ? '' : String(key))}
+      aria-label={label}
+    >
+      <Select.Trigger className={`h-9 ${className}`.trim()}>
+        <Select.Value />
+        <Select.Indicator />
+      </Select.Trigger>
+      <Select.Popover>
+        <ListBox>
+          {options.map((option) => (
+            <ListBox.Item key={option.value} id={option.value} textValue={option.label}>
+              {option.label}
+            </ListBox.Item>
+          ))}
+        </ListBox>
+      </Select.Popover>
+    </Select>
+  )
+}
+
+export function ToolbarSearch({
+  label,
+  value,
+  onChange,
+  placeholder,
+  className = '',
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+  className?: string
+}) {
+  return (
+    <input
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      aria-label={label}
+      className={`h-9 rounded-field border border-border bg-surface px-3 text-sm text-foreground outline-none placeholder:text-muted focus:border-focus ${className}`.trim()}
+    />
   )
 }
 

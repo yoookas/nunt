@@ -16,6 +16,7 @@ import {
   SwitchInput,
   TextAreaInput,
   TextInput,
+  ToolbarSearch,
   toast,
   type Column,
 } from '../ui'
@@ -954,21 +955,20 @@ export default function Ddns() {
         <Panel
           title="DDNS 规则"
           extra={
-            <span className="text-xs text-muted">
-              共 {rules.length} 条，当前显示 {filteredRules.length} 条
-            </span>
-          }
-        >
-          <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
-            <div className="w-full sm:w-80">
-              <TextInput
-                label="搜索"
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+              <ToolbarSearch
+                label="搜索规则"
                 value={keyword}
                 onChange={setKeyword}
                 placeholder="搜索名称 / 域名 / 提供商 / 子域名"
+                className="w-full sm:w-72"
               />
+              <span className="whitespace-nowrap text-xs text-muted">
+                共 {rules.length} 条 · 显示 {filteredRules.length} 条
+              </span>
             </div>
-          </div>
+          }
+        >
 
           {loadError ? (
             <div className="p-3">

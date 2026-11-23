@@ -18,6 +18,8 @@ import {
   TagInput,
   TextAreaInput,
   TextInput,
+  ToolbarSearch,
+  ToolbarSelect,
   toast,
   type Column,
 } from '../ui'
@@ -691,33 +693,30 @@ export default function Forward() {
         <Panel
           title="转发规则"
           extra={
-            <span className="text-xs text-muted">
-              共 {rules.length} 条，当前显示 {filteredRules.length} 条
-            </span>
-          }
-        >
-          <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
-            <div className="w-44">
-              <SelectInput
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+              <ToolbarSelect
                 label="协议筛选"
                 value={protoFilter}
                 onChange={setProtoFilter}
                 options={[{ value: 'all', label: '全部协议' }, ...PROTOCOL_OPTIONS]}
+                className="w-full sm:w-32"
               />
-            </div>
-            <div className="w-full sm:w-72">
-              <TextInput
-                label="搜索"
+              <ToolbarSearch
+                label="搜索转发规则"
                 value={keyword}
                 onChange={setKeyword}
                 placeholder="搜索名称 / 源地址 / 目标地址"
+                className="w-full sm:w-64"
               />
+              <Button variant="tertiary" onPress={() => openLogsFor()}>
+                访问日志
+              </Button>
+              <span className="whitespace-nowrap text-xs text-muted">
+                共 {rules.length} 条 · 显示 {filteredRules.length} 条
+              </span>
             </div>
-            <div className="flex-1" />
-            <Button variant="tertiary" onPress={() => openLogsFor()}>
-              访问日志
-            </Button>
-          </div>
+          }
+        >
 
           {loadError ? (
             <div className="p-3">

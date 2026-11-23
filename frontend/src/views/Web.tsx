@@ -8,6 +8,8 @@ import {
   PageHeader,
   Panel,
   StatusChip,
+  ToolbarSearch,
+  ToolbarSelect,
   toast,
   type Column,
 } from '../ui'
@@ -31,41 +33,6 @@ import {
   type WebRule,
 } from './web/types'
 
-function ToolbarSelect({
-  label,
-  value,
-  onChange,
-  options,
-  className = '',
-}: {
-  label: string
-  value: string
-  onChange: (value: string) => void
-  options: { value: string; label: string }[]
-  className?: string
-}) {
-  return (
-    <Select
-      selectedKey={value}
-      onSelectionChange={(key) => onChange(key == null ? '' : String(key))}
-      aria-label={label}
-    >
-      <Select.Trigger className={`h-9 ${className}`}>
-        <Select.Value />
-        <Select.Indicator />
-      </Select.Trigger>
-      <Select.Popover>
-        <ListBox>
-          {options.map((option) => (
-            <ListBox.Item key={option.value} id={option.value} textValue={option.label}>
-              {option.label}
-            </ListBox.Item>
-          ))}
-        </ListBox>
-      </Select.Popover>
-    </Select>
-  )
-}
 
 export default function Web() {
   const [listeners, setListeners] = useState<WebListenerView[]>([])
@@ -648,27 +615,28 @@ export default function Web() {
         <Panel
           title="路由"
           className="min-w-0"
+          extra={
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+              <ToolbarSelect
+                label="类型筛选"
+                value={typeFilter}
+                onChange={setTypeFilter}
+                options={[{ value: 'all', label: '全部类型' }, ...TYPE_OPTIONS]}
+                className="w-full sm:w-36"
+              />
+              <ToolbarSearch
+                label="搜索路由"
+                value={search}
+                onChange={setSearch}
+                placeholder="搜索域名 / 路径 / 上游"
+                className="w-full sm:w-64"
+              />
+              <span className="whitespace-nowrap text-xs text-muted">
+                共 {rules.length} 条 · 显示 {filteredRules.length} 条
+              </span>
+            </div>
+          }
         >
-          <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center">
-            <ToolbarSelect
-              label="类型筛选"
-              value={typeFilter}
-              onChange={setTypeFilter}
-              options={[{ value: 'all', label: '全部类型' }, ...TYPE_OPTIONS]}
-              className="w-full sm:w-40"
-            />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="搜索域名 / 路径 / 上游"
-              aria-label="搜索路由"
-              className="h-9 w-full rounded-field border border-border bg-surface px-3 text-sm text-foreground outline-none placeholder:text-muted focus:border-focus sm:w-72"
-            />
-            <div className="flex-1" />
-            <span className="text-xs text-muted sm:ml-auto">
-              共 {rules.length} 条，当前显示 {filteredRules.length} 条
-            </span>
-          </div>
 
           {routeError ? (
             <div className="flex items-center gap-2 border-y border-border px-4 py-2 text-sm text-danger">
