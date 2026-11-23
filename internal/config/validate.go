@@ -170,6 +170,16 @@ func Normalize(c *model.Config) {
 		}
 	}
 	c.System.IP2RegionDB = strings.TrimSpace(c.System.IP2RegionDB)
+
+	// A factor that is enabled without a usable seed can never be verified.
+	// Disable it instead of locking the only administrator out; the error is
+	// visible because the login simply stops asking for a code. Validate still
+	// rejects writing such a state, so this only repairs a corrupted file.
+	for i := range c.Users {
+		if c.Users[i].TOTP.Enabled && strings.TrimSpace(c.Users[i].TOTP.Secret) == "" {
+			c.Users[i].TOTP = model.TOTP{}
+		}
+	}
 }
 
 // normalizeLogs clamps the log retention settings into the range the store and

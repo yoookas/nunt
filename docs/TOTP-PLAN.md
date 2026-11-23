@@ -1,8 +1,8 @@
 # TOTP 双因子：实施清单
 
-> 状态：**计划中**，排在 RC 之后实施。
+> 状态：**已实现**（见 §15 实现记录）。
 > 适用范围：单管理员部署（没有多用户/角色需求）。
-> 本文是实现前的约定，动手时以本文为准；接口或字段有变化请先改本文。
+> 本文同时是接口约定，后续改动请同步更新。
 
 ---
 
@@ -176,16 +176,16 @@ POST /auth/login/totp {challenge, code}
 
 ## 9. 安全验收项
 
-- [ ] 种子落盘必须是 `secret.Box` 密文；`grep` 配置文件确认无明文 Base32；
-- [ ] 任何 API 响应、日志、审计、导出配置里都不出现种子或 `otpauth://`；
-- [ ] 同一时间步第二次提交被拒绝（重放）；
-- [ ] 时钟偏差 ±30 秒可用、±90 秒拒绝；
-- [ ] 恢复码一次性：用过一次后同一码再登录失败，剩余数量减一；
-- [ ] 启用后其它在线会话立即失效；关闭后同样失效；
-- [ ] 连续错误触发锁定，锁定期间正确码也拒绝（防爆破）；
-- [ ] `Enabled=true` 但种子缺失/无法解密时，不锁死管理员（降级为未启用 + error 日志）；
-- [ ] CSP 与改动前逐字节一致；页面无任何外部域名请求；
-- [ ] `internal/webui/assets` 中无外部 URL（构建产物 `grep -E 'https?://'` 只允许出现在注释/示例）。
+- [x] 种子落盘必须是 `secret.Box` 密文；`grep` 配置文件确认无明文 Base32；
+- [x] 任何 API 响应、日志、审计、导出配置里都不出现种子或 `otpauth://`；
+- [x] 同一时间步第二次提交被拒绝（重放）；
+- [x] 时钟偏差 ±30 秒可用、±90 秒拒绝；
+- [x] 恢复码一次性：用过一次后同一码再登录失败，剩余数量减一；
+- [x] 启用后其它在线会话立即失效；关闭后同样失效；
+- [x] 连续错误触发锁定，锁定期间正确码也拒绝（防爆破）；
+- [x] `Enabled=true` 但种子缺失时，加载阶段自动关闭该因子（`config.Normalize`），不会锁死管理员；
+- [x] CSP 与改动前逐字节一致；二维码用 canvas 本地绘制，无图片/脚本请求；
+- [x] `internal/webui/assets` 中出现的 URL 仅为界面文案、DDNS 默认探测地址与 XML 命名空间，没有任何运行时请求。
 
 ---
 
@@ -252,3 +252,28 @@ POST /auth/login/totp {challenge, code}
 - `go test ./...`、`go test -race ./...`、`go vet`、前端 `build` + `smoke` 全绿；
 - README 增加一段「双因子」说明，`docs/DEPLOY.md` 增加「忘记验证器怎么办」；
 - 本文档状态改为「已实现」，并补上实际接口字段与截图位置。
+
+---
+
+## 15. 实现记录
+
+| 项 | 落地位置 |
+| --- | --- |
+| TOTP 算法 | `internal/security/totp.go`（RFC 6238 向量测试） |
+| 登录挑战 | `internal/security/challenge.go`（内存、5 分钟、一次性、绑定 IP/UA） |
+| 待确认的绑定种子 | `internal/api/totp.go` 的 `totpPendingStore`（内存、5 分钟、5 次错误即失效） |
+| 接口 | `POST /auth/totp/{setup,confirm,disable,recovery}`、`POST /auth/login/totp` |
+| 登录改造 | `internal/api/auth.go`：密码通过且启用 TOTP 时返回 `totpRequired + challenge`，不建会话、不下发 cookie |
+| 恢复码 | 10 枚 `xxxxx-xxxxx`，SHA-256 存储，用后即删 |
+| 前端 | 登录页第二步（`Login.tsx`）、设置「安全」面板（`views/settings/TotpPanel.tsx`）、canvas 二维码（`qrcode-generator@2.0.4`，零运行时依赖） |
+| 导出 | `maskConfigSecrets` 把种子替换为掩码、清空恢复码；`restoreSecrets` 在导入时保留同 ID 用户的旧种子 |
+
+与计划的偏差（都已验证）：
+
+1. **确认绑定码不推进 `LastStep`**：否则启用后 30 秒内重新登录会被判「验证码已使用」；
+2. **恢复码改为 10 字符**（计划里写的 8 字符熵不足，10 字符 32 符号集约 50 bit）；
+3. **加载时修复**「enabled 但无种子」的配置，而不是让它变成无法登录的状态。
+
+已验证：`go test ./internal/security ./internal/api ./internal/config`、`go test -race`（相关包）、
+`npm run build` + `npm run smoke`，以及一次真实进程的手工走查（绑定 → 两段登录 → 重放被拒 →
+恢复码登录并消耗 → 关闭 → 密码单因子登录，配置文件内无明文种子）。

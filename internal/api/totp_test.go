@@ -257,6 +257,24 @@ func TestTOTPSecretIsMaskedInConfigExport(t *testing.T) {
 	}
 }
 
+func TestTOTPEnrollmentRevokesOtherSessions(t *testing.T) {
+	env := newTestEnv(t)
+	cookiesA, csrfA := login(t, env)
+	// A second browser session for the same account.
+	cookiesB, _ := login(t, env)
+
+	enrollTOTP(t, env, cookiesA, csrfA)
+
+	rec := env.do(t, http.MethodGet, "/api/v1/auth/session", nil, cookiesB, nil)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("the other session must be revoked, got %d", rec.Code)
+	}
+	rec = env.do(t, http.MethodGet, "/api/v1/auth/session", nil, cookiesA, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("the session that enrolled the factor must survive, got %d", rec.Code)
+	}
+}
+
 func TestTOTPConfirmWithoutSetupFails(t *testing.T) {
 	env := newTestEnv(t)
 	cookies, csrf := login(t, env)

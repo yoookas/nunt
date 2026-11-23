@@ -130,3 +130,16 @@ func TestValidate(t *testing.T) {
 		t.Fatal("a configuration without users must be rejected")
 	}
 }
+
+func TestNormalizeDisablesSeedlessTOTP(t *testing.T) {
+	cfg := Default()
+	cfg.Users = []model.User{{ID: "u1", Username: "admin", Role: "admin", Enabled: true,
+		TOTP: model.TOTP{Enabled: true}}}
+	Normalize(cfg)
+	if cfg.Users[0].TOTP.Enabled {
+		t.Fatal("a TOTP factor without a secret must be disabled")
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("the repaired configuration must be valid: %v", err)
+	}
+}

@@ -159,6 +159,7 @@ data/
 - **反向代理**：剥离 hop-by-hop 头、可控超时、上游仅允许 http/https，响应头可裁剪。
 - **WAF**：Coraza + CRS，可保护后台接口本身；拦截页面不回显用户输入；请求体检查由 Coraza 自己按 `bodyLimitKb` 截断（见下方「WAF」）。
 - **TLS**：最低 TLS 1.2、仅 ECDHE 系列套件、按 SNI 热加载证书。
+- **双因子**：可选 TOTP（RFC 6238），密码 + 6 位验证码两段登录；10 枚一次性恢复码；种子用部署密钥加密存储、导出时脱敏；绑定二维码在浏览器本地绘制，不请求任何外部服务。
 - **其它**：管理后台支持 IP 白名单；配置与密钥文件权限 0600；日志不记录任何凭据。
 
 ---
@@ -245,7 +246,7 @@ web 前端            frontend/（React 19 + HeroUI + Tailwind 4 + Vite 8）
 
 模块开发约定见 [docs/CONTRACT.md](docs/CONTRACT.md)（模块接口、REST 约定、前端页面契约）；
 公网部署前的检查清单见 [docs/PUBLIC-EXPOSURE.md](docs/PUBLIC-EXPOSURE.md)；
-路线图（单管理员口径）见 [docs/ROADMAP.md](docs/ROADMAP.md)；双因子（TOTP + 前端本地二维码）的实施清单见 [docs/TOTP-PLAN.md](docs/TOTP-PLAN.md)（计划中，尚未实现）。
+路线图（单管理员口径）见 [docs/ROADMAP.md](docs/ROADMAP.md)；双因子（TOTP）的接口与验收见 [docs/TOTP-PLAN.md](docs/TOTP-PLAN.md)。
 
 ### 前端
 
