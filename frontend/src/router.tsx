@@ -2,7 +2,6 @@ import { lazy, Suspense, type ReactNode } from 'react'
 import { createHashRouter, Navigate, Outlet, useLocation } from 'react-router-dom'
 import AppLayout from './layout/AppLayout'
 import { useAuth } from './session'
-import { Page, PageHeader } from './ui'
 import Dashboard from './views/Dashboard'
 import Login from './views/Login'
 import PasswordChange from './views/PasswordChange'
@@ -35,14 +34,6 @@ function Lazy({ children }: { children: ReactNode }) {
   return <Suspense fallback={<div className="p-6 text-sm text-muted">加载中…</div>}>{children}</Suspense>
 }
 
-function Placeholder({ title }: { title: string }) {
-  return (
-    <Page>
-      <PageHeader title={title} sub="页面开发中" />
-    </Page>
-  )
-}
-
 const router = createHashRouter([
   { path: '/login', element: <Login /> },
   {
@@ -69,4 +60,3 @@ const router = createHashRouter([
 ])
 
 export default router
-export { Placeholder }
