@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Alert, Button, Switch, Tabs, TextArea, TextField } from '@heroui/react'
+import { Alert, Button, Switch, Tabs } from '@heroui/react'
 import { api, errorText } from '../api'
 import { fmtBytes, fmtTime } from '../format'
 import { useAuth } from '../session'
@@ -82,15 +82,6 @@ interface UserRow {
   mustChangePassword?: boolean
   createdAt?: string
   lastLogin?: string
-}
-
-interface TokenRow {
-  id: string
-  name: string
-  scopes?: string[]
-  enabled: boolean
-  createdAt?: string
-  lastUsed?: string
 }
 
 interface SessionRow {
@@ -331,20 +322,6 @@ export default function Settings() {
   }>({ open: false, saving: false, user: null, password: '' })
   const [deleteUser, setDeleteUser] = useState<UserRow | null>(null)
   const [disableUser, setDisableUser] = useState<UserRow | null>(null)
-
-  /* ---- tokens ---- */
-  const [tokens, setTokens] = useState<ListState<TokenRow>>(emptyList<TokenRow>())
-  const [tokenDialog, setTokenDialog] = useState<{
-    open: boolean
-    saving: boolean
-    form: { name: string; scopes: string[] }
-  }>({ open: false, saving: false, form: { name: '', scopes: [] } })
-  const [tokenResult, setTokenResult] = useState<{ open: boolean; name: string; token: string }>({
-    open: false,
-    name: '',
-    token: '',
-  })
-  const [deleteToken, setDeleteToken] = useState<TokenRow | null>(null)
 
   /* ---- sessions ---- */
   const [sessions, setSessions] = useState<ListState<SessionRow>>(emptyList<SessionRow>())
@@ -748,66 +725,6 @@ export default function Settings() {
     }
   }
 
-  /* ---- tokens ---- */
-
-  const loadTokens = async (force = false) => {
-    if (tokens.loading) return
-    if (tokens.loaded && !force) return
-    setTokens((prev) => ({ ...prev, loading: true, error: '' }))
-    try {
-      const data = await api.get('/api/v1/auth/tokens')
-      setTokens({ items: asArray<TokenRow>(data), loading: false, loaded: true, error: '' })
-    } catch (err) {
-      setTokens((prev) => ({ ...prev, loading: false, loaded: true, error: errorText(err) }))
-    }
-  }
-
-  const openCreateToken = () => {
-    setTokenDialog({ open: true, saving: false, form: { name: '', scopes: [] } })
-  }
-
-  const createToken = async () => {
-    const name = tokenDialog.form.name.trim()
-    if (!name) {
-      toast.warning('请填写 Token 名称')
-      return
-    }
-    setTokenDialog((prev) => ({ ...prev, saving: true }))
-    try {
-      const result = await api.post<{ token?: string }>('/api/v1/auth/tokens', {
-        name,
-        scopes: toList(tokenDialog.form.scopes),
-      })
-      setTokenResult({ open: true, name, token: result?.token || '' })
-      setTokenDialog((prev) => ({ ...prev, open: false }))
-      await loadTokens(true)
-      toast.success('Token 已创建，请立即复制保存')
-    } catch (err) {
-      toast.danger(errorText(err))
-    } finally {
-      setTokenDialog((prev) => ({ ...prev, saving: false }))
-    }
-  }
-
-  const copyTokenValue = async () => {
-    const ok = await copyText(tokenResult.token)
-    if (ok) toast.success('Token 已复制到剪贴板')
-    else toast.danger('复制失败，请手动选择文本')
-  }
-
-  const confirmDeleteToken = async () => {
-    const target = deleteToken
-    if (!target) return
-    setDeleteToken(null)
-    try {
-      await api.del(`/api/v1/auth/tokens/${encodeURIComponent(target.id)}`)
-      toast.success('Token 已删除')
-      await loadTokens(true)
-    } catch (err) {
-      toast.danger(errorText(err))
-    }
-  }
-
   /* ---- sessions ---- */
 
   const loadSessions = async (force = false) => {
@@ -959,7 +876,7 @@ export default function Settings() {
         setSwitched({ addr: effective, url: adminListenURL(effective) })
       } else {
         await loadSystem()
-        await Promise.all([loadUsers(true), loadTokens(true), loadSessions(true)])
+        await Promise.all([loadUsers(true), loadSessions(true)])
       }
     } catch (err) {
       toast.danger(errorText(err))
@@ -990,7 +907,6 @@ export default function Settings() {
   useEffect(() => {
     if (tab === 'logs') void loadLogs()
     else if (tab === 'users') void loadUsers()
-    else if (tab === 'tokens') void loadTokens()
     else if (tab === 'sessions') void loadSessions()
     else if (tab === 'backup') void loadBackup()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1065,42 +981,6 @@ export default function Settings() {
     },
   ]
 
-  const tokenColumns: Column<TokenRow>[] = [
-    { key: 'name', title: '名称', render: (row) => <span className="text-sm">{row.name}</span> },
-    {
-      key: 'scopes',
-      title: '权限范围',
-      render: (row) =>
-        Array.isArray(row.scopes) && row.scopes.length ? (
-          <div className="flex flex-wrap gap-1">
-            {row.scopes.map((scope) => (
-              <StatusChip key={scope}>{scope}</StatusChip>
-            ))}
-          </div>
-        ) : (
-          <span className="text-sm text-muted">默认（完全管理权限）</span>
-        ),
-    },
-    {
-      key: 'enabled',
-      title: '状态',
-      render: (row) => (
-        <StatusChip color={row.enabled ? 'success' : 'default'}>{row.enabled ? '有效' : '已停用'}</StatusChip>
-      ),
-    },
-    { key: 'lastUsed', title: '最近使用', render: (row) => <span className="text-sm text-muted">{fmtTime(row.lastUsed)}</span> },
-    { key: 'createdAt', title: '创建时间', render: (row) => <span className="text-sm text-muted">{fmtTime(row.createdAt)}</span> },
-    {
-      key: 'actions',
-      title: '操作',
-      render: (row) => (
-        <Button size="sm" variant="danger-soft" onPress={() => setDeleteToken(row)}>
-          删除
-        </Button>
-      ),
-    },
-  ]
-
   const sessionColumns: Column<SessionRow>[] = [
     {
       key: 'username',
@@ -1155,7 +1035,7 @@ export default function Settings() {
     <Page>
       <PageHeader
         title="系统设置"
-        sub="系统参数、用户、API Token、在线会话与配置备份"
+        sub="系统参数、用户、在线会话与配置备份"
         actions={
           <Button variant="secondary" isDisabled={systemLoading} onPress={() => void loadSystem()}>
             刷新
@@ -1170,7 +1050,6 @@ export default function Settings() {
             <Tabs.Tab id="logs">日志</Tabs.Tab>
             <Tabs.Tab id="security">安全</Tabs.Tab>
             <Tabs.Tab id="users">用户</Tabs.Tab>
-            <Tabs.Tab id="tokens">Token</Tabs.Tab>
             <Tabs.Tab id="sessions">会话</Tabs.Tab>
             <Tabs.Tab id="backup">备份</Tabs.Tab>
           </Tabs.List>
@@ -1481,48 +1360,6 @@ export default function Settings() {
         </Tabs.Panel>
 
         {/* ------------------------------------------------------------------ */}
-        <Tabs.Panel id="tokens">
-          <div className="space-y-5 pt-4">
-            <Panel
-              title="API Token"
-              extra={
-                <div className="flex items-center gap-2">
-                  <Button size="sm" variant="secondary" isDisabled={tokens.loading} onPress={() => void loadTokens(true)}>
-                    刷新
-                  </Button>
-                  <Button size="sm" variant="primary" onPress={openCreateToken}>
-                    新建 Token
-                  </Button>
-                </div>
-              }
-            >
-              <div className="p-4">
-                {tokens.error ? (
-                  <div className="mb-3">
-                    <Notice status="danger">{tokens.error}</Notice>
-                  </div>
-                ) : null}
-                <div className={tokens.loading ? 'opacity-60' : ''}>
-                  <DataTable
-                    items={tokens.items}
-                    columns={tokenColumns}
-                    rowKey={(row) => row.id}
-                    ariaLabel="API Token 列表"
-                    empty="还没有创建 API Token"
-                  />
-                </div>
-              </div>
-            </Panel>
-            <Panel>
-              <Note>
-                Token 仅在创建时完整显示一次，请立即复制保存；服务端只保存摘要。留空权限范围表示完全管理权限，填 read
-                只会得到只读权限。
-              </Note>
-            </Panel>
-          </div>
-        </Tabs.Panel>
-
-        {/* ------------------------------------------------------------------ */}
         <Tabs.Panel id="sessions">
           <div className="space-y-5 pt-4">
             <Panel
@@ -1778,72 +1615,6 @@ export default function Settings() {
       </FormModal>
 
       <FormModal
-        open={tokenDialog.open}
-        onClose={() => {
-          if (!tokenDialog.saving) setTokenDialog((prev) => ({ ...prev, open: false }))
-        }}
-        title="新建 API Token"
-        footer={
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="tertiary"
-              isDisabled={tokenDialog.saving}
-              onPress={() => setTokenDialog((prev) => ({ ...prev, open: false }))}
-            >
-              取消
-            </Button>
-            <Button variant="primary" isDisabled={tokenDialog.saving} onPress={() => void createToken()}>
-              {tokenDialog.saving ? '创建中…' : '创建'}
-            </Button>
-          </div>
-        }
-      >
-        <div className="space-y-5">
-          <TextInput
-            label="名称"
-            value={tokenDialog.form.name}
-            onChange={(value) => setTokenDialog((prev) => ({ ...prev, form: { ...prev.form, name: value } }))}
-            placeholder="例如：监控脚本"
-            required
-          />
-          <TagInput
-            label="权限范围"
-            value={tokenDialog.form.scopes}
-            onChange={(value) => setTokenDialog((prev) => ({ ...prev, form: { ...prev.form, scopes: value } }))}
-            placeholder="输入范围后按回车添加"
-            hint="留空表示完全管理权限（等同 admin）；填 read 只会得到只读权限"
-          />
-        </div>
-      </FormModal>
-
-      <FormModal
-        open={tokenResult.open}
-        onClose={() => setTokenResult((prev) => ({ ...prev, open: false }))}
-        title={`Token 已创建${tokenResult.name ? '：' + tokenResult.name : ''}`}
-        footer={
-          <div className="flex justify-end gap-2">
-            <Button variant="primary" onPress={() => void copyTokenValue()}>
-              复制令牌
-            </Button>
-            <Button variant="tertiary" onPress={() => setTokenResult((prev) => ({ ...prev, open: false }))}>
-              关闭
-            </Button>
-          </div>
-        }
-      >
-        <div className="space-y-5">
-          <Notice status="warning">请立即复制并妥善保存，关闭本窗口后将无法再次查看。</Notice>
-          <TextField
-            isReadOnly
-            value={tokenResult.token || '（后端未返回令牌）'}
-            aria-label="新 Token"
-          >
-            <TextArea className="mono min-h-20" rows={4} />
-          </TextField>
-        </div>
-      </FormModal>
-
-      <FormModal
         open={rawDialog.open}
         onClose={() => setRawDialog((prev) => ({ ...prev, open: false }))}
         title="当前配置（密钥已脱敏）"
@@ -1889,20 +1660,6 @@ export default function Settings() {
         confirmText="停用"
         onCancel={() => setDisableUser(null)}
         onConfirm={() => void confirmDisableUser()}
-      />
-
-      <ConfirmModal
-        open={!!deleteToken}
-        title="删除 API Token"
-        content={
-          <>
-            确定要删除 Token「{deleteToken?.name}」吗？使用它的客户端会立即失效。
-          </>
-        }
-        danger
-        confirmText="删除"
-        onCancel={() => setDeleteToken(null)}
-        onConfirm={() => void confirmDeleteToken()}
       />
 
       <ConfirmModal

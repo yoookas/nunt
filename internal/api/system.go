@@ -411,7 +411,6 @@ func maskConfigSecrets(cfg *model.Config) {
 		}
 		cfg.Users[i].TOTP.Codes = nil
 	}
-	cfg.Tokens = nil
 	for i := range cfg.DDNS.Rules {
 		for k, v := range cfg.DDNS.Rules[i].Creds {
 			cfg.DDNS.Rules[i].Creds[k] = secret.Mask(v)

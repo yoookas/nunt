@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -90,20 +89,6 @@ func (s *Server) SetAdminListener(srv *adminlisten.Server) { s.admin.Store(srv) 
 // standalone).
 func (s *Server) AdminListener() *adminlisten.Server { return s.admin.Load() }
 
-// WaitBackground blocks until every background task started by the server has
-// finished. Call it on shutdown so that no deferred write lands after the
-// configuration directory is gone.
-func (s *Server) WaitBackground() { s.bg.Wait() }
-
-// goBackground runs fn in a goroutine that WaitBackground joins.
-func (s *Server) goBackground(fn func()) {
-	s.bg.Add(1)
-	go func() {
-		defer s.bg.Done()
-		fn()
-	}()
-}
-
 // New creates the API server and registers every route.
 func New(opts Options) *Server {
 	log := opts.Log.Logger().With("component", "api")
@@ -127,7 +112,6 @@ func New(opts Options) *Server {
 	s.mux = rest.NewMux(log, rest.Recover(log), rest.AccessLog(log))
 	s.mux = s.mux.With(s.apiLimit)
 	s.mux = s.mux.WithAuth(s.authenticate)
-	s.mux = s.mux.With(s.adminScope)
 	s.register()
 	return s
 }
@@ -140,8 +124,8 @@ func (s *Server) Handler() http.Handler {
 		apiHandler = s.opts.AdminWAF(apiHandler)
 	}
 	root.Handle("/api/", apiHandler)
-	// Metrics live outside /api but behind the same authentication, so a
-	// scraper needs a read-only API token instead of the admin session cookie.
+	// Metrics live outside /api but behind the same authentication, so they are
+	// only reachable with a signed in browser session.
 	root.Handle("/metrics", apiHandler)
 	root.Handle("/healthz", http.HandlerFunc(s.health))
 	root.Handle("/", rest.Chain(webui.Handler(), rest.SecurityHeaders()))
@@ -181,13 +165,13 @@ func (s *Server) apiLimit(next http.Handler) http.Handler {
 // authentication
 // ---------------------------------------------------------------------------
 
-// IdentityKind distinguishes browser sessions from open API tokens.
+// IdentityKind distinguishes how the caller authenticated. Only browser
+// sessions exist today; the type keeps the JSON shape stable.
 type IdentityKind string
 
 // Identity kinds.
 const (
 	IdentitySession IdentityKind = "session"
-	IdentityToken   IdentityKind = "token"
 )
 
 // Identity is the authenticated caller.
@@ -195,8 +179,6 @@ type Identity struct {
 	Kind     IdentityKind `json:"kind"`
 	UserID   string       `json:"userId,omitempty"`
 	Username string       `json:"username"`
-	TokenID  string       `json:"tokenId,omitempty"`
-	Scopes   []string     `json:"scopes,omitempty"`
 	CSRF     string       `json:"-"`
 	Session  *security.Session
 }
@@ -223,38 +205,14 @@ func (s *Server) SessionFrom(r *http.Request) (*security.Session, bool) {
 	return id.Session, true
 }
 
-func tokenFromRequest(r *http.Request) (token string, isBearer bool) {
-	auth := r.Header.Get("Authorization")
-	if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
-		return strings.TrimSpace(auth[7:]), true
-	}
-	if c, err := r.Cookie(SessionCookie); err == nil && c.Value != "" {
-		return c.Value, false
-	}
-	return "", false
-}
-
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token, isBearer := tokenFromRequest(r)
-		if token == "" {
-			// Open API clients may also use the X-API-Token header.
-			token = r.Header.Get("X-Api-Token")
-			isBearer = token != ""
-		}
-		if token == "" {
+		cookie, err := r.Cookie(SessionCookie)
+		if err != nil || cookie.Value == "" {
 			rest.FailCode(w, http.StatusUnauthorized, "unauthorized", "需要先登录")
 			return
 		}
-
-		if isBearer {
-			if id := s.matchToken(token); id != nil {
-				next.ServeHTTP(w, r.WithContext(WithIdentity(r.Context(), id)))
-				return
-			}
-			rest.FailCode(w, http.StatusUnauthorized, "unauthorized", "API Token 无效")
-			return
-		}
+		token := cookie.Value
 
 		sess, ok := s.opts.Sessions.Get(token)
 		if !ok {
@@ -282,98 +240,16 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) matchToken(token string) *Identity {
-	var matched *model.APIToken
-	cfg := s.opts.Cfg.Snapshot()
-	for i := range cfg.Tokens {
-		t := cfg.Tokens[i]
-		if !t.Enabled || t.TokenHash == "" {
-			continue
-		}
-		if security.ConstantTimeEqual(t.TokenHash, hashTokenValue(token)) {
-			matched = &t
-			break
-		}
-	}
-	if matched == nil {
-		return nil
-	}
-	// Persisting every request would rewrite the configuration file far too
-	// often, so the usage timestamp is only refreshed every few minutes. The
-	// write is tracked so shutdown (and tests) can wait for it.
-	if matched.LastUsed == nil || time.Since(*matched.LastUsed) > 5*time.Minute {
-		s.goBackground(func() { s.touchToken(matched.ID) })
-	}
-	return &Identity{Kind: IdentityToken, Username: matched.Name, TokenID: matched.ID, Scopes: matched.Scopes}
-}
-
-func (s *Server) touchToken(id string) {
-	_ = s.opts.Cfg.Update(func(c *model.Config) error {
-		for i := range c.Tokens {
-			if c.Tokens[i].ID == id {
-				now := time.Now()
-				c.Tokens[i].LastUsed = &now
-			}
-		}
-		return nil
-	})
-}
-
-// adminScope protects every mutating route, including the ones registered by
-// modules, against API tokens that were issued with a restricted scope.
-func (s *Server) adminScope(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet, http.MethodHead, http.MethodOptions:
-			next.ServeHTTP(w, r)
-			return
-		}
-		id, ok := IdentityFrom(r.Context())
-		if !ok {
-			// Public route (sign in); authentication is not required.
-			next.ServeHTTP(w, r)
-			return
-		}
-		if id.Kind == IdentityToken && !hasAdminScope(id.Scopes) {
-			rest.FailCode(w, http.StatusForbidden, "forbidden", "该 API Token 没有修改配置的权限")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func hasAdminScope(scopes []string) bool {
-	if len(scopes) == 0 {
-		return true
-	}
-	for _, scope := range scopes {
-		if scope == "*" || scope == "admin" {
-			return true
-		}
-	}
-	return false
-}
-
-// isAdmin reports whether the caller may change configuration.
+// isAdmin reports whether the caller may change configuration. Every
+// authenticated caller is an administrator: the console is single-admin.
 func isAdmin(r *http.Request) bool {
-	id, ok := IdentityFrom(r.Context())
-	if !ok {
-		return false
-	}
-	if id.Kind == IdentitySession {
-		return true
-	}
-	for _, scope := range id.Scopes {
-		if scope == "*" || scope == "admin" {
-			return true
-		}
-	}
-	return len(id.Scopes) == 0
+	_, ok := IdentityFrom(r.Context())
+	return ok
 }
 
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	if !isAdmin(r) {
-		rest.FailCode(w, http.StatusForbidden, "forbidden", "该 API Token 没有修改配置的权限")
+		rest.FailCode(w, http.StatusForbidden, "forbidden", "需要管理员权限")
 		return false
 	}
 	return true

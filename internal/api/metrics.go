@@ -11,8 +11,8 @@ import (
 )
 
 // handleMetrics serves a small Prometheus text exposition. It is mounted under
-// the authenticated mux on purpose: a scraper has to use a read-only API token
-// (Authorization: Bearer ...), so the topology is not public by default.
+// the authenticated mux on purpose: only a signed in session can read it, so
+// the topology is not public by default.
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	var b strings.Builder
 

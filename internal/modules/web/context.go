@@ -14,27 +14,14 @@ import (
 var errNotFound = errors.New("not found")
 
 // requireAdmin rejects callers that may not change the configuration. The
-// authentication and CSRF checks themselves run in the admin API middleware;
-// this helper only verifies the scope of an open API token.
+// authentication and CSRF checks run in the admin API middleware; this helper
+// only makes sure an authenticated caller reached the handler.
 func requireAdmin(rw http.ResponseWriter, req *http.Request) bool {
-	id, ok := api.IdentityFrom(req.Context())
-	if !ok {
+	if _, ok := api.IdentityFrom(req.Context()); !ok {
 		rest.FailCode(rw, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return false
 	}
-	if id.Kind == api.IdentitySession {
-		return true
-	}
-	for _, scope := range id.Scopes {
-		if scope == "*" || scope == "admin" {
-			return true
-		}
-	}
-	if len(id.Scopes) == 0 {
-		return true
-	}
-	rest.FailCode(rw, http.StatusForbidden, "forbidden", "this api token is not allowed to change the configuration")
-	return false
+	return true
 }
 
 type upstreamKey struct{}

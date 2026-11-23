@@ -157,7 +157,6 @@ data/
 - **认证**：Argon2id 密码哈希；会话为服务端存储的随机令牌（HttpOnly + SameSite=Strict + TLS 下 Secure），修改密码后旧会话立即失效。
 - **CSRF**：会话鉴权的写操作必须带 `X-CSRF-Token`（登录时下发）。
 - **暴力破解**：登录失败按「用户名 + IP」计数，超过阈值指数退避锁定；API 有令牌桶限流。
-- **开放 API**：Bearer Token 或 `X-API-Token`，令牌只存 SHA-256 哈希，可限制 scope，可随时吊销。
 - **文件安全**：静态托管的本地目录全部走基于 `os.Root` 的虚拟文件系统，符号链接与 `..` 逃逸在内核层面被拒绝。
 - **反向代理**：剥离 hop-by-hop 头、可控超时、上游仅允许 http/https，响应头可裁剪。
 - **WAF**：Coraza + CRS，可保护后台接口本身；拦截页面不回显用户输入；请求体检查由 Coraza 自己按 `bodyLimitKb` 截断（见下方「WAF」）。

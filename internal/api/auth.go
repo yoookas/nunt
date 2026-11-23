@@ -1,8 +1,6 @@
 package api
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"net/http"
 	"strings"
 	"time"
@@ -11,11 +9,6 @@ import (
 	"github.com/nunt/nunt/internal/rest"
 	"github.com/nunt/nunt/internal/security"
 )
-
-func hashTokenValue(token string) string {
-	sum := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(sum[:])
-}
 
 func (s *Server) registerAuth() {
 	g := s.mux.Group("/api/v1/auth")
@@ -34,10 +27,6 @@ func (s *Server) registerAuth() {
 	g.Post("/users", s.handleCreateUser)
 	g.Put("/users/{id}", s.handleUpdateUser)
 	g.Delete("/users/{id}", s.handleDeleteUser)
-
-	g.Get("/tokens", s.handleListTokens)
-	g.Post("/tokens", s.handleCreateToken)
-	g.Delete("/tokens/{id}", s.handleDeleteToken)
 
 	g.Get("/sessions", s.handleListSessions)
 	g.Delete("/sessions/{id}", s.handleDeleteSession)
@@ -402,98 +391,6 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	s.opts.Sessions.DeleteUser(id)
 	s.audit(r, "user.delete", "id", id)
-	rest.NoContent(w)
-}
-
-// ---------------------------------------------------------------------------
-// api tokens
-// ---------------------------------------------------------------------------
-
-func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
-	cfg := s.opts.Cfg.Snapshot()
-	type tokenView struct {
-		ID        string     `json:"id"`
-		Name      string     `json:"name"`
-		Scopes    []string   `json:"scopes,omitempty"`
-		Enabled   bool       `json:"enabled"`
-		CreatedAt time.Time  `json:"createdAt"`
-		LastUsed  *time.Time `json:"lastUsed,omitempty"`
-	}
-	out := make([]tokenView, 0, len(cfg.Tokens))
-	for _, t := range cfg.Tokens {
-		out = append(out, tokenView{t.ID, t.Name, t.Scopes, t.Enabled, t.CreatedAt, t.LastUsed})
-	}
-	rest.OK(w, out)
-}
-
-type tokenRequest struct {
-	Name   string   `json:"name"`
-	Scopes []string `json:"scopes"`
-}
-
-func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
-	if !requireAdmin(w, r) {
-		return
-	}
-	var req tokenRequest
-	if !jsonBody(w, r, &req) {
-		return
-	}
-	req.Name = strings.TrimSpace(req.Name)
-	if req.Name == "" {
-		rest.Fail(w, http.StatusBadRequest, "请填写名称")
-		return
-	}
-	plain, err := security.RandomToken(24)
-	if err != nil {
-		rest.Fail(w, http.StatusInternalServerError, "无法生成 Token：%s", err)
-		return
-	}
-	token := model.APIToken{
-		ID:        model.NewID(),
-		Name:      req.Name,
-		TokenHash: hashTokenValue(plain),
-		Scopes:    req.Scopes,
-		Enabled:   true,
-		CreatedAt: time.Now(),
-	}
-	if err := s.opts.Cfg.Update(func(c *model.Config) error {
-		c.Tokens = append(c.Tokens, token)
-		return nil
-	}); err != nil {
-		rest.Fail(w, http.StatusInternalServerError, "无法保存 Token：%s", err)
-		return
-	}
-	s.audit(r, "token.create", "name", req.Name)
-	// The plain token is returned exactly once.
-	rest.OK(w, map[string]any{"id": token.ID, "token": plain})
-}
-
-func (s *Server) handleDeleteToken(w http.ResponseWriter, r *http.Request) {
-	if !requireAdmin(w, r) {
-		return
-	}
-	id := idParam(r, "id")
-	if err := s.opts.Cfg.Update(func(c *model.Config) error {
-		out := c.Tokens[:0]
-		removed := false
-		for _, t := range c.Tokens {
-			if t.ID == id {
-				removed = true
-				continue
-			}
-			out = append(out, t)
-		}
-		c.Tokens = out
-		if !removed {
-			return errNotFound
-		}
-		return nil
-	}); err != nil {
-		rest.Fail(w, http.StatusNotFound, "Token 不存在")
-		return
-	}
-	s.audit(r, "token.delete", "id", id)
 	rest.NoContent(w)
 }
 

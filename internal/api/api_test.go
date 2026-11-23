@@ -85,9 +85,6 @@ func newTestEnv(t *testing.T) *testEnv {
 		DataDir:  dir,
 		Logs:     logStore,
 	})
-	// Deferred writes (token usage) must not outlive the test: t.TempDir
-	// removal races with them on Windows ("the directory is not empty").
-	t.Cleanup(server.WaitBackground)
 	return &testEnv{server: server, store: store, sessions: sessions, logs: logStore}
 }
 
@@ -170,42 +167,16 @@ func TestLoginSessionAndCsrf(t *testing.T) {
 	}
 
 	// Writes without the csrf header are rejected.
-	rec = env.do(t, http.MethodPost, "/api/v1/auth/tokens", map[string]any{"name": "ci"}, cookies, nil)
+	rec = env.do(t, http.MethodPost, "/api/v1/system/reload", nil, cookies, nil)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("a write without csrf must be 403, got %d", rec.Code)
 	}
 
-	// With the csrf header the token is created and returned exactly once.
-	rec = env.do(t, http.MethodPost, "/api/v1/auth/tokens", map[string]any{"name": "ci"}, cookies,
+	// The same write with the csrf header goes through.
+	rec = env.do(t, http.MethodPost, "/api/v1/system/reload", nil, cookies,
 		map[string]string{"X-CSRF-Token": login.CSRF})
 	if rec.Code != http.StatusOK {
-		t.Fatalf("token creation: %d %s", rec.Code, rec.Body.String())
-	}
-	var created struct {
-		ID    string `json:"id"`
-		Token string `json:"token"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decode token: %v", err)
-	}
-	if created.Token == "" {
-		t.Fatal("the plain token must be returned once")
-	}
-
-	// The stored token must never be exposed again.
-	rec = env.do(t, http.MethodGet, "/api/v1/auth/tokens", nil, cookies, nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("list tokens: %d", rec.Code)
-	}
-	if bytes.Contains(rec.Body.Bytes(), []byte(created.Token)) {
-		t.Fatal("the token list must not contain the plain token")
-	}
-
-	// API tokens authenticate through the Authorization header without csrf.
-	rec = env.do(t, http.MethodGet, "/api/v1/system/info", nil, nil,
-		map[string]string{"Authorization": "Bearer " + created.Token})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("bearer authentication failed: %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("a write with csrf must be accepted, got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	// Logout invalidates the session.

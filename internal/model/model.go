@@ -45,7 +45,6 @@ type Config struct {
 	Version int           `json:"version"`
 	System  SystemConfig  `json:"system"`
 	Users   []User        `json:"users"`
-	Tokens  []APIToken    `json:"tokens,omitempty"`
 	Web     WebConfig     `json:"web"`
 	Forward ForwardConfig `json:"forward"`
 	DDNS    DDNSConfig    `json:"ddns"`
@@ -138,17 +137,6 @@ type TOTP struct {
 	// LastStep is the last accepted time step, which makes a code single use
 	// even inside its 30 second window.
 	LastStep int64 `json:"lastStep,omitempty"`
-}
-
-// APIToken is an open API credential (the plain token is shown once).
-type APIToken struct {
-	ID        string     `json:"id"`
-	Name      string     `json:"name"`
-	TokenHash string     `json:"tokenHash,omitempty"`
-	Scopes    []string   `json:"scopes,omitempty"`
-	Enabled   bool       `json:"enabled"`
-	CreatedAt time.Time  `json:"createdAt"`
-	LastUsed  *time.Time `json:"lastUsed,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
