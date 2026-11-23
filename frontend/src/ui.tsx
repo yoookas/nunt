@@ -1,26 +1,40 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
+  Alert,
+  AlertDialog,
   Button,
   Card,
   Chip,
   Description,
+  Drawer,
+  EmptyState,
   Input,
   Label,
   ListBox,
-  Modal,
+  Menu,
+  MenuItem,
+  NumberField,
   Select,
+  Skeleton,
+  Spinner,
   Switch,
   Table,
+  Tag,
   TextArea,
   TextField,
+  Typography,
   toast,
 } from '@heroui/react'
-import { ChevronDown, X } from 'lucide-react'
+import { ChevronDown, Minus, Plus, X } from 'lucide-react'
 
 export { toast }
 
+/* -------------------------------------------------------------------------- */
+/* Page shell                                                                 */
+/* -------------------------------------------------------------------------- */
+
 export function Page({ children }: { children: ReactNode }) {
-  return <div className="page">{children}</div>
+  return <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">{children}</div>
 }
 
 export function PageHeader({
@@ -33,41 +47,87 @@ export function PageHeader({
   actions?: ReactNode
 }) {
   return (
-    <div className="page-header">
-      <div>
-        <div className="page-title">{title}</div>
-        {sub ? <div className="page-sub">{sub}</div> : null}
+    <header className="mb-6 flex flex-wrap items-start gap-4">
+      <div className="min-w-0 flex-1">
+        <Typography.Heading level={2} className="text-2xl font-semibold tracking-tight">
+          {title}
+        </Typography.Heading>
+        {sub ? (
+          <Typography.Paragraph className="mt-1 text-sm text-muted">{sub}</Typography.Paragraph>
+        ) : null}
       </div>
-      <div className="spacer" />
-      {actions ? <div className="toolbar">{actions}</div> : null}
-    </div>
+      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+    </header>
   )
 }
 
-export function Panel({
+export function Section({
   title,
+  description,
+  actions,
   extra,
   children,
   className = '',
+  flush,
 }: {
   title?: ReactNode
+  description?: ReactNode
+  actions?: ReactNode
   extra?: ReactNode
   children: ReactNode
   className?: string
+  flush?: boolean
 }) {
+  const headerActions = actions ?? extra
   return (
     <Card className={className}>
-      {title || extra ? (
-        <Card.Header className="flex flex-wrap items-center gap-3">
-          <Card.Title className="text-base">{title}</Card.Title>
-          <div className="flex-1" />
-          {extra}
+      {title || description || headerActions ? (
+        <Card.Header className="flex flex-wrap items-center gap-3 border-b border-border">
+          <div className="min-w-0 flex-1">
+            {title ? <Card.Title className="text-base">{title}</Card.Title> : null}
+            {description ? (
+              <Card.Description className="mt-0.5 text-xs text-muted">{description}</Card.Description>
+            ) : null}
+          </div>
+          {headerActions ? <div className="flex flex-wrap items-center gap-2">{headerActions}</div> : null}
         </Card.Header>
       ) : null}
-      <Card.Content className="p-0">{children}</Card.Content>
+      <Card.Content className={flush ? 'p-0' : 'p-4 sm:p-5'}>{children}</Card.Content>
     </Card>
   )
 }
+
+// Panel stays as the compatibility alias used by the pages.
+export const Panel = Section
+
+export function StatCard({
+  label,
+  value,
+  hint,
+  icon,
+}: {
+  label: ReactNode
+  value: ReactNode
+  hint?: ReactNode
+  icon?: ReactNode
+}) {
+  return (
+    <Card>
+      <Card.Content className="flex items-start gap-3 p-4">
+        {icon ? <div className="rounded-lg bg-default p-2 text-foreground">{icon}</div> : null}
+        <div className="min-w-0">
+          <div className="text-xs text-muted">{label}</div>
+          <div className="mt-1 truncate text-xl font-semibold">{value}</div>
+          {hint ? <div className="mt-1 text-xs text-muted">{hint}</div> : null}
+        </div>
+      </Card.Content>
+    </Card>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Tables                                                                     */
+/* -------------------------------------------------------------------------- */
 
 export interface Column<T> {
   key: string
@@ -82,15 +142,24 @@ export function DataTable<T>({
   rowKey,
   empty = '暂无数据',
   ariaLabel = '数据表',
+  loading,
 }: {
   items: T[]
   columns: Column<T>[]
   rowKey: (row: T) => string
   empty?: ReactNode
   ariaLabel?: string
+  loading?: boolean
 }) {
+  if (loading) return <TableSkeleton columns={columns.length} />
   if (items.length === 0) {
-    return <div className="px-4 py-10 text-center text-sm text-muted">{empty}</div>
+    return (
+      <EmptyState className="py-10">
+        <EmptyState.Root>
+          <div className="text-sm text-muted">{empty}</div>
+        </EmptyState.Root>
+      </EmptyState>
+    )
   }
   return (
     <Table>
@@ -118,6 +187,54 @@ export function DataTable<T>({
   )
 }
 
+export function TableSkeleton({ columns = 4, rows = 5 }: { columns?: number; rows?: number }) {
+  return (
+    <div className="space-y-2 p-4">
+      {Array.from({ length: rows }).map((_, rowIndex) => (
+        <div key={rowIndex} className="flex gap-3">
+          {Array.from({ length: columns }).map((__, columnIndex) => (
+            <Skeleton key={columnIndex} className="h-8 flex-1 rounded-md" />
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export function LoadingBlock({ label = '加载中…' }: { label?: string }) {
+  return (
+    <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted">
+      <Spinner size="sm" />
+      {label}
+    </div>
+  )
+}
+
+export function SearchInput({
+  value,
+  onChange,
+  placeholder = '搜索…',
+}: {
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+}) {
+  return (
+    <TextField
+      aria-label={placeholder}
+      value={value}
+      onChange={onChange}
+      className="w-56"
+    >
+      <Input placeholder={placeholder} />
+    </TextField>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Drawers / dialogs                                                          */
+/* -------------------------------------------------------------------------- */
+
 export function FormModal({
   open,
   onClose,
@@ -134,21 +251,66 @@ export function FormModal({
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'full'
 }) {
   return (
-    <Modal isOpen={open} onOpenChange={(isOpen: boolean) => !isOpen && onClose()}>
-      <Modal.Backdrop>
-        <Modal.Container size={size === 'xl' ? 'lg' : size}>
-          <Modal.Dialog>
-            <Modal.Header>
-              <Modal.Heading>{title}</Modal.Heading>
-            </Modal.Header>
-            <Modal.Body>{children}</Modal.Body>
-            {footer ? <Modal.Footer>{footer}</Modal.Footer> : null}
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
-    </Modal>
+    <Drawer isOpen={open} onOpenChange={(isOpen: boolean) => !isOpen && onClose()}>
+      <Drawer.Backdrop>
+        <Drawer.Content>
+          <Drawer.Dialog className={size === 'xl' || size === 'full' ? 'sm:max-w-3xl' : 'sm:max-w-xl'}>
+            <Drawer.Header>
+              <Drawer.Heading>{title}</Drawer.Heading>
+            </Drawer.Header>
+            <Drawer.Body>{children}</Drawer.Body>
+            {footer ? <Drawer.Footer>{footer}</Drawer.Footer> : null}
+          </Drawer.Dialog>
+        </Drawer.Content>
+      </Drawer.Backdrop>
+    </Drawer>
   )
 }
+
+export function ConfirmModal({
+  open,
+  title,
+  content,
+  onCancel,
+  onConfirm,
+  danger,
+  confirmText = '确定',
+}: {
+  open: boolean
+  title: string
+  content: ReactNode
+  onCancel: () => void
+  onConfirm: () => void
+  danger?: boolean
+  confirmText?: string
+}) {
+  return (
+    <AlertDialog isOpen={open} onOpenChange={(isOpen: boolean) => !isOpen && onCancel()}>
+      <AlertDialog.Backdrop>
+        <AlertDialog.Container>
+          <AlertDialog.Dialog>
+            <AlertDialog.Header>
+              <AlertDialog.Heading>{title}</AlertDialog.Heading>
+            </AlertDialog.Header>
+            <AlertDialog.Body>{content}</AlertDialog.Body>
+            <AlertDialog.Footer>
+              <Button variant="tertiary" onPress={onCancel}>
+                取消
+              </Button>
+              <Button variant={danger ? 'danger' : 'primary'} onPress={onConfirm}>
+                {confirmText}
+              </Button>
+            </AlertDialog.Footer>
+          </AlertDialog.Dialog>
+        </AlertDialog.Container>
+      </AlertDialog.Backdrop>
+    </AlertDialog>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Form fields                                                                */
+/* -------------------------------------------------------------------------- */
 
 export function TextInput({
   label,
@@ -170,9 +332,16 @@ export function TextInput({
   type?: string
 }) {
   return (
-    <TextField value={value} onChange={onChange} isRequired={required} isDisabled={disabled}>
+    <TextField
+      value={value}
+      onChange={onChange}
+      isRequired={required}
+      isDisabled={disabled}
+      type={type}
+      className="w-full"
+    >
       <Label>{label}</Label>
-      <Input type={type} placeholder={placeholder} />
+      <Input placeholder={placeholder} />
       {hint ? <Description>{hint}</Description> : null}
     </TextField>
   )
@@ -196,7 +365,7 @@ export function TextAreaInput({
   required?: boolean
 }) {
   return (
-    <TextField value={value} onChange={onChange} isRequired={required}>
+    <TextField value={value} onChange={onChange} isRequired={required} className="w-full">
       <Label>{label}</Label>
       <TextArea rows={rows} placeholder={placeholder} />
       {hint ? <Description>{hint}</Description> : null}
@@ -222,19 +391,26 @@ export function NumberInput({
   hint?: ReactNode
 }) {
   return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-sm font-medium">{label}</span>
-      <input
-        type="number"
-        className="h-9 w-full rounded-md border border-border bg-surface px-3 text-sm outline-none focus:border-focus"
-        value={Number.isFinite(value) ? value : 0}
-        min={min}
-        max={max}
-        step={step}
-        onChange={(event) => onChange(Number(event.target.value))}
-      />
-      {hint ? <span className="field-hint">{hint}</span> : null}
-    </label>
+    <NumberField
+      value={Number.isFinite(value) ? value : 0}
+      onChange={(next: number) => onChange(Number.isFinite(next) ? next : 0)}
+      minValue={min}
+      maxValue={max}
+      step={step}
+      className="w-full"
+    >
+      <Label>{label}</Label>
+      <NumberField.Group>
+        <NumberField.DecrementButton>
+          <Minus size={14} />
+        </NumberField.DecrementButton>
+        <NumberField.Input />
+        <NumberField.IncrementButton>
+          <Plus size={14} />
+        </NumberField.IncrementButton>
+      </NumberField.Group>
+      {hint ? <Description>{hint}</Description> : null}
+    </NumberField>
   )
 }
 
@@ -269,6 +445,7 @@ export function SelectInput({
       isRequired={required}
       isDisabled={disabled}
       placeholder={placeholder}
+      className="w-full"
     >
       <Label>{label}</Label>
       <Select.Trigger>
@@ -317,6 +494,26 @@ export function SwitchInput({
   )
 }
 
+function TagFieldShell({
+  label,
+  hint,
+  children,
+}: {
+  label?: ReactNode
+  hint?: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      {label ? <span className="text-sm font-medium">{label}</span> : null}
+      <div className="flex min-h-9 flex-wrap items-center gap-1 rounded-lg border border-border bg-surface px-2 py-1">
+        {children}
+      </div>
+      {hint ? <span className="field-hint">{hint}</span> : null}
+    </div>
+  )
+}
+
 export function TagInput({
   label,
   value,
@@ -345,96 +542,36 @@ export function TagInput({
   }
 
   return (
-    <div className="flex flex-col gap-1.5">
-      {label ? <span className="text-sm font-medium">{label}</span> : null}
-      <div className="flex min-h-9 flex-wrap items-center gap-1 rounded-md border border-border bg-surface px-2 py-1">
-        {value.map((item) => (
-          <span
-            key={item}
-            className="inline-flex items-center gap-1 rounded-full bg-default px-2 py-0.5 text-xs"
+    <TagFieldShell label={label} hint={hint}>
+      {value.map((item) => (
+        <Tag key={item} className="gap-1">
+          {item}
+          <button
+            type="button"
+            aria-label={`移除 ${item}`}
+            className="text-muted hover:text-danger"
+            onClick={() => onChange(value.filter((entry) => entry !== item))}
           >
-            {item}
-            <button
-              type="button"
-              aria-label={`移除 ${item}`}
-              className="text-muted hover:text-danger"
-              onClick={() => onChange(value.filter((entry) => entry !== item))}
-            >
-              <X size={12} />
-            </button>
-          </span>
-        ))}
-        <input
-          className="min-w-24 flex-1 bg-transparent px-1 py-0.5 text-sm outline-none"
-          value={draft}
-          placeholder={placeholder}
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={add}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ',' || event.key === '，') {
-              event.preventDefault()
-              add()
-            } else if (event.key === 'Backspace' && !draft && value.length) {
-              onChange(value.slice(0, -1))
-            }
-          }}
-        />
-      </div>
-      {hint ? <span className="field-hint">{hint}</span> : null}
-    </div>
-  )
-}
-
-export function ConfirmModal({
-  open,
-  title,
-  content,
-  onCancel,
-  onConfirm,
-  danger,
-  confirmText = '确定',
-}: {
-  open: boolean
-  title: string
-  content: ReactNode
-  onCancel: () => void
-  onConfirm: () => void
-  danger?: boolean
-  confirmText?: string
-}) {
-  return (
-    <FormModal
-      open={open}
-      onClose={onCancel}
-      title={title}
-      size="sm"
-      footer={
-        <div className="flex justify-end gap-2">
-          <Button variant="tertiary" onPress={onCancel}>
-            取消
-          </Button>
-          <Button variant={danger ? 'danger' : 'primary'} onPress={onConfirm}>
-            {confirmText}
-          </Button>
-        </div>
-      }
-    >
-      <div className="text-sm">{content}</div>
-    </FormModal>
-  )
-}
-
-export function StatusChip({
-  color,
-  children,
-}: {
-  color?: 'default' | 'primary' | 'success' | 'warning' | 'danger'
-  children: ReactNode
-}) {
-  return (
-    <Chip color={color === 'primary' ? 'accent' : color || 'default'} size="sm" variant="soft">
-      {children}
-    </Chip>
+            <X size={12} />
+          </button>
+        </Tag>
+      ))}
+      <input
+        className="min-w-24 flex-1 bg-transparent px-1 py-0.5 text-sm outline-none"
+        value={draft}
+        placeholder={placeholder}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={add}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ',' || event.key === '，') {
+            event.preventDefault()
+            add()
+          } else if (event.key === 'Backspace' && !draft && value.length) {
+            onChange(value.slice(0, -1))
+          }
+        }}
+      />
+    </TagFieldShell>
   )
 }
 
@@ -476,21 +613,19 @@ export function MultiSelectInput({
         <button
           type="button"
           onClick={() => setOpen((prev) => !prev)}
-          className="flex min-h-9 w-full flex-wrap items-center gap-1 rounded-md border border-border bg-surface px-2 py-1 text-left text-sm"
+          className="flex min-h-9 w-full flex-wrap items-center gap-1 rounded-lg border border-border bg-surface px-2 py-1 text-left text-sm"
         >
           {value.length === 0 ? (
             <span className="text-muted">{placeholder}</span>
           ) : (
             value.map((item) => (
-              <span key={item} className="inline-flex items-center rounded-full bg-default px-2 py-0.5 text-xs">
-                {item}
-              </span>
+              <Tag key={item}>{item}</Tag>
             ))
           )}
           <ChevronDown size={14} className="ml-auto text-muted" />
         </button>
         {open ? (
-          <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border bg-overlay p-1 shadow-lg">
+          <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-border bg-overlay p-1 shadow-lg">
             {options.length === 0 ? (
               <div className="px-2 py-3 text-xs text-muted">没有可选项</div>
             ) : (
@@ -513,6 +648,40 @@ export function MultiSelectInput({
       </div>
       {hint ? <span className="field-hint">{hint}</span> : null}
     </div>
+  )
+}
+
+export function StatusChip({
+  color,
+  children,
+}: {
+  color?: 'default' | 'primary' | 'success' | 'warning' | 'danger'
+  children: ReactNode
+}) {
+  return (
+    <Chip color={color === 'primary' ? 'accent' : color || 'default'} size="sm" variant="soft">
+      {children}
+    </Chip>
+  )
+}
+
+export function AlertBox({
+  status = 'default',
+  title,
+  children,
+}: {
+  status?: 'default' | 'accent' | 'success' | 'warning' | 'danger'
+  title?: ReactNode
+  children?: ReactNode
+}) {
+  return (
+    <Alert status={status}>
+      <Alert.Indicator />
+      <Alert.Content>
+        {title ? <Alert.Title>{title}</Alert.Title> : null}
+        {children ? <Alert.Description>{children}</Alert.Description> : null}
+      </Alert.Content>
+    </Alert>
   )
 }
 

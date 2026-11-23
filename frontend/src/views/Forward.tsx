@@ -12,6 +12,7 @@ import {
   Page,
   PageHeader,
   Panel,
+  StatCard,
   SelectInput,
   StatusChip,
   TagInput,
@@ -669,45 +670,23 @@ export default function Forward() {
         }
       />
 
-      <div className="stack">
-        <Panel>
-          <div className="grid grid-cols-2 gap-3 p-4 md:grid-cols-3 xl:grid-cols-6">
-            <div>
-              <div className="stat-label">转发规则</div>
-              <div className="stat-value">{rules.length}</div>
-              <div className="text-xs text-muted">
-                启用 {summary.enabled} · 正在监听 {summary.listening}
-              </div>
-            </div>
-            <div>
-              <div className="stat-label">活跃连接</div>
-              <div className="stat-value">{summary.active}</div>
-              <div className="text-xs text-muted">当前正在转发的连接数</div>
-            </div>
-            <div>
-              <div className="stat-label">累计连接</div>
-              <div className="stat-value">{summary.total}</div>
-              <div className="text-xs text-muted">进程启动以来接受的连接</div>
-            </div>
-            <div>
-              <div className="stat-label">上行流量</div>
-              <div className="stat-value">{fmtBytes(summary.up)}</div>
-              <div className="text-xs text-muted">客户端 → 目标</div>
-            </div>
-            <div>
-              <div className="stat-label">下行流量</div>
-              <div className="stat-value">{fmtBytes(summary.down)}</div>
-              <div className="text-xs text-muted">目标 → 客户端</div>
-            </div>
-            <div>
-              <div className="stat-label">被限流拒绝</div>
-              <div className="stat-value">{summary.rejected}</div>
-              <div className="text-xs text-muted">
-                规则上限 {summary.rejectedRule} · 单 IP {summary.rejectedIp}
-              </div>
-            </div>
-          </div>
-        </Panel>
+      <div className="space-y-6">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <StatCard
+            label="转发规则"
+            value={rules.length}
+            hint={`启用 ${summary.enabled} · 正在监听 ${summary.listening}`}
+          />
+          <StatCard label="活跃连接" value={summary.active} hint="当前正在转发的连接数" />
+          <StatCard label="累计连接" value={summary.total} hint="进程启动以来接受的连接" />
+          <StatCard label="上行流量" value={fmtBytes(summary.up)} hint="客户端 → 目标" />
+          <StatCard label="下行流量" value={fmtBytes(summary.down)} hint="目标 → 客户端" />
+          <StatCard
+            label="被限流拒绝"
+            value={summary.rejected}
+            hint={`规则上限 ${summary.rejectedRule} · 单 IP ${summary.rejectedIp}`}
+          />
+        </div>
 
         <Panel
           title="转发规则"

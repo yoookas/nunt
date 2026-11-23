@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button } from '@heroui/react'
+import { Button, Tabs } from '@heroui/react'
 import { api, errorText } from '../api'
 import { fmtTime, splitLines, splitList } from '../format'
 import {
@@ -744,7 +744,12 @@ export default function Acme() {
         }
       />
 
-      <div className="stack">
+      <Tabs defaultSelectedKey="jobs" className="w-full">
+        <Tabs.List aria-label="证书分类">
+          <Tabs.Tab id="jobs">证书任务</Tabs.Tab>
+          <Tabs.Tab id="certs">证书仓库</Tabs.Tab>
+        </Tabs.List>
+        <Tabs.Panel id="jobs" className="pt-4">
         <Panel
           title="证书任务"
           extra={<span className="text-xs text-muted">自动续期只在任务启用时参与</span>}
@@ -757,7 +762,8 @@ export default function Acme() {
             empty="还没有证书任务，点右上角「新建任务」创建"
           />
         </Panel>
-
+        </Tabs.Panel>
+        <Tabs.Panel id="certs" className="pt-4">
         <Panel
           title="证书仓库"
           extra={<span className="text-xs text-muted">上传或自动签发的证书都保存在这里</span>}
@@ -770,7 +776,8 @@ export default function Acme() {
             empty="证书仓库为空"
           />
         </Panel>
-      </div>
+        </Tabs.Panel>
+      </Tabs>
 
       <FormModal
         open={jobOpen}
@@ -787,7 +794,7 @@ export default function Acme() {
           </div>
         }
       >
-        <div className="stack">
+        <div className="space-y-5">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <TextInput
               label="名称"
@@ -913,7 +920,7 @@ export default function Acme() {
           </div>
         }
       >
-        <div className="stack">
+        <div className="space-y-5">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <TextInput
               label="备注"
@@ -1019,7 +1026,7 @@ export default function Acme() {
           </div>
         }
       >
-        <div className="stack">
+        <div className="space-y-5">
           <div className="rounded-md border border-border bg-background-secondary p-3 text-sm text-muted">
             证书颁发机构固定为 Let&apos;s Encrypt，所有证书任务共用一个 ACME 账户。
           </div>

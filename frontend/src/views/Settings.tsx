@@ -1156,7 +1156,7 @@ export default function Settings() {
 
         {/* ------------------------------------------------------------------ */}
         <Tabs.Panel id="system">
-          <div className="stack pt-4">
+          <div className="space-y-5 pt-4">
             {switched ? (
               <Notice status="success" title="管理后台监听地址已切换">
                 <span>
@@ -1374,7 +1374,7 @@ export default function Settings() {
 
         {/* ------------------------------------------------------------------ */}
         <Tabs.Panel id="users">
-          <div className="stack pt-4">
+          <div className="space-y-5 pt-4">
             <Panel
               title="用户管理"
               extra={
@@ -1413,7 +1413,7 @@ export default function Settings() {
 
         {/* ------------------------------------------------------------------ */}
         <Tabs.Panel id="tokens">
-          <div className="stack pt-4">
+          <div className="space-y-5 pt-4">
             <Panel
               title="API Token"
               extra={
@@ -1455,7 +1455,7 @@ export default function Settings() {
 
         {/* ------------------------------------------------------------------ */}
         <Tabs.Panel id="sessions">
-          <div className="stack pt-4">
+          <div className="space-y-5 pt-4">
             <Panel
               title="在线会话"
               extra={
@@ -1498,7 +1498,7 @@ export default function Settings() {
 
         {/* ------------------------------------------------------------------ */}
         <Tabs.Panel id="backup">
-          <div className="stack pt-4">
+          <div className="space-y-5 pt-4">
             <Panel title="配置导入 / 导出">
               <div className="p-4">
                 <Notice status="accent">
@@ -1571,7 +1571,7 @@ export default function Settings() {
           </div>
         }
       >
-        <div className="stack">
+        <div className="space-y-5">
           <TextInput
             label="用户名"
             value={userDialog.form.username}
@@ -1624,7 +1624,7 @@ export default function Settings() {
           </div>
         }
       >
-        <div className="stack">
+        <div className="space-y-5">
           <Notice status="warning">重置后该用户的所有会话会立即失效（包括当前会话，如果重置的是本人）。</Notice>
           <TextInput
             label="新密码"
@@ -1658,7 +1658,7 @@ export default function Settings() {
           </div>
         }
       >
-        <div className="stack">
+        <div className="space-y-5">
           <TextInput
             label="名称"
             value={tokenDialog.form.name}
@@ -1691,7 +1691,7 @@ export default function Settings() {
           </div>
         }
       >
-        <div className="stack">
+        <div className="space-y-5">
           <Notice status="warning">请立即复制并妥善保存，关闭本窗口后将无法再次查看。</Notice>
           <textarea
             className="mono min-h-20 w-full resize-y rounded-md border border-border bg-default p-3 text-sm"

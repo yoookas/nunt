@@ -101,7 +101,23 @@ Lucky v1.10.8 源码（Go module 缓存里已下载好）：
 （Go 用 `go:embed all:assets` 打进二进制，所以 `go build` 和 Docker 镜像都不需要 Node；
 镜像里的 `web` 阶段会重新构建一次，保证镜像不会带着过期的前端）。
 
-### 7.1 技术栈与硬约束
+### 7.1 设计语言（HeroUI 原生）
+
+页面不是把旧管理界面的组件逐个换成 HeroUI 同款，而是按 HeroUI v3 自己的设计语言组织：
+
+- **布局**：HeroUI `Menu` 侧栏 + `Header` 顶栏；移动端导航用 `Drawer`；页面内容最大宽度 1600px；
+- **层级**：`Typography.Heading/Paragraph` 做页面标题与说明；`Card`（`Section` 封装）承载分组；
+  概览/转发/DDNS 用 `StatCard` 展示指标；
+- **数据**：`DataTable` 封装 HeroUI `Table`，空态用 `EmptyState`，加载用 `Skeleton`/`Spinner`，
+  筛选/搜索放在 `Section` header 或 `Toolbar` 中；
+- **编辑**：表单一律走右侧 `Drawer`（`FormModal` 封装），确认操作走 `AlertDialog`
+  （`ConfirmModal` 封装）；字段使用 HeroUI `TextField`/`NumberField`/`Select`/`Switch`/`Tag`；
+- **信息架构**：证书、WAF、设置按能力分 `Tabs`；Web 服务是「监听器列表 + 路由表格」的主从布局；
+- 共享设计层在 `src/ui.tsx`，页面只组合这里的设计原语与 HeroUI 组件，不自己写弹窗/表格/按钮样式；
+- 颜色只用 Tailwind 语义 token（`bg-background`/`bg-surface`/`text-muted`/`border-border`/`text-danger`），
+  不写死颜色；明暗主题由根元素 `.dark` 控制。
+
+### 7.2 技术栈与硬约束
 
 - **React 19 + TypeScript**（函数组件 + hooks）+ **HeroUI v3** + **Tailwind CSS 4** + **Vite 8**；
 - 只有一个入口：`frontend/src/main.tsx` → `ThemeProvider` → `AuthProvider` → HashRouter；
@@ -112,7 +128,7 @@ Lucky v1.10.8 源码（Go module 缓存里已下载好）：
 - 主题：根元素 `.dark` class 切换，持久化在 `localStorage['nunt.theme']`；页面使用 HeroUI 组件与
   Tailwind 语义色（`bg-background`、`text-foreground`、`text-muted`、`border-border` 等），不写死颜色。
 
-### 7.2 目录
+### 7.3 目录
 
 ```
 frontend/
@@ -131,7 +147,7 @@ frontend/
     └── views/*.tsx         # 9 个页面 + Login + PasswordChange
 ```
 
-### 7.3 页面契约
+### 7.4 页面契约
 
 - 每个页面一个函数组件（默认导出），路由用 `lazy(() => import('./views/Xxx'))`；
 - 页面结构统一：`Page` → `PageHeader`（标题 + `.page-sub` + 操作按钮）→ `Panel`/`DataTable`；
@@ -139,7 +155,7 @@ frontend/
 - 写操作由 `api.ts` 自动带上 `X-CSRF-Token`；401 会触发 `nunt:unauthorized` 事件回到登录页；
 - 表单必须有 label，表格列必须有标题，按钮必须有可读文字（可访问性基线）。
 
-### 7.4 构建与本地开发
+### 7.5 构建与本地开发
 
 ```bash
 npm ci --prefix frontend          # 或 cd frontend && npm install

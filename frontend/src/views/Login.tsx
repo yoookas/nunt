@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button, Card } from '@heroui/react'
+import { Button, Card, Typography } from '@heroui/react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { errorText } from '../api'
 import { useAuth } from '../session'
@@ -49,14 +49,23 @@ export default function Login() {
   }
 
   return (
-    <div className="login-shell">
-      <Card className="login-card">
-        <Card.Content className="p-6">
-          <div className="login-brand">
-            <span className="brand-dot" />
-            nunt
+    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-sm">
+        <Card.Content className="p-6 sm:p-8">
+          <div className="mb-6 flex items-center gap-2.5">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent text-base font-bold text-accent-foreground">
+              n
+            </span>
+            <div>
+              <Typography.Heading level={3} className="text-lg font-semibold">
+                nunt
+              </Typography.Heading>
+              <Typography.Paragraph className="text-xs text-muted">
+                登录到管理后台
+              </Typography.Paragraph>
+            </div>
           </div>
-          <form onSubmit={submit} className="stack">
+          <form onSubmit={submit} className="space-y-5">
             <TextInput label="用户名" value={username} onChange={setUsername} placeholder="admin" required />
             <TextInput
               label="密码"

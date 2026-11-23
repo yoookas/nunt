@@ -1,8 +1,19 @@
 import { useEffect, useState } from 'react'
-import { Button } from '@heroui/react'
-import { errorText, api } from '../api'
+import { Button, Typography } from '@heroui/react'
+import { Activity, Boxes, Cpu, Globe, HardDrive, Server } from 'lucide-react'
+import { api, errorText } from '../api'
 import { fmtBytes, fmtDuration, fmtTime } from '../format'
-import { DataTable, Page, PageHeader, Panel, StatusChip, toast, type Column } from '../ui'
+import {
+  DataTable,
+  LoadingBlock,
+  Page,
+  PageHeader,
+  Section,
+  StatCard,
+  StatusChip,
+  toast,
+  type Column,
+} from '../ui'
 
 interface ModuleStatus {
   name: string
@@ -32,7 +43,7 @@ export default function Dashboard() {
         api.get('/api/v1/system/info'),
         api.get('/api/v1/system/stats'),
         api.get('/api/v1/modules'),
-        api.get('/api/v1/system/logs', { limit: 50 }),
+        api.get('/api/v1/system/logs', { limit: 30 }),
       ])
       setInfo(infoData)
       setStats(statsData)
@@ -54,9 +65,12 @@ export default function Dashboard() {
       key: 'title',
       title: '模块',
       render: (row) => (
-        <div>
-          <div>{row.title || row.name}</div>
-          <div className="mono text-xs text-muted">{row.name}</div>
+        <div className="flex items-center gap-2">
+          <Boxes size={15} className="text-muted" />
+          <div>
+            <div className="text-sm">{row.title || row.name}</div>
+            <div className="mono text-[11px] text-muted">{row.name}</div>
+          </div>
         </div>
       ),
     },
@@ -67,62 +81,130 @@ export default function Dashboard() {
         <StatusChip color={row.running ? 'success' : 'default'}>{row.running ? '运行中' : '已停止'}</StatusChip>
       ),
     },
-    { key: 'detail', title: '详情', render: (row) => <span className="text-xs text-muted">{row.detail || row.error || '-'}</span> },
+    {
+      key: 'detail',
+      title: '详情',
+      render: (row) => <span className="text-xs text-muted">{row.detail || row.error || '-'}</span>,
+    },
   ]
 
   const logColumns: Column<LogEntry>[] = [
-    { key: 'time', title: '时间', render: (row) => <span className="text-xs">{fmtTime(row.time)}</span> },
-    { key: 'level', title: '级别', render: (row) => <span className="text-xs uppercase">{row.level}</span> },
+    { key: 'time', title: '时间', render: (row) => <span className="text-xs text-muted">{fmtTime(row.time)}</span> },
+    {
+      key: 'level',
+      title: '级别',
+      render: (row) => (
+        <StatusChip color={row.level === 'error' ? 'danger' : row.level === 'warn' ? 'warning' : 'default'}>
+          {row.level}
+        </StatusChip>
+      ),
+    },
     { key: 'msg', title: '内容', render: (row) => <span className="text-xs">{row.msg}</span> },
-  ]
-
-  const cards = [
-    { label: '版本', value: info?.version?.version || '-', hint: String(info?.version?.commit || '').slice(0, 8) },
-    { label: '运行时长', value: fmtDuration(stats?.uptimeSec), hint: `启动于 ${fmtTime(stats?.startTime)}` },
-    {
-      label: 'Web 规则',
-      value: String(info?.webRules ?? '-'),
-      hint: `证书 ${info?.certs?.count ?? 0} 张`,
-    },
-    { label: '内存 / 协程', value: fmtBytes(stats?.heapBytes), hint: `${stats?.goroutines ?? '-'} goroutines` },
-    { label: '主机', value: stats?.hostname || '-', hint: `${stats?.os || ''}/${stats?.arch || ''} · ${stats?.numCpu ?? '-'} 核` },
-    {
-      label: '负载 / 内存',
-      value: Number(stats?.host?.load1 || 0).toFixed(2),
-      hint: `已用 ${Number(stats?.host?.memUsedPct || 0).toFixed(1)}% · 磁盘剩余 ${fmtBytes(stats?.host?.diskFreeBytes)}`,
-    },
   ]
 
   return (
     <Page>
       <PageHeader
         title="概览"
-        sub="运行状态、模块与最近的日志"
+        sub="运行状态、模块健康度与最近的日志"
         actions={
           <Button variant="secondary" isDisabled={loading} onPress={() => void load()}>
             刷新
           </Button>
         }
       />
-      <div className="stack">
-        <div className="cards">
-          {cards.map((card) => (
-            <Panel key={card.label}>
-              <div className="p-4">
-                <div className="stat-label">{card.label}</div>
-                <div className="stat-value">{card.value}</div>
-                <div className="mt-1 text-xs text-muted">{card.hint}</div>
+
+      {loading && !info ? (
+        <LoadingBlock />
+      ) : (
+        <div className="space-y-6">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard
+              icon={<Server size={16} />}
+              label="版本"
+              value={info?.version?.version || '-'}
+              hint={String(info?.version?.commit || '').slice(0, 8)}
+            />
+            <StatCard
+              icon={<Activity size={16} />}
+              label="运行时长"
+              value={fmtDuration(stats?.uptimeSec)}
+              hint={`启动于 ${fmtTime(stats?.startTime)}`}
+            />
+            <StatCard
+              icon={<Globe size={16} />}
+              label="Web 路由"
+              value={String(info?.webRules ?? '-')}
+              hint={`证书 ${info?.certs?.count ?? 0} 张`}
+            />
+            <StatCard
+              icon={<Cpu size={16} />}
+              label="内存 / 协程"
+              value={fmtBytes(stats?.heapBytes)}
+              hint={`${stats?.goroutines ?? '-'} goroutines`}
+            />
+          </div>
+
+          <div className="grid gap-6 xl:grid-cols-3">
+            <div className="space-y-6 xl:col-span-2">
+              <Section title="模块" description="每个模块的启动状态与最近一次错误" flush>
+                <DataTable
+                  items={modules}
+                  columns={moduleColumns}
+                  rowKey={(row) => row.name}
+                  ariaLabel="模块"
+                  loading={loading}
+                  empty="没有已注册的模块"
+                />
+              </Section>
+            </div>
+            <Section title="主机" description="当前进程所在机器的资源概览">
+              <div className="space-y-4">
+                <div>
+                  <Typography.Paragraph className="text-xs text-muted">主机名</Typography.Paragraph>
+                  <div className="text-sm font-medium">{stats?.hostname || '-'}</div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-xs text-muted">系统</div>
+                    <div className="text-sm">
+                      {stats?.os || '-'}/{stats?.arch || '-'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted">CPU</div>
+                    <div className="text-sm">{stats?.numCpu ?? '-'} 核</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted">负载</div>
+                    <div className="text-sm">{Number(stats?.host?.load1 || 0).toFixed(2)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted">内存占用</div>
+                    <div className="text-sm">{Number(stats?.host?.memUsedPct || 0).toFixed(1)}%</div>
+                  </div>
+                  <div className="col-span-2">
+                    <div className="flex items-center gap-1 text-xs text-muted">
+                      <HardDrive size={13} /> 磁盘剩余
+                    </div>
+                    <div className="text-sm">{fmtBytes(stats?.host?.diskFreeBytes)}</div>
+                  </div>
+                </div>
               </div>
-            </Panel>
-          ))}
+            </Section>
+          </div>
+
+          <Section title="最近日志" description="最新 30 条进程日志" flush>
+            <DataTable
+              items={logs}
+              columns={logColumns}
+              rowKey={(row) => `${row.time}-${row.msg}`}
+              ariaLabel="日志"
+              empty="暂无日志"
+            />
+          </Section>
         </div>
-        <Panel title="模块">
-          <DataTable items={modules} columns={moduleColumns} rowKey={(row) => row.name} ariaLabel="模块" />
-        </Panel>
-        <Panel title="最近日志">
-          <DataTable items={logs} columns={logColumns} rowKey={(row) => `${row.time}-${row.msg}`} ariaLabel="日志" />
-        </Panel>
-      </div>
+      )}
     </Page>
   )
 }

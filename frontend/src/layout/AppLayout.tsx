@@ -1,14 +1,52 @@
-import { Button, Dropdown } from '@heroui/react'
-import { LogOut, Moon, Sun, UserRound } from 'lucide-react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { useState } from 'react'
+import { Button, Drawer, Dropdown, Header, Menu, useOverlayState } from '@heroui/react'
+import { LogOut, Menu as MenuIcon, Moon, Sun, UserRound } from 'lucide-react'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { menu } from '../menu'
 import { useAuth } from '../session'
 import { useTheme } from '../theme'
+
+function Navigation({ onNavigate }: { onNavigate?: () => void }) {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const active = menu.find((item) => (item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path)))
+
+  return (
+    <Menu
+      aria-label="主导航"
+      selectionMode="single"
+      selectedKeys={active ? [active.path] : []}
+      onSelectionChange={(keys) => {
+        const next = [...keys][0]
+        if (next != null) {
+          navigate(String(next))
+          onNavigate?.()
+        }
+      }}
+      className="px-2"
+    >
+      {menu.map((item) => {
+        const Icon = item.icon
+        return (
+          <Menu.Item key={item.path} id={item.path} textValue={item.title}>
+            <Icon size={18} />
+            <span>{item.title}</span>
+          </Menu.Item>
+        )
+      })}
+    </Menu>
+  )
+}
 
 export default function AppLayout() {
   const { user, logout } = useAuth()
   const { theme, toggle } = useTheme()
   const navigate = useNavigate()
+  const location = useLocation()
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const current = menu.find((item) => (item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path)))
+
+  const drawer = useOverlayState()
 
   const onAction = async (key: string) => {
     if (key === 'password') {
@@ -23,38 +61,48 @@ export default function AppLayout() {
 
   return (
     <div className="flex h-full min-h-screen bg-background text-foreground">
-      <aside className="flex w-14 shrink-0 flex-col border-r border-border bg-background-secondary md:w-56">
-        <div className="flex h-14 items-center gap-2 px-4 text-base font-semibold">
-          <span className="brand-dot" />
-          <span className="hidden md:inline">nunt</span>
+      {/* Desktop sidebar */}
+      <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-surface md:flex">
+        <div className="flex h-16 items-center gap-2.5 px-5">
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-accent text-sm font-bold text-accent-foreground">
+            n
+          </span>
+          <div>
+            <div className="text-sm font-semibold leading-tight">nunt</div>
+            <div className="text-[11px] text-muted">edge console</div>
+          </div>
         </div>
-        <nav className="flex flex-1 flex-col gap-1 p-2">
-          {menu.map((item) => {
-            const Icon = item.icon
-            return (
-              <NavLink
-                key={item.path}
-                to={item.path}
-                end={item.path === '/'}
-                className={({ isActive }) =>
-                  [
-                    'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
-                    isActive
-                      ? 'bg-default text-foreground'
-                      : 'text-muted hover:bg-default/60 hover:text-foreground',
-                  ].join(' ')
-                }
-              >
-                <Icon size={18} className="shrink-0" />
-                <span className="hidden md:inline">{item.title}</span>
-              </NavLink>
-            )
-          })}
-        </nav>
+        <div className="flex-1 overflow-y-auto py-2">
+          <Navigation />
+        </div>
+        <div className="border-t border-border p-3">
+          <div className="flex items-center gap-2 rounded-xl bg-background px-3 py-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-default">
+              <UserRound size={15} />
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-xs font-medium">{user?.username}</div>
+              <div className="text-[11px] text-muted">管理员</div>
+            </div>
+          </div>
+        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4 md:px-6">
+        <Header className="flex h-16 shrink-0 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur sm:px-6">
+          <Button
+            isIconOnly
+            variant="ghost"
+            className="md:hidden"
+            aria-label="打开导航"
+            onPress={() => setMobileOpen(true)}
+          >
+            <MenuIcon size={18} />
+          </Button>
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold">{current?.title || '概览'}</div>
+            <div className="truncate text-[11px] text-muted">nunt 管理后台</div>
+          </div>
           <div className="flex-1" />
           <Button
             isIconOnly
@@ -83,11 +131,27 @@ export default function AppLayout() {
               </Dropdown.Menu>
             </Dropdown.Popover>
           </Dropdown>
-        </header>
+        </Header>
+
         <main className="min-h-0 flex-1 overflow-auto">
           <Outlet />
         </main>
       </div>
+
+      <Drawer isOpen={mobileOpen} onOpenChange={setMobileOpen}>
+        <Drawer.Backdrop>
+          <Drawer.Content placement="left">
+            <Drawer.Dialog>
+              <Drawer.Header>
+                <Drawer.Heading>nunt</Drawer.Heading>
+              </Drawer.Header>
+              <Drawer.Body className="p-0">
+                <Navigation onNavigate={() => setMobileOpen(false)} />
+              </Drawer.Body>
+            </Drawer.Dialog>
+          </Drawer.Content>
+        </Drawer.Backdrop>
+      </Drawer>
     </div>
   )
 }

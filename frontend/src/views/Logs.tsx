@@ -387,7 +387,7 @@ export default function Logs() {
         }
       />
 
-      <div className="stack">
+      <div className="space-y-5">
         {streamError ? (
           <Notice status={status === 'error' ? 'danger' : 'warning'}>{streamError}</Notice>
         ) : null}

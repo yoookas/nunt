@@ -217,7 +217,7 @@ web 前端            frontend/（React 19 + HeroUI + Tailwind 4 + Vite 8）
 
 ### 前端
 
-管理界面是独立的 **React 19 + HeroUI v3 + Tailwind CSS 4 + Vite 8 + TypeScript** 工程，源码在 `frontend/`，
+管理界面是独立的 **React 19 + HeroUI v3 + Tailwind CSS 4 + Vite 8 + TypeScript** 工程，界面按 HeroUI 原生设计语言重做（Menu 侧栏、Drawer 表单、Card/StatCard/DataTable 设计层），源码在 `frontend/`，
 构建产物提交在 `internal/webui/assets/` 并通过 `go:embed` 打进二进制——所以 `go build` 和最终镜像都不需要 Node；
 镜像的 `web` 阶段会重新构建一次，保证镜像不会带过期前端。
 

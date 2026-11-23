@@ -173,12 +173,46 @@ for (const [route, title] of routes) {
   let heading = ''
   for (let i = 0; i < 40; i += 1) {
     await sleep(100)
-    heading = window.document.querySelector('.page-title')?.textContent || ''
+    heading = window.document.querySelector('h2')?.textContent || ''
     if (heading.includes(title)) break
   }
   if (!heading.includes(title)) failures.push(`${route}: heading is "${heading}", want "${title}"`)
   const fresh = errors.splice(before)
   if (fresh.length) failures.push(`${route}: ${fresh.join(' | ')}`)
+}
+
+// The sidebar uses a HeroUI Menu; clicking an item must navigate.
+window.location.hash = '#/'
+window.dispatchEvent(new window.HashChangeEvent('hashchange'))
+window.dispatchEvent(new window.PopStateEvent('popstate'))
+await sleep(400)
+const navItems = window.document.querySelectorAll('[data-slot="menu-item"]')
+if (navItems.length < 9) {
+  failures.push(`sidebar: expected 9 menu items, found ${navItems.length}`)
+}
+
+// Drawer forms are part of the HeroUI design system; open one and make sure it
+// mounts without a runtime error.
+window.location.hash = '#/web'
+window.dispatchEvent(new window.HashChangeEvent('hashchange'))
+window.dispatchEvent(new window.PopStateEvent('popstate'))
+await sleep(600)
+const newListener = [...window.document.querySelectorAll('button')].find((button) =>
+  (button.textContent || '').includes('新建监听器'),
+)
+if (!newListener) {
+  failures.push('/web: 新建监听器 button not found')
+} else {
+  const before = errors.length
+  newListener.click()
+  await sleep(500)
+  if (!window.document.querySelector('[data-slot*="drawer"], [data-slot*="dialog"]')) {
+    failures.push('/web: listener drawer did not open')
+  }
+  const fresh = errors.splice(before)
+  if (fresh.length) failures.push(`/web drawer: ${fresh.join(' | ')}`)
+  window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  await sleep(200)
 }
 
 await sleep(100)

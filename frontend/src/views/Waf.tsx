@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button } from '@heroui/react'
+import { Button, Tabs } from '@heroui/react'
 import { api, errorText } from '../api'
 import { fmtTime } from '../format'
 import {
@@ -635,7 +635,14 @@ export default function Waf() {
         }
       />
 
-      <div className="stack">
+      <Tabs defaultSelectedKey="config" className="w-full">
+        <Tabs.List aria-label="WAF 分类">
+          <Tabs.Tab id="config">配置</Tabs.Tab>
+          <Tabs.Tab id="rules">规则</Tabs.Tab>
+          <Tabs.Tab id="test">测试</Tabs.Tab>
+          <Tabs.Tab id="logs">日志</Tabs.Tab>
+        </Tabs.List>
+        <Tabs.Panel id="config" className="pt-4">
         <Panel
           title="引擎配置"
           extra={
@@ -651,7 +658,7 @@ export default function Waf() {
               </div>
             ) : null}
 
-            <div className="stack">
+            <div className="space-y-5">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <SwitchInput
                   label="总开关"
@@ -749,7 +756,8 @@ export default function Waf() {
             </div>
           </div>
         </Panel>
-
+        </Tabs.Panel>
+        <Tabs.Panel id="rules" className="pt-4">
         <Panel
           title="规则文件"
           extra={
@@ -779,7 +787,8 @@ export default function Waf() {
             </div>
           </div>
         </Panel>
-
+        </Tabs.Panel>
+        <Tabs.Panel id="test" className="pt-4">
         <Panel
           title="请求测试"
           extra={
@@ -792,7 +801,7 @@ export default function Waf() {
           }
         >
           <div className="p-4">
-            <div className="stack">
+            <div className="space-y-5">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
                 <div className="md:col-span-2">
                   <SelectInput
@@ -830,7 +839,7 @@ export default function Waf() {
               />
 
               {testResult ? (
-                <div className="stack border-t border-border pt-4">
+                <div className="space-y-4 border-t border-border pt-4">
                   {verdict ? (
                     <div className="flex flex-wrap items-center gap-2">
                       <StatusChip color={verdict.color}>{verdict.text}</StatusChip>
@@ -882,7 +891,8 @@ export default function Waf() {
             </div>
           </div>
         </Panel>
-
+        </Tabs.Panel>
+        <Tabs.Panel id="logs" className="pt-4">
         <Panel
           title="拦截日志"
           extra={
@@ -919,7 +929,8 @@ export default function Waf() {
             />
           </div>
         </Panel>
-      </div>
+        </Tabs.Panel>
+      </Tabs>
 
       <ConfirmModal
         open={confirmClearOpen}

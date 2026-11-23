@@ -152,12 +152,12 @@ export default function LogsModal({
       }
     >
       <div className="flex flex-col gap-3">
-        <div className="toolbar">
+        <div className="flex flex-wrap items-center gap-2">
           <SwitchInput label="每 5 秒自动刷新" value={auto} onChange={setAuto} />
           <Button size="sm" variant="secondary" isDisabled={loading} onPress={() => void load(false)}>
             {loading ? '加载中…' : '刷新'}
           </Button>
-          <div className="spacer" />
+          <div className="flex-1" />
           <span className="text-xs text-muted">最近 {logs.length} 条</span>
         </div>
         <div className="overflow-x-auto">

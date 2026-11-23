@@ -11,6 +11,7 @@ import {
   PageHeader,
   Panel,
   SelectInput,
+  StatCard,
   StatusChip,
   TextAreaInput,
   TextInput,
@@ -923,7 +924,7 @@ export default function Ddns() {
         }
       />
 
-      <div className="stack">
+      <div className="space-y-5">
         {providersError ? (
           <div className="flex flex-wrap items-center gap-2">
             <div className="min-w-64 flex-1">
@@ -935,30 +936,12 @@ export default function Ddns() {
           </div>
         ) : null}
 
-        <Panel>
-          <div className="grid grid-cols-2 gap-3 p-4 md:grid-cols-4">
-            <div>
-              <div className="stat-label">DDNS 规则</div>
-              <div className="stat-value">{rules.length}</div>
-              <div className="text-xs text-muted">启用 {summary.enabled} 条</div>
-            </div>
-            <div>
-              <div className="stat-label">已启用</div>
-              <div className="stat-value">{summary.enabled}</div>
-              <div className="text-xs text-muted">当前参与调度的规则</div>
-            </div>
-            <div>
-              <div className="stat-label">累计成功</div>
-              <div className="stat-value">{summary.success}</div>
-              <div className="text-xs text-muted">来自 /api/v1/ddns/status</div>
-            </div>
-            <div>
-              <div className="stat-label">累计失败</div>
-              <div className="stat-value">{summary.failures}</div>
-              <div className="text-xs text-muted">失败原因可在运行日志中查看</div>
-            </div>
-          </div>
-        </Panel>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard label="DDNS 规则" value={rules.length} hint={`启用 ${summary.enabled} 条`} />
+          <StatCard label="已启用" value={summary.enabled} hint="当前参与调度的规则" />
+          <StatCard label="累计成功" value={summary.success} hint="来自 /api/v1/ddns/status" />
+          <StatCard label="累计失败" value={summary.failures} hint="失败原因可在运行日志中查看" />
+        </div>
 
         <Panel
           title="DDNS 规则"

@@ -41,7 +41,7 @@ export default function PasswordChange() {
     <Page>
       <PageHeader title="修改密码" sub="修改成功后当前会话仍然有效，其他旧会话会立即失效" />
       <Panel title="修改密码" className="max-w-xl">
-        <form onSubmit={submit} className="stack p-4">
+        <form onSubmit={submit} className="space-y-4 p-4">
           <TextInput label="当前密码" type="password" value={current} onChange={setCurrent} />
           <TextInput label="新密码" type="password" value={next} onChange={setNext} hint="至少 8 位" />
           <TextInput label="确认新密码" type="password" value={confirm} onChange={setConfirm} />

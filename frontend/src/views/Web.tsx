@@ -562,10 +562,11 @@ export default function Web() {
         }
       />
 
-      <div className="stack">
+      <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
         <Panel
           title="监听器"
-          extra={<span className="text-xs text-muted">共 {listeners.length} 个监听器</span>}
+          extra={<span className="text-xs text-muted">{listeners.length} 个</span>}
+          className="self-start"
         >
           {listenerError ? (
             <div className="flex items-center gap-2 border-b border-border px-4 py-2 text-sm text-danger">
@@ -575,19 +576,77 @@ export default function Web() {
               </Button>
             </div>
           ) : null}
-          <div className="overflow-x-auto">
-            <DataTable
-              items={listeners}
-              columns={listenerColumns}
-              rowKey={(row) => row.id}
-              ariaLabel="监听器"
-              empty={listenerLoading ? '加载中…' : '还没有监听器'}
-            />
+          <div className="space-y-2 p-2">
+            <button
+              type="button"
+              onClick={() => setSelectedListenerId('all')}
+              className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                selectedListenerId === 'all'
+                  ? 'border-accent bg-accent-soft text-accent-soft-foreground'
+                  : 'border-border hover:bg-default'
+              }`}
+            >
+              <span className="text-sm font-medium">全部监听器</span>
+              <StatusChip color={selectedListenerId === 'all' ? 'primary' : 'default'}>
+                {listeners.length}
+              </StatusChip>
+            </button>
+            {listeners.map((listener) => {
+              const mode = tlsModeOf(listener)
+              const active = selectedListenerId === listener.id
+              return (
+                <div
+                  key={listener.id}
+                  className={`rounded-xl border p-3 transition-colors ${
+                    active ? 'border-accent bg-accent-soft/40' : 'border-border hover:bg-default/60'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    className="w-full text-left"
+                    onClick={() => selectListener(listener)}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium">{listener.name || listener.id}</span>
+                      <StatusChip color={tlsColor(mode)}>{TLS_LABEL[mode] || '关闭'}</StatusChip>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {(Array.isArray(listener.listen) ? listener.listen : []).map((item) => (
+                        <span key={item} className="mono rounded-full bg-default px-2 py-0.5 text-[11px]">
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-muted">
+                      <span>{listenerRouteCount(listener)} 条路由</span>
+                      {mode !== 'off' && listener.tls?.hsts ? <span>HSTS</span> : null}
+                      {mode === 'custom' ? (
+                        <span className="truncate" title={certTooltip(listener.tls?.certId, certificates)}>
+                          {certDomainsText(listener.tls?.certId, certificates)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </button>
+                  <div className="mt-2 flex justify-end gap-1 border-t border-border pt-2">
+                    <Button size="sm" variant="ghost" onPress={() => openEditListener(listener)}>
+                      编辑
+                    </Button>
+                    <Button size="sm" variant="ghost" className="text-danger" onPress={() => setDeleteListener(listener)}>
+                      删除
+                    </Button>
+                  </div>
+                </div>
+              )
+            })}
+            {!listeners.length && !listenerLoading ? (
+              <div className="px-2 py-8 text-center text-sm text-muted">还没有监听器</div>
+            ) : null}
           </div>
         </Panel>
 
         <Panel
           title="路由"
+          className="min-w-0"
           extra={
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted">当前监听器</span>
@@ -619,7 +678,7 @@ export default function Web() {
               aria-label="搜索路由"
               className="h-9 w-72 rounded-field border border-border bg-surface px-3 text-sm text-foreground outline-none placeholder:text-muted focus:border-focus"
             />
-            <div className="spacer" />
+            <div className="flex-1" />
             <span className="text-xs text-muted">
               共 {rules.length} 条，当前显示 {filteredRules.length} 条
             </span>
