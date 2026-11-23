@@ -274,6 +274,9 @@ pwsh -File scripts/verify.ps1
 # 起一个临时实例，登录并把每个模块接口、前端资源、创建规则后立即生效都跑一遍
 pwsh -File scripts/smoke.ps1
 
+# 本机 soak：起实例、建静态规则、并发打 600 次，对比 goroutine/内存/RSS
+BIN=./nunt WORKERS=20 EACH=200 ./scripts/soak.sh
+
 # 真机验证「控制台里改监听地址，立即生效」：默认 3113 → 占用失败 → 切到 127.0.0.1:3199
 # （同一个会话仍然有效）→ 改回 3113
 pwsh -File scripts/listen-rebind.ps1
