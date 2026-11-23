@@ -68,7 +68,7 @@ Dockerfile 的三个基础镜像都可以用构建参数覆盖，方便把镜像
 | 参数 | 默认值 | 用途 |
 | --- | --- | --- |
 | `NODE_IMAGE` | `node:24-alpine` | 前端构建阶段 |
-| `GO_IMAGE` | `golang:1.26.10-alpine` | Go 构建阶段 |
+| `GO_IMAGE` | `golang:1.26.11-alpine` | Go 构建阶段 |
 | `ALPINE_IMAGE` | `alpine:3.21` | 运行时阶段 |
 
 ```bash

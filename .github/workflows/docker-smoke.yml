@@ -149,8 +149,10 @@ jobs:
           jq -e '.csrf' /tmp/session.json > /dev/null
 
           # every module is registered and the registry is reachable with the session
+          # (a plain count was wrong - there are five, and it broke the day a
+          # module was removed; naming them survives additions)
           curl -fsSL -b /tmp/cookies http://127.0.0.1:3113/api/v1/modules \
-            | jq -e 'length >= 6' > /dev/null
+            | jq -e '[.[].name] as $names | ["acme", "ddns", "forward", "waf", "web"] - $names | length == 0' > /dev/null
 
           # the health check is a subcommand of the service and works from
           # inside the container (no shell, sed or wget involved)

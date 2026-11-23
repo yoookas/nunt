@@ -18,7 +18,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache: true
 
       - name: Format check
@@ -60,7 +60,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache: true
 
       - name: Set up Node
@@ -170,7 +170,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache: true
 
       - name: Scan for reachable vulnerabilities

@@ -5,7 +5,7 @@
 #   docker build --build-arg ALPINE_IMAGE=alpine@sha256:... .
 # The tags below are the versions the project is tested against.
 ARG NODE_IMAGE=node:24-alpine
-ARG GO_IMAGE=golang:1.26.10-alpine
+ARG GO_IMAGE=golang:1.26.11-alpine
 ARG ALPINE_IMAGE=alpine:3.21
 
 # ---------------------------------------------------------------------------
