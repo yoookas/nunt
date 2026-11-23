@@ -72,7 +72,6 @@
 | 1 | Cloudflare DNS 提供商 | ✅ 完成 | API Token 认证、按域名逐级查找 zone、A/AAAA/TXT 增改删；泛域名证书可直接用 |
 | 2 | Let's Encrypt staging 开关 | ✅ 完成 | 证书页可切 staging；账号注册 URL 与目录绑定，切换后重新注册，正式证书不受影响 |
 | 3 | 流量历史图表 | ✅ 完成 | 概览页按小时画最近 24 小时的请求量（5xx 标红），数据来自访问日志分桶，不新增存储 |
-| 4 | `/metrics`（Prometheus） | ✅ 完成 | 文本格式；API Token 移除后只能由已登录的浏览器会话访问，Prometheus 不再能直接抓取 |
 | 5 | CORS（预检短路） | ✅ 完成 | 代理规则可配 origins/methods/headers/credentials/maxAge，OPTIONS 本地 204；路由表单「高级选项 → 启用 CORS」 |
 | 6 | mTLS（客户端证书） | ✅ 完成 | 监听器可配 request/require + CA bundle；控制台「客户端证书（mTLS）」可选、可粘贴 CA，列表标出状态 |
 
@@ -99,7 +98,7 @@
 | 2026-11-23 | TOTP 纳入计划，二维码由前端本地生成 | 新增 [TOTP-PLAN.md](TOTP-PLAN.md)；CSP 不变、零外部请求 |
 | 2026-11-23 | 发布先走 RC | 新功能（含 TOTP）一律排在 RC 之后 |
 | 2026-11-23 | 首个公开版本定为 `v1.0.0-rc1`，随后 `v1.0.0-rc2` 修 rc1 反馈 | 功能面视为 1.0 范围；RC 只修问题，不新增功能 |
-| 2026-11-24 | 移除 API Token 与开放 API 鉴权 | 只保留浏览器会话；`/metrics` 不再能被 Prometheus 直接抓取 |
+| 2026-11-24 | 移除 API Token、开放 API 鉴权与 `/metrics` | 只保留浏览器会话；没有非浏览器的访问口子，监控改由外部工具从日志/概览页取数 |
 
 ---
 

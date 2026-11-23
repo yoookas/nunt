@@ -124,9 +124,6 @@ func (s *Server) Handler() http.Handler {
 		apiHandler = s.opts.AdminWAF(apiHandler)
 	}
 	root.Handle("/api/", apiHandler)
-	// Metrics live outside /api but behind the same authentication, so they are
-	// only reachable with a signed in browser session.
-	root.Handle("/metrics", apiHandler)
 	root.Handle("/healthz", http.HandlerFunc(s.health))
 	root.Handle("/", rest.Chain(webui.Handler(), rest.SecurityHeaders()))
 	// The IP allow list guards the complete admin surface, including the sign
@@ -280,7 +277,6 @@ func (s *Server) register() {
 	s.registerSystem()
 	s.registerSystemHealth()
 	s.registerBackup()
-	s.mux.Get("/metrics", s.handleMetrics)
 	s.registerLogs()
 	s.registerModules()
 	s.registerEvents()
