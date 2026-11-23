@@ -705,7 +705,7 @@ export default function Forward() {
                 options={[{ value: 'all', label: '全部协议' }, ...PROTOCOL_OPTIONS]}
               />
             </div>
-            <div className="w-72 max-w-full">
+            <div className="w-full sm:w-72">
               <TextInput
                 label="搜索"
                 value={keyword}
@@ -722,7 +722,7 @@ export default function Forward() {
           {loadError ? (
             <div className="p-3">
               <div className="flex flex-wrap items-center gap-2">
-                <div className="min-w-64 flex-1">
+                <div className="w-full sm:w-auto sm:min-w-64 sm:flex-1">
                   <InlineAlert status="danger">加载转发规则失败：{errorText(loadError)}</InlineAlert>
                 </div>
                 <Button size="sm" variant="secondary" onPress={() => void loadRules()}>
@@ -901,7 +901,7 @@ export default function Forward() {
       >
         <div className="space-y-3">
           <div className="flex flex-wrap items-end gap-2">
-            <div className="w-56">
+            <div className="w-full sm:w-56">
               <SelectInput
                 label="规则"
                 value={logRule || ALL_RULES}
@@ -909,7 +909,7 @@ export default function Forward() {
                 options={ruleLogOptions}
               />
             </div>
-            <div className="w-40">
+            <div className="w-full sm:w-40">
               <SelectInput
                 label="条数"
                 value={String(logLimit)}
@@ -935,7 +935,7 @@ export default function Forward() {
 
           {logsError ? (
             <div className="flex flex-wrap items-center gap-2">
-              <div className="min-w-64 flex-1">
+              <div className="w-full sm:w-auto sm:min-w-64 sm:flex-1">
                 <InlineAlert status="danger">加载访问日志失败：{errorText(logsError)}</InlineAlert>
               </div>
               <Button size="sm" variant="secondary" onPress={() => void loadLogs()}>

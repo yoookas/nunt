@@ -927,7 +927,7 @@ export default function Ddns() {
       <div className="space-y-5">
         {providersError ? (
           <div className="flex flex-wrap items-center gap-2">
-            <div className="min-w-64 flex-1">
+            <div className="w-full sm:w-auto sm:min-w-64 sm:flex-1">
               <InlineAlert status="danger">无法读取 DNS 提供商列表：{errorText(providersError)}</InlineAlert>
             </div>
             <Button size="sm" variant="secondary" onPress={() => void loadProviders()}>
@@ -952,7 +952,7 @@ export default function Ddns() {
           }
         >
           <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
-            <div className="w-80 max-w-full">
+            <div className="w-full sm:w-80">
               <TextInput
                 label="搜索"
                 value={keyword}
@@ -965,7 +965,7 @@ export default function Ddns() {
           {loadError ? (
             <div className="p-3">
               <div className="flex flex-wrap items-center gap-2">
-                <div className="min-w-64 flex-1">
+                <div className="w-full sm:w-auto sm:min-w-64 sm:flex-1">
                   <InlineAlert status="danger">加载 DDNS 规则失败：{errorText(loadError)}</InlineAlert>
                 </div>
                 <Button size="sm" variant="secondary" onPress={() => void loadRules()}>
@@ -998,7 +998,7 @@ export default function Ddns() {
           {statusError ? (
             <div className="p-3">
               <div className="flex flex-wrap items-center gap-2">
-                <div className="min-w-64 flex-1">
+                <div className="w-full sm:w-auto sm:min-w-64 sm:flex-1">
                   <InlineAlert status="danger">加载运行状态失败：{errorText(statusError)}</InlineAlert>
                 </div>
                 <Button size="sm" variant="secondary" onPress={() => void loadStatus()}>

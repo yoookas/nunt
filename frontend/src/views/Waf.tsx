@@ -908,7 +908,7 @@ export default function Waf() {
         >
           <div className="p-4">
             <div className="mb-3 flex flex-wrap items-end gap-3">
-              <div className="w-40">
+              <div className="w-full sm:w-40">
                 <SelectInput
                   label="动作过滤"
                   value={logFilter || 'all'}

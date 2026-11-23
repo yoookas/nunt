@@ -658,28 +658,28 @@ export default function Web() {
                   { value: 'all', label: '全部监听器' },
                   ...listenerOptions(listeners),
                 ]}
-                className="w-56"
+                className="w-full sm:w-56"
               />
             </div>
           }
         >
-          <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+          <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center">
             <ToolbarSelect
               label="类型筛选"
               value={typeFilter}
               onChange={setTypeFilter}
               options={[{ value: 'all', label: '全部类型' }, ...TYPE_OPTIONS]}
-              className="w-40"
+              className="w-full sm:w-40"
             />
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="搜索域名 / 路径 / 上游"
               aria-label="搜索路由"
-              className="h-9 w-72 rounded-field border border-border bg-surface px-3 text-sm text-foreground outline-none placeholder:text-muted focus:border-focus"
+              className="h-9 w-full rounded-field border border-border bg-surface px-3 text-sm text-foreground outline-none placeholder:text-muted focus:border-focus sm:w-72"
             />
             <div className="flex-1" />
-            <span className="text-xs text-muted">
+            <span className="text-xs text-muted sm:ml-auto">
               共 {rules.length} 条，当前显示 {filteredRules.length} 条
             </span>
           </div>

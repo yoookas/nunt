@@ -47,16 +47,22 @@ export function PageHeader({
   actions?: ReactNode
 }) {
   return (
-    <header className="mb-6 flex flex-wrap items-start gap-4">
+    <header className="mb-5 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-start sm:gap-4">
       <div className="min-w-0 flex-1">
-        <Typography.Heading level={2} className="text-2xl font-semibold tracking-tight">
+        <Typography.Heading level={2} className="text-xl font-semibold tracking-tight sm:text-2xl">
           {title}
         </Typography.Heading>
         {sub ? (
-          <Typography.Paragraph className="mt-1 text-sm text-muted">{sub}</Typography.Paragraph>
+          <Typography.Paragraph className="mt-1 max-w-prose text-xs text-muted sm:text-sm">
+            {sub}
+          </Typography.Paragraph>
         ) : null}
       </div>
-      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+      {actions ? (
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          {actions}
+        </div>
+      ) : null}
     </header>
   )
 }
@@ -79,19 +85,22 @@ export function Section({
   flush?: boolean
 }) {
   const headerActions = actions ?? extra
+  const header =
+    title || description || headerActions ? (
+      <div className="flex flex-col gap-2 border-b border-border p-4 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+        <div className="min-w-0">
+          {title ? <div className="text-sm font-semibold sm:text-base">{title}</div> : null}
+          {description ? <div className="mt-0.5 text-xs text-muted">{description}</div> : null}
+        </div>
+        {headerActions ? (
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">{headerActions}</div>
+        ) : null}
+      </div>
+    ) : null
+
   return (
     <Card className={className}>
-      {title || description || headerActions ? (
-        <Card.Header className="flex flex-wrap items-center gap-3 border-b border-border">
-          <div className="min-w-0 flex-1">
-            {title ? <Card.Title className="text-base">{title}</Card.Title> : null}
-            {description ? (
-              <Card.Description className="mt-0.5 text-xs text-muted">{description}</Card.Description>
-            ) : null}
-          </div>
-          {headerActions ? <div className="flex flex-wrap items-center gap-2">{headerActions}</div> : null}
-        </Card.Header>
-      ) : null}
+      {header}
       <Card.Content className={flush ? 'p-0' : 'p-4 sm:p-5'}>{children}</Card.Content>
     </Card>
   )
@@ -162,6 +171,7 @@ export function DataTable<T>({
     )
   }
   return (
+    <div className="w-full overflow-x-auto">
     <Table>
       <Table.Content aria-label={ariaLabel}>
         <Table.Header>
@@ -184,6 +194,7 @@ export function DataTable<T>({
         </Table.Body>
       </Table.Content>
     </Table>
+    </div>
   )
 }
 

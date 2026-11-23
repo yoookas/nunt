@@ -399,7 +399,7 @@ export default function Logs() {
 
         <Panel title="运行日志" extra={<span className="text-xs text-muted">{counter}</span>}>
           <div className="flex flex-wrap items-end gap-3 border-b border-border p-3">
-            <div className="w-40">
+            <div className="w-full sm:w-40">
               <SelectInput
                 label="日志级别"
                 value={level || 'all'}
@@ -407,7 +407,7 @@ export default function Logs() {
                 options={LEVELS}
               />
             </div>
-            <div className="w-56">
+            <div className="w-full sm:w-56">
               <TextInput
                 label="关键字"
                 value={keyword}

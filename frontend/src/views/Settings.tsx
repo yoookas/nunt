@@ -1345,7 +1345,7 @@ export default function Settings() {
                 <Separator />
 
                 <div className="flex flex-wrap items-end gap-3">
-                  <div className="w-56">
+                  <div className="w-full sm:w-56">
                     <TextInput
                       label="查询测试"
                       value={ip2region.testIP}
