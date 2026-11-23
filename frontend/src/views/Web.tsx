@@ -562,7 +562,7 @@ export default function Web() {
         }
       />
 
-      <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
+      <div className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)] xl:gap-6">
         <Panel
           title="监听器"
           extra={<span className="text-xs text-muted">{listeners.length} 个</span>}
@@ -576,7 +576,7 @@ export default function Web() {
               </Button>
             </div>
           ) : null}
-          <div className="space-y-2 p-2">
+          <div className="space-y-1.5 p-2">
             <button
               type="button"
               onClick={() => setSelectedListenerId('all')}
@@ -639,7 +639,7 @@ export default function Web() {
               )
             })}
             {!listeners.length && !listenerLoading ? (
-              <div className="px-2 py-8 text-center text-sm text-muted">还没有监听器</div>
+              <div className="px-2 py-2 text-center text-sm text-muted">还没有监听器</div>
             ) : null}
           </div>
         </Panel>
@@ -648,8 +648,8 @@ export default function Web() {
           title="路由"
           className="min-w-0"
           extra={
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted">当前监听器</span>
+            <div className="flex w-full items-center gap-2 sm:w-auto">
+              <span className="hidden text-xs text-muted sm:inline">当前监听器</span>
               <ToolbarSelect
                 label="当前监听器"
                 value={selectedListenerId}
@@ -663,23 +663,25 @@ export default function Web() {
             </div>
           }
         >
-          <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center">
-            <ToolbarSelect
-              label="类型筛选"
-              value={typeFilter}
-              onChange={setTypeFilter}
-              options={[{ value: 'all', label: '全部类型' }, ...TYPE_OPTIONS]}
-              className="w-full sm:w-40"
-            />
+          <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-center gap-2 px-3 py-2 sm:flex sm:flex-wrap sm:items-center sm:gap-2 sm:py-3">
+            <div className="min-w-0">
+              <ToolbarSelect
+                label="类型筛选"
+                value={typeFilter}
+                onChange={setTypeFilter}
+                options={[{ value: 'all', label: '全部类型' }, ...TYPE_OPTIONS]}
+                className="w-full sm:w-40"
+              />
+            </div>
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="搜索域名 / 路径 / 上游"
+              placeholder="搜索域名 / 路径"
               aria-label="搜索路由"
               className="h-9 w-full rounded-field border border-border bg-surface px-3 text-sm text-foreground outline-none placeholder:text-muted focus:border-focus sm:w-72"
             />
-            <div className="flex-1" />
-            <span className="text-xs text-muted sm:ml-auto">
+            <div className="hidden flex-1 sm:block" />
+            <span className="col-span-2 text-[11px] text-muted sm:col-span-1 sm:ml-auto sm:text-xs">
               共 {rules.length} 条，当前显示 {filteredRules.length} 条
             </span>
           </div>
