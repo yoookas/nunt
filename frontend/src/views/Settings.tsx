@@ -377,6 +377,40 @@ export default function Settings() {
 
   /* ---- backup ---- */
   const [configBusy, setConfigBusy] = useState('')
+  const [backupCfg, setBackupCfg] = useState({ enabled: false, intervalHours: 24, keep: 7, dir: '' })
+  const [backupFiles, setBackupFiles] = useState<{ name: string; size: number; modTime: string }[]>([])
+  const [backupDir, setBackupDir] = useState('')
+  const [backupSaving, setBackupSaving] = useState(false)
+
+  const loadBackup = async () => {
+    try {
+      const data = await api.get<any>('/api/v1/system/backup/files')
+      const cfg = data?.config || {}
+      setBackupCfg({
+        enabled: !!cfg.enabled,
+        intervalHours: Number(cfg.intervalHours) || 24,
+        keep: Number(cfg.keep) || 7,
+        dir: String(cfg.dir || ''),
+      })
+      setBackupFiles(Array.isArray(data?.files) ? data.files : [])
+      setBackupDir(String(data?.dir || ''))
+    } catch (err) {
+      toast.danger(errorText(err))
+    }
+  }
+
+  const saveBackup = async () => {
+    setBackupSaving(true)
+    try {
+      await api.put('/api/v1/system/backup/config', backupCfg)
+      toast.success('备份设置已保存')
+      await loadBackup()
+    } catch (err) {
+      toast.danger(errorText(err))
+    } finally {
+      setBackupSaving(false)
+    }
+  }
   const [rawDialog, setRawDialog] = useState({ open: false, loading: false, text: '' })
   const [importCandidate, setImportCandidate] = useState<unknown>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -1053,6 +1087,7 @@ export default function Settings() {
     else if (tab === 'users') void loadUsers()
     else if (tab === 'tokens') void loadTokens()
     else if (tab === 'sessions') void loadSessions()
+    else if (tab === 'backup') void loadBackup()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab])
 
@@ -1679,6 +1714,77 @@ export default function Settings() {
         {/* ------------------------------------------------------------------ */}
         <Tabs.Panel id="backup">
           <div className="space-y-5 pt-4">
+            <Panel
+              title="自动备份"
+              description="按间隔把配置、密钥、证书与 ACME 账号打成 tar.gz；日志与旧备份不包含在内"
+              extra={
+                <Button variant="primary" isDisabled={backupSaving} onPress={() => void saveBackup()}>
+                  {backupSaving ? '保存中…' : '保存'}
+                </Button>
+              }
+            >
+              <div className="grid gap-4 p-4 md:grid-cols-3">
+                <SwitchInput
+                  label="启用定时备份"
+                  value={backupCfg.enabled}
+                  onChange={(value) => setBackupCfg((prev) => ({ ...prev, enabled: value }))}
+                  hint="服务启动后约 45 秒检查一次，到间隔才写入；重启不会连续生成。"
+                />
+                <NumberInput
+                  label="间隔（小时）"
+                  value={backupCfg.intervalHours}
+                  onChange={(value) => setBackupCfg((prev) => ({ ...prev, intervalHours: value }))}
+                  min={1}
+                  max={720}
+                />
+                <NumberInput
+                  label="保留份数"
+                  value={backupCfg.keep}
+                  onChange={(value) => setBackupCfg((prev) => ({ ...prev, keep: value }))}
+                  min={1}
+                  max={60}
+                />
+                <div className="md:col-span-3">
+                  <TextInput
+                    label="备份目录（可选）"
+                    value={backupCfg.dir}
+                    onChange={(value) => setBackupCfg((prev) => ({ ...prev, dir: value }))}
+                    placeholder={backupDir || '<数据目录>/backups'}
+                    hint="必须是绝对路径；留空则写入数据目录下的 backups/。归档权限 0600，但包含 secret.key，离开本机前请自行加密。"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 border-t border-border p-4">
+                <Button
+                  variant="secondary"
+                  onPress={() => {
+                    const link = document.createElement('a')
+                    link.href = '/api/v1/system/backup'
+                    link.download = ''
+                    document.body.appendChild(link)
+                    link.click()
+                    link.remove()
+                  }}
+                >
+                  立即备份并下载
+                </Button>
+                <span className="text-xs text-muted">{backupDir ? `目录：${backupDir}` : ''}</span>
+              </div>
+              <div className="border-t border-border">
+                <DataTable
+                  items={backupFiles}
+                  ariaLabel="备份文件"
+                  rowKey={(row) => row.name}
+                  empty="还没有备份文件"
+                  columns={[
+                    { key: 'name', title: '文件', render: (row) => <span className="mono text-xs">{row.name}</span> },
+                    { key: 'size', title: '大小', render: (row) => <span className="text-xs text-muted">{fmtBytes(row.size)}</span> },
+                    { key: 'time', title: '时间', render: (row) => <span className="text-xs text-muted">{fmtTime(row.modTime)}</span> },
+                  ]}
+                />
+              </div>
+            </Panel>
+
             <Panel title="配置导入 / 导出">
               <div className="p-4">
                 <Notice status="accent">

@@ -171,6 +171,20 @@ func Normalize(c *model.Config) {
 	}
 	c.System.IP2RegionDB = strings.TrimSpace(c.System.IP2RegionDB)
 
+	if c.Backup.IntervalHours <= 0 {
+		c.Backup.IntervalHours = 24
+	}
+	if c.Backup.IntervalHours > 24*30 {
+		c.Backup.IntervalHours = 24 * 30
+	}
+	if c.Backup.Keep <= 0 {
+		c.Backup.Keep = 7
+	}
+	if c.Backup.Keep > 60 {
+		c.Backup.Keep = 60
+	}
+	c.Backup.Dir = strings.TrimSpace(c.Backup.Dir)
+
 	// A factor that is enabled without a usable seed can never be verified.
 	// Disable it instead of locking the only administrator out; the error is
 	// visible because the login simply stops asking for a code. Validate still

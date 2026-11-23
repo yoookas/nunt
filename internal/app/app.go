@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/nunt/nunt/internal/adminlisten"
 	"github.com/nunt/nunt/internal/api"
+	"github.com/nunt/nunt/internal/backup"
 	"github.com/nunt/nunt/internal/certs"
 	"github.com/nunt/nunt/internal/config"
 	"github.com/nunt/nunt/internal/ip2region"
@@ -52,6 +54,8 @@ type App struct {
 	api         *api.Server
 	admin       *adminlisten.Server
 	logStore    *logstore.Store
+	bg          sync.WaitGroup
+	bgCancel    context.CancelFunc
 
 	initialPassword string
 }
@@ -242,6 +246,7 @@ func (a *App) Run(ctx context.Context) error {
 	for _, err := range a.registry.StartAll(ctx) {
 		log.Error("module failed to start", "error", err)
 	}
+	a.startBackups(ctx)
 
 	if err := a.admin.Serve(a.adminListen.Listen); err != nil {
 		return fmt.Errorf("listen on %s: %w", a.adminListen.Listen, err)
@@ -270,6 +275,10 @@ func (a *App) Shutdown() {
 			a.log.Logger().Warn("admin server shutdown", "error", err)
 		}
 	}
+	if a.bgCancel != nil {
+		a.bgCancel()
+	}
+	a.bg.Wait()
 	a.registry.StopAll(ctx)
 	if a.logStore != nil {
 		if err := a.logStore.Close(); err != nil {
@@ -278,4 +287,45 @@ func (a *App) Shutdown() {
 	}
 	a.sessions.Close()
 	a.log.Close()
+}
+
+// startBackups runs the periodic data directory archive. It checks every few
+// minutes and only writes when the configured interval has elapsed, so a
+// restart does not create a burst of archives.
+func (a *App) startBackups(ctx context.Context) {
+	loopCtx, cancel := context.WithCancel(ctx)
+	a.bgCancel = cancel
+	a.bg.Add(1)
+	go func() {
+		defer a.bg.Done()
+		timer := time.NewTimer(45 * time.Second)
+		defer timer.Stop()
+		for {
+			select {
+			case <-loopCtx.Done():
+				return
+			case <-timer.C:
+				a.runBackup()
+				timer.Reset(10 * time.Minute)
+			}
+		}
+	}()
+}
+
+func (a *App) runBackup() {
+	cfg := a.cfg.Snapshot()
+	if !cfg.Backup.Enabled {
+		return
+	}
+	dest := backup.Dir(a.opts.DataDir, cfg.Backup.Dir)
+	interval := time.Duration(cfg.Backup.IntervalHours) * time.Hour
+	if newest := backup.Newest(dest); !newest.IsZero() && time.Since(newest) < interval {
+		return
+	}
+	path, err := backup.Create(a.opts.DataDir, dest, cfg.Backup.Keep, time.Now())
+	if err != nil {
+		a.log.Logger().Warn("backup: cannot write an archive", "error", err)
+		return
+	}
+	a.log.Logger().Info("backup: archive written", "file", path)
 }

@@ -215,5 +215,9 @@ func Default() *model.Config {
 				KeepFiles: 3,
 			},
 		},
+		Backup: model.BackupConfig{
+			IntervalHours: 24,
+			Keep:          7,
+		},
 	}
 }

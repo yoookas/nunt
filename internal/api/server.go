@@ -400,6 +400,7 @@ func (s *Server) register() {
 	s.registerAuth()
 	s.registerSystem()
 	s.registerSystemHealth()
+	s.registerBackup()
 	s.registerLogs()
 	s.registerModules()
 	s.registerEvents()

@@ -45,6 +45,20 @@ type Config struct {
 	ACME    ACMEConfig    `json:"acme"`
 	WAF     WAFConfig     `json:"waf"`
 	Logs    LogConfig     `json:"logs"`
+	Backup  BackupConfig  `json:"backup"`
+}
+
+// BackupConfig controls the periodic archive of the data directory.
+type BackupConfig struct {
+	// Enabled turns the scheduled archive on. It is off by default: writing
+	// archives to disk is something the operator should choose.
+	Enabled bool `json:"enabled"`
+	// IntervalHours is how often an archive is written (default 24).
+	IntervalHours int `json:"intervalHours"`
+	// Keep is how many archives are kept (default 7).
+	Keep int `json:"keep"`
+	// Dir overrides where archives are written (default <dataDir>/backups).
+	Dir string `json:"dir,omitempty"`
 }
 
 // LogConfig holds the retention settings of both log streams.
