@@ -27,6 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.vars.outputs.version }}
+      prerelease: ${{ steps.vars.outputs.prerelease }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,23 +35,67 @@ jobs:
       - name: Resolve version
         id: vars
         run: |
+          set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "version=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+            VERSION="${{ github.event.inputs.tag }}"
           else
-            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            VERSION="${GITHUB_REF_NAME}"
           fi
+
+          # The version becomes a docker tag, a file name and the release title,
+          # so it has to be a plain vX.Y.Z[-pre] string: "+build" or spaces would
+          # fail later in the image jobs, after the release already exists.
+          if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z._-]+)?$'; then
+            echo "::error::version '$VERSION' is not of the form vX.Y.Z or vX.Y.Z-rcN"
+            exit 1
+          fi
+
+          # A pre-release must not be presented as the latest stable download.
+          # Compared in lower case so v1.0.0-RC1 is recognised as well.
+          case "$(printf '%s' "$VERSION" | tr '[:upper:]' '[:lower:]')" in
+            *-alpha*|*-beta*|*-rc*|*-pre*|*-dev*) PRERELEASE=true ;;
+            *) PRERELEASE=false ;;
+          esac
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "resolved $VERSION (prerelease=$PRERELEASE)"
 
       - name: Create the release when it does not exist yet
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.vars.outputs.version }}
+          PRERELEASE: ${{ steps.vars.outputs.prerelease }}
         run: |
-          VERSION="${{ steps.vars.outputs.version }}"
+          set -euo pipefail
           if gh release view "$VERSION" >/dev/null 2>&1; then
             echo "release $VERSION already exists"
-          else
-            gh release create "$VERSION" --title "nunt $VERSION" --verify-tag \
-              --notes "Container image archives for nunt $VERSION. Load one with `docker load < nunt-$VERSION-amd64.tar.gz` and start it with docker compose. Nothing is published to Docker Hub or GHCR."
+            exit 0
           fi
+
+          # The notes are built in a file: putting backticks inside a double
+          # quoted --notes argument made the shell run `docker load` here.
+          notes="$(mktemp)"
+          cat > "$notes" <<'NOTES'
+          Container image archives for nunt __VERSION__.
+
+          Load one and start it:
+
+          ```sh
+          docker load < nunt-__VERSION__-amd64.tar.gz
+          docker compose up -d
+          ```
+
+          Nothing is published to Docker Hub or GHCR.
+          NOTES
+          sed -i "s/__VERSION__/${VERSION}/g" "$notes"
+
+          args=(--title "nunt $VERSION" --verify-tag --notes-file "$notes")
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+            echo "publishing $VERSION as a pre-release"
+          fi
+          gh release create "$VERSION" "${args[@]}"
 
   # ---------------------------------------------------------------------------
   # One image per architecture, uploaded straight into the release.
@@ -147,6 +192,11 @@ jobs:
           tags: |
             nunt:${{ needs.prepare.outputs.version }}
           outputs: type=oci,dest=/tmp/nunt-${{ needs.prepare.outputs.version }}-oci.tar
+          # Only the OCI layout can carry attestations (the docker exporter used
+          # by the per architecture archives cannot). The SBOM lists every
+          # package in the image; provenance records how it was built.
+          sbom: true
+          provenance: mode=max
 
       - name: Compress and upload
         env:
@@ -189,25 +239,39 @@ jobs:
       - name: Upload SHA256SUMS and finish the notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
         run: |
           set -euo pipefail
-          VERSION="${{ needs.prepare.outputs.version }}"
           gh release upload "$VERSION" dist/SHA256SUMS --clobber
-          gh release edit "$VERSION" --notes "Container image archives for nunt $VERSION.
+
+          notes="$(mktemp)"
+          cat > "$notes" <<'NOTES'
+          Container image archives for nunt __VERSION__.
 
           Load one and start it:
 
-          \`\`\`sh
-          docker load < nunt-$VERSION-amd64.tar.gz
+          ```sh
+          docker load < nunt-__VERSION__-amd64.tar.gz
           docker compose up -d
-          \`\`\`
+          ```
 
-          The loaded image is tagged nunt:$VERSION (plus nunt:$VERSION-<arch>),
+          The loaded image is tagged nunt:__VERSION__ (plus nunt:__VERSION__-<arch>),
           so start the stack with:
 
-              NUNT_IMAGE=nunt:$VERSION docker compose up -d
+              NUNT_IMAGE=nunt:__VERSION__ docker compose up -d
 
           amd64, arm64 and armv7 are single architecture docker archives; the -oci
           archive contains all three platforms but uses the OCI layout, which
           docker load does not read (use ctr or podman for that one). Verify the
-          downloads with SHA256SUMS. Nothing is published to Docker Hub or GHCR."
+          downloads with SHA256SUMS. Nothing is published to Docker Hub or GHCR.
+          NOTES
+          sed -i "s/__VERSION__/${VERSION}/g" "$notes"
+
+          args=(--notes-file "$notes")
+          if [ "$PRERELEASE" = "true" ]; then
+            # Keep a re-run from turning a pre-release back into a normal one.
+            args+=(--prerelease)
+          fi
+          gh release edit "$VERSION" "${args[@]}"

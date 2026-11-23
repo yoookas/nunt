@@ -44,6 +44,31 @@ type Config struct {
 	DDNS    DDNSConfig    `json:"ddns"`
 	ACME    ACMEConfig    `json:"acme"`
 	WAF     WAFConfig     `json:"waf"`
+	Logs    LogConfig     `json:"logs"`
+}
+
+// LogConfig holds the retention settings of both log streams.
+type LogConfig struct {
+	// Access is the persistent access log (web, port forward and WAF).
+	Access AccessLogConfig `json:"access"`
+	// App is the process log written to <dataDir>/logs/nunt.log.
+	App AppLogConfig `json:"app"`
+}
+
+// AccessLogConfig controls how access records are stored on disk. The in
+// memory ring buffers of the modules are independent of it.
+type AccessLogConfig struct {
+	// Persist keeps the records on disk. Turning it off stops writing but
+	// keeps whatever is already stored.
+	Persist   bool `json:"persist"`
+	KeepDays  int  `json:"keepDays"`
+	MaxFileMB int  `json:"maxFileMb"`
+}
+
+// AppLogConfig controls the rotation of the process log file.
+type AppLogConfig struct {
+	MaxFileMB int `json:"maxFileMb"`
+	KeepFiles int `json:"keepFiles"`
 }
 
 // SystemConfig holds global options.
@@ -60,7 +85,6 @@ type SystemConfig struct {
 	SessionBindIP bool   `json:"sessionBindIp,omitempty"`
 	LoginLockMin  int    `json:"loginLockMinutes"`
 	Theme         string `json:"theme"`
-	CheckUpdate   bool   `json:"checkUpdate"`
 	BaseURL       string `json:"baseUrl,omitempty"`
 	// IP2RegionDB is the path of the ip2region xdb database used by the
 	// country/province access filters.
@@ -101,7 +125,6 @@ type WebConfig struct {
 	Rules     []WebRule     `json:"rules"`
 	AccessLog bool          `json:"accessLog"`
 	LogKeep   int           `json:"logKeep"`
-	RealIP    bool          `json:"realIp"`
 }
 
 // WebListener is one set of sockets and its TLS configuration. Every route

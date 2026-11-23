@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from 'react'
-import { Alert, Button } from '@heroui/react'
+import { Alert, Button, Tabs } from '@heroui/react'
 import { Pause, Play, RefreshCw, Trash2 } from 'lucide-react'
 import { fmtTime } from '../format'
+import AccessLogs from './AccessLogs'
 import {
   Page,
   PageHeader,
@@ -148,7 +149,7 @@ function Notice({
  * Page
  * ---------------------------------------------------------------------- */
 
-export default function Logs() {
+function RunLogs() {
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [level, setLevel] = useState('')
   const [keyword, setKeyword] = useState('')
@@ -372,20 +373,15 @@ export default function Logs() {
   const meta = statusMeta(status)
 
   return (
-    <Page>
-      <PageHeader
-        title="日志"
-        sub="通过 SSE 实时接收运行日志；连接建立后先回放服务端最近 100 条历史"
-        actions={
-          <>
-            <StatusChip color={meta.color}>{meta.label}</StatusChip>
-            <Button variant="secondary" onPress={reconnect}>
-              <RefreshCw size={14} />
-              重新连接
-            </Button>
-          </>
-        }
-      />
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusChip color={meta.color}>{meta.label}</StatusChip>
+        <Button variant="secondary" onPress={reconnect}>
+          <RefreshCw size={14} />
+          重新连接
+        </Button>
+        <span className="text-xs text-muted">通过 SSE 实时接收，连接建立后先回放服务端最近 100 条历史</span>
+      </div>
 
       <div className="space-y-5">
         {streamError ? (
@@ -479,6 +475,42 @@ export default function Logs() {
           </div>
         </Panel>
       </div>
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------------------
+ * Page shell: run log (live) and access log (persisted) side by side.
+ * ---------------------------------------------------------------------- */
+
+export default function Logs() {
+  const [tab, setTab] = useState('run')
+
+  return (
+    <Page>
+      <PageHeader
+        title="日志"
+        sub="运行日志实时接收，访问日志落盘保留，可按来源、状态与关键字检索"
+      />
+      <Tabs selectedKey={tab} onSelectionChange={(key) => setTab(String(key))} className="w-full">
+        <Tabs.ListContainer>
+          <Tabs.List aria-label="日志分类">
+            <Tabs.Tab id="run">运行日志</Tabs.Tab>
+            <Tabs.Tab id="access">访问日志</Tabs.Tab>
+          </Tabs.List>
+        </Tabs.ListContainer>
+
+        <Tabs.Panel id="run">
+          <div className="pt-4">
+            <RunLogs />
+          </div>
+        </Tabs.Panel>
+        <Tabs.Panel id="access">
+          <div className="pt-4">
+            <AccessLogs />
+          </div>
+        </Tabs.Panel>
+      </Tabs>
     </Page>
   )
 }

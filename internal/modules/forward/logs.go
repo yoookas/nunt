@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nunt/nunt/internal/ipfilter"
+	"github.com/nunt/nunt/internal/logstore"
 	"github.com/nunt/nunt/internal/model"
 )
 
@@ -86,6 +87,38 @@ func (l *accessLogger) append(e accessEntry) {
 	if len(l.ring) > limit {
 		l.ring = append([]accessEntry{}, l.ring[len(l.ring)-limit:]...)
 	}
+}
+
+// persist copies a connection entry to the persistent access log. It honours
+// the same enable switch as the in memory ring.
+func (f *Forward) persist(e accessEntry) {
+	if f.deps == nil || f.deps.Logs == nil || !f.access.enabledNow() {
+		return
+	}
+	f.deps.Logs.Append(logstore.Entry{
+		Time:       e.Time,
+		Source:     logstore.SourceForward,
+		RuleID:     e.RuleID,
+		Rule:       e.Rule,
+		Protocol:   e.Protocol,
+		ClientIP:   bareHost(e.Client),
+		Upstream:   e.Target,
+		Result:     e.Result,
+		DurationMs: e.Duration.Milliseconds(),
+		Bytes:      e.BytesIn + e.BytesOut,
+		BytesIn:    e.BytesIn,
+		BytesOut:   e.BytesOut,
+	})
+}
+
+// bareHost strips the port of a "host:port" peer address so the stored client
+// matches the shape the web and WAF records use (and the IP filter works the
+// same way for every source).
+func bareHost(addr string) string {
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		return host
+	}
+	return addr
 }
 
 // list returns up to limit entries, newest first, optionally filtered by rule.

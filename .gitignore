@@ -15,6 +15,9 @@
 *.log
 *.bak
 
+# docker compose environment (copy .env.example to .env)
+/.env
+
 # editors
 .idea/
 .vscode/

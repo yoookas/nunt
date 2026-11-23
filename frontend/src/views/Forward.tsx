@@ -952,6 +952,9 @@ export default function Forward() {
             ariaLabel="访问日志"
             empty={logsLoading ? '加载中…' : '暂无访问日志'}
           />
+          <div className="text-xs text-muted">
+            本窗口只显示内存缓冲；历史记录可在「日志 → 访问日志」中按来源「端口转发」检索并导出。
+          </div>
         </div>
       </FormModal>
 

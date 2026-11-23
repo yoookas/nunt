@@ -36,6 +36,30 @@ const (
 	subChanDepth = 256
 )
 
+// Options controls the rotation of the log file.
+type Options struct {
+	// MaxFileMB is the size at which the file is rotated (default 8).
+	MaxFileMB int
+	// KeepFiles is how many rotated files are kept (default 3).
+	KeepFiles int
+}
+
+func (o Options) normalize() Options {
+	if o.MaxFileMB <= 0 {
+		o.MaxFileMB = maxFileSize >> 20
+	}
+	if o.MaxFileMB > 1024 {
+		o.MaxFileMB = 1024
+	}
+	if o.KeepFiles <= 0 {
+		o.KeepFiles = maxFileKeep
+	}
+	if o.KeepFiles > 10 {
+		o.KeepFiles = 10
+	}
+	return o
+}
+
 // Hub owns the logger and the in-memory ring buffer.
 type Hub struct {
 	mu       sync.RWMutex
@@ -49,17 +73,28 @@ type Hub struct {
 	file     *os.File
 	filePath string
 	fileSize int64
+	maxBytes int64
+	keep     int
 }
 
 var _ slog.Handler = (*handler)(nil)
 
-// New creates a hub. level accepts debug/info/warn/error. filePath may be
-// empty to disable file logging.
+// New creates a hub with the default rotation settings.
 func New(level string, filePath string) *Hub {
+	return NewWithOptions(level, filePath, Options{})
+}
+
+// NewWithOptions creates a hub whose log file rotates at the given size and
+// keeps the given number of rotations. level accepts debug/info/warn/error;
+// filePath may be empty to disable file logging.
+func NewWithOptions(level string, filePath string, opts Options) *Hub {
+	opts = opts.normalize()
 	h := &Hub{
-		ring: make([]Entry, ringSize),
-		subs: map[int]chan Entry{},
-		out:  os.Stdout,
+		ring:     make([]Entry, ringSize),
+		maxBytes: int64(opts.MaxFileMB) << 20,
+		keep:     opts.KeepFiles,
+		subs:     map[int]chan Entry{},
+		out:      os.Stdout,
 	}
 	h.SetLevel(level)
 	if filePath != "" {
@@ -126,7 +161,7 @@ func (h *Hub) rotateLocked() {
 	}
 	_ = h.file.Close()
 	h.file = nil
-	for i := maxFileKeep - 1; i >= 1; i-- {
+	for i := h.keep - 1; i >= 1; i-- {
 		_ = os.Rename(fmt.Sprintf("%s.%d", h.filePath, i), fmt.Sprintf("%s.%d", h.filePath, i+1))
 	}
 	_ = os.Rename(h.filePath, h.filePath+".1")
@@ -143,8 +178,25 @@ func (h *Hub) writeFileLocked(line string) {
 		return
 	}
 	h.fileSize += int64(n)
-	if h.fileSize > maxFileSize {
+	if h.fileSize > h.maxBytes {
 		h.rotateLocked()
+	}
+}
+
+// SetLimits applies new rotation settings. The new size takes effect on the
+// next write; rotations beyond the new count are removed.
+func (h *Hub) SetLimits(opts Options) {
+	opts = opts.normalize()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.maxBytes = int64(opts.MaxFileMB) << 20
+	h.keep = opts.KeepFiles
+	if h.filePath == "" {
+		return
+	}
+	// Drop rotations that a previous, larger setting left behind.
+	for i := h.keep + 1; i <= 10; i++ {
+		_ = os.Remove(fmt.Sprintf("%s.%d", h.filePath, i))
 	}
 }
 

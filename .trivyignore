@@ -1,0 +1,11 @@
+# Accepted vulnerabilities for the container image scan in CI.
+#
+# One CVE (or CVE with a package qualifier) per line, `#` comments allowed.
+# Keep this list empty unless an exception is justified and reviewed:
+# a scanner that is permanently red gets ignored, while a short, explicit
+# exception list with a reason keeps the gate useful.
+#
+# When adding an entry, put the reason next to it and remove it once a fixed
+# version ships in the base image or the dependency:
+#
+#   CVE-2024-12345  # curl in alpine:3.21, no fix available; only used by ...

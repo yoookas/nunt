@@ -10,3 +10,11 @@ bin
 *.log
 nunt
 nunt.exe
+# 前端与编辑器产物（构建阶段不需要，缩小构建上下文）
+frontend/dist
+.vscode
+.idea
+.DS_Store
+# compose overrides (may hold local paths/ids, never needed in the build)
+.env
+.env.*

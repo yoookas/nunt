@@ -186,12 +186,10 @@ func Default() *model.Config {
 			LoginMaxFail:    5,
 			LoginLockMin:    10,
 			Theme:           "dark",
-			CheckUpdate:     false,
 		},
 		Web: model.WebConfig{
 			AccessLog: true,
 			LogKeep:   200,
-			RealIP:    true,
 		},
 		Forward: model.ForwardConfig{AccessLog: true},
 		ACME: model.ACMEConfig{
@@ -205,6 +203,17 @@ func Default() *model.Config {
 			InboundThreshold:  5,
 			OutboundThreshold: 4,
 			BodyLimitKB:       128,
+		},
+		Logs: model.LogConfig{
+			Access: model.AccessLogConfig{
+				Persist:   true,
+				KeepDays:  7,
+				MaxFileMB: 64,
+			},
+			App: model.AppLogConfig{
+				MaxFileMB: 8,
+				KeepFiles: 3,
+			},
 		},
 	}
 }

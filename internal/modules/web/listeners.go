@@ -154,8 +154,18 @@ func (l *listener) serve(ln net.Listener, scheme string) {
 	}
 }
 
-// close shuts the sockets down and waits for in flight requests.
+// close shuts the sockets down and waits for in flight requests, bounded by
+// shutdownTimeout. The service keeps using it when a listener is retired at
+// runtime (a reload can afford to drain a connection).
 func (l *listener) close() {
+	l.closeWithin(context.Background(), shutdownTimeout)
+}
+
+// closeWithin shuts the sockets down and waits for in flight requests, bounded
+// by both timeout and ctx. Stop passes the shutdown context so several
+// listeners drain in parallel under one shared budget: docker sends SIGKILL
+// when the grace period ends, so the total must stay below it.
+func (l *listener) closeWithin(ctx context.Context, timeout time.Duration) {
 	l.mu.Lock()
 	if l.closed {
 		l.mu.Unlock()
@@ -165,9 +175,12 @@ func (l *listener) close() {
 	plain, secure := l.plain, l.secure
 	l.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	drainCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	if err := l.server.Shutdown(ctx); err != nil {
+	if err := l.server.Shutdown(drainCtx); err != nil {
 		_ = l.server.Close()
 	}
 	if plain != nil {

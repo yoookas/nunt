@@ -167,6 +167,9 @@ export default function LogsModal({
             ariaLabel="访问日志"
             empty={loading ? '加载中…' : '暂无访问日志（可能未开启访问日志记录）'}
           />
+        <div className="text-xs text-muted">
+          本窗口只显示内存缓冲；历史记录可在「日志 → 访问日志」中按站点检索并导出 CSV。
+        </div>
       </div>
     </FormModal>
   )

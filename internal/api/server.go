@@ -18,6 +18,7 @@ import (
 	"github.com/nunt/nunt/internal/config"
 	"github.com/nunt/nunt/internal/ip2region"
 	"github.com/nunt/nunt/internal/logging"
+	"github.com/nunt/nunt/internal/logstore"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/netutil"
@@ -41,7 +42,10 @@ type Options struct {
 	Sessions *security.SessionStore
 	DataDir  string
 	Geo      *ip2region.Service
-	Reload   func() // called after a configuration change that needs a reload
+	// Logs is the persistent access log store; nil disables the access log
+	// endpoints (they answer with empty results).
+	Logs   *logstore.Store
+	Reload func() // called after a configuration change that needs a reload
 	// AdminWAF optionally wraps the admin API with the web application
 	// firewall (used when system protection is enabled in the WAF config).
 	AdminWAF func(http.Handler) http.Handler
@@ -389,6 +393,7 @@ func (s *Server) clientIP(r *http.Request) net.IP {
 func (s *Server) register() {
 	s.registerAuth()
 	s.registerSystem()
+	s.registerLogs()
 	s.registerModules()
 	s.registerEvents()
 

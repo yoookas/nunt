@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/nunt/nunt/internal/logstore"
 )
 
 // defaultLogKeep is the fallback size of the access log ring buffer.
@@ -17,6 +19,8 @@ type AccessEntry struct {
 	Time       time.Time `json:"time"`
 	RuleID     string    `json:"ruleId"`
 	Rule       string    `json:"rule"`
+	Listen     string    `json:"listen,omitempty"`
+	Host       string    `json:"host,omitempty"`
 	Method     string    `json:"method"`
 	Path       string    `json:"path"`
 	Status     int       `json:"status"`
@@ -25,7 +29,6 @@ type AccessEntry struct {
 	ClientIP   string    `json:"clientIp"`
 	UserAgent  string    `json:"userAgent"`
 	Upstream   string    `json:"upstream,omitempty"`
-	Listen     string    `json:"listen,omitempty"`
 	Bytes      int64     `json:"bytes"`
 }
 
@@ -215,6 +218,8 @@ func (w *Web) logAccess(r *rule, req *http.Request, rec *accessRecorder, start t
 		Time:       start,
 		RuleID:     r.id,
 		Rule:       r.name,
+		Listen:     requestListenAddr(req),
+		Host:       req.Host,
 		Method:     req.Method,
 		Path:       req.URL.RequestURI(),
 		Status:     status,
@@ -223,14 +228,38 @@ func (w *Web) logAccess(r *rule, req *http.Request, rec *accessRecorder, start t
 		ClientIP:   clientIPString(req, w.trustProxy(w.cfg)),
 		UserAgent:  req.UserAgent(),
 		Upstream:   upstreamFrom(req.Context()),
-		Listen:     requestListenAddr(req),
 		Bytes:      rec.bytes,
 	}
 	w.logs.add(entry)
+	w.persist(entry)
 	if status >= 500 {
 		w.logger().Warn("web: request failed", "rule", r.name, "method", req.Method, "path", entry.Path,
 			"status", status, "client", entry.ClientIP)
 	}
+}
+
+// persist appends the entry to the persistent access log. The in memory ring
+// keeps the live view fast; the store survives a restart.
+func (w *Web) persist(e AccessEntry) {
+	if w.deps == nil || w.deps.Logs == nil {
+		return
+	}
+	w.deps.Logs.Append(logstore.Entry{
+		Time:       e.Time,
+		Source:     logstore.SourceWeb,
+		RuleID:     e.RuleID,
+		Rule:       e.Rule,
+		Listen:     e.Listen,
+		Host:       e.Host,
+		Method:     e.Method,
+		Path:       e.Path,
+		Status:     e.Status,
+		ClientIP:   e.ClientIP,
+		UserAgent:  e.UserAgent,
+		Upstream:   e.Upstream,
+		DurationMs: e.DurationMs,
+		Bytes:      e.Bytes,
+	})
 }
 
 // Logs returns the recorded entries, newest first.

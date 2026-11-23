@@ -556,7 +556,10 @@ func closeWrite(c net.Conn) {
 // refusal.
 func (p *proxy) allow(remote net.Addr) bool { return p.f.allow(p.rule, remote) }
 
-func (p *proxy) record(e accessEntry) { p.f.access.append(e) }
+func (p *proxy) record(e accessEntry) {
+	p.f.access.append(e)
+	p.f.persist(e)
+}
 
 // ---------------------------------------------------------------------------
 // UDP

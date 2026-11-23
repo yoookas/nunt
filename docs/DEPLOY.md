@@ -26,7 +26,8 @@ docker images | grep nunt
 NUNT_IMAGE=nunt:v1.0.0 docker compose up -d
 ```
 
-多架构归档 `nunt-v1.0.0-oci.tar.gz` 可用同样方式导入（较新的 Docker 版本支持 `docker load` 读取 OCI 归档）。
+多架构归档 `nunt-v1.0.0-oci.tar.gz` 是 OCI 布局，**`docker load` 读不了**：需要 `ctr images import`
+或 `podman load`（先解压）。单架构的 `nunt-v1.0.0-<arch>.tar.gz` 才是 `docker load` 能直接吃的 docker 归档。
 
 ## 2. 端口
 
@@ -38,7 +39,55 @@ NUNT_IMAGE=nunt:v1.0.0 docker compose up -d
 
 容器内以非 root（uid 1000）运行，镜像里已经给二进制设置了 `cap_net_bind_service`，因此可以直接绑定 80/443；默认的 compose 不需要 `cap_add`。只有你额外加了 `cap_drop: [ALL]`（或跑在老版本 Docker / rootless / Podman 上）时，才需要补回 `cap_add: [NET_BIND_SERVICE]`，否则绑定 80/443 会失败。
 
-### 2.1 在控制台里改管理后台端口（立即生效）
+> **不要加 `security_opt: [no-new-privileges]`**：它会阻止文件能力（file capabilities）生效，
+> 非 root 进程就再也拿不到 `cap_net_bind_service`，80/443 直接绑定失败。要收紧权限请用
+> `cap_drop: [ALL]` + `cap_add: [NET_BIND_SERVICE]` 的组合。
+
+### 2.1 容器运行参数（PUID/PGID、日志、停止）
+
+| 参数 | 说明 |
+| --- | --- |
+| `PUID` / `PGID` | 容器内进程的 uid/gid，默认 `1000`。与宿主机 `./data` 属主不一致时，入口脚本会递归 `chown` 数据目录（只改元数据）再降权；`0` 表示以 root 运行（会有告警）。 |
+| `DATA_DIR` | 数据目录，默认 `/data`。同时用于入口脚本、`CMD` 与 `HEALTHCHECK`。 |
+| `stop_grace_period: 20s` | compose 里已设置。服务收到 SIGTERM 后有 15 秒收尾预算（等待进行中的请求），默认的 10 秒会被 docker 直接 SIGKILL，长连接被硬断。 |
+| `logging.options.max-size/max-file` | compose 里已把 docker 的 json-file 日志限制在 10 MB × 3 份。访问日志有自己的轮转（默认 7 天 × 64 MB），这里管的是 stdout。 |
+| `--read-only` | 可用：除 `/data` 外进程不写任何路径（临时文件也建在数据目录里）。记得同时给 `/data` 挂可写卷。 |
+| `--user 1000:1000` | 跳过 PUID/PGID 重映射；此时 `/data` 必须已属于该 uid（入口脚本会检查并给出明确报错，退出码 73）。 |
+
+> rootless Docker / Podman 下，非 root 进程绑定 80/443 还受内核开关限制：
+> 需要宿主机 `sysctl -w net.ipv4.ip_unprivileged_port_start=0`，或改用 `--cap-add=NET_BIND_SERVICE` 并
+> 确认 rootless 端口转发可用。true rootless + host 网络的组合本身也有限制，生产环境建议用普通 Docker + host 网络。
+
+compose 的变量可以放在同目录的 `.env` 里（`cp .env.example .env`），该文件已在 `.gitignore` 与
+`.dockerignore` 中，不会被提交也不会进入镜像。
+
+### 2.2 构建参数与固定基础镜像
+
+Dockerfile 的三个基础镜像都可以用构建参数覆盖，方便把镜像固定到 digest 或临时换用打过补丁的基础镜像：
+
+| 参数 | 默认值 | 用途 |
+| --- | --- | --- |
+| `NODE_IMAGE` | `node:24-alpine` | 前端构建阶段 |
+| `GO_IMAGE` | `golang:1.26.10-alpine` | Go 构建阶段 |
+| `ALPINE_IMAGE` | `alpine:3.21` | 运行时阶段 |
+
+```bash
+docker build \
+  --build-arg VERSION=v1.0.0 \
+  --build-arg COMMIT=$(git rev-parse --short=12 HEAD) \
+  --build-arg BUILDTIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  --build-arg ALPINE_IMAGE=alpine@sha256:... \
+  -t nunt:v1.0.0 .
+```
+
+`VERSION` / `COMMIT` / `BUILDTIME` 同时写进二进制和镜像的 OCI 标签
+（`org.opencontainers.image.version` / `.revision` / `.created`），`docker image inspect` 可以直接看到。
+`make docker` 会自动带上这三个参数。
+
+镜像的发布归档由 CI 用与 Release 相同的导出格式构建，并在 `docker-smoke` 里用 `docker load` 加载后
+校验标签与容器契约——所以在本地或 CI 能通过的事，发出去归档不会变样。
+
+### 2.3 在控制台里改管理后台端口（立即生效）
 
 管理后台默认监听 `:3113`（配置字段 `system.adminListen`）。**设置 → 系统参数 → 管理监听地址**
 可以直接改端口 / 监听地址，保存后立即生效，**不需要重启进程**：
@@ -54,7 +103,7 @@ NUNT_IMAGE=nunt:v1.0.0 docker compose up -d
 
 > 运行时改端口只影响当前进程；如果容器被重建，会以 `config.json` 里的值为准（已经写进去了）。
 
-### 2.2 用环境变量指定管理后台端口
+### 2.4 用环境变量指定管理后台端口
 
 管理后台默认监听 `:3113`（配置字段 `system.adminListen`）。部署时可以用环境变量覆盖，
 **不需要改 `config.json`**；覆盖值只影响当前进程，不会写回数据卷（换端口重启不会污染配置）。
@@ -83,11 +132,20 @@ NUNT_ADMIN_LISTEN=127.0.0.1:18080 docker compose up -d
   同样不受支持。
 - **非法值启动即失败**：例如 `NUNT_ADMIN_LISTEN=abc`、`NUNT_ADMIN_LISTEN=127.0.0.1`、
   `NUNT_ADMIN_PORT=70000` 会打印明确错误并以非零码退出，不会静默回退到 `config.json` 的值。
-- **健康检查会自动跟随**：镜像的 `HEALTHCHECK` 按与程序相同的优先级取端口——
-  `NUNT_ADMIN_PORT` → `NUNT_ADMIN_LISTEN` 的端口部分 → `/data/config.json` 里的
-  `system.adminListen` → 内置默认 `3113`。因此**在控制台里改过端口后，healthcheck 会自动跟到新端口**
-  （它读的是配置文件里的值）；healthcheck 固定访问 `127.0.0.1`，如果管理面只绑在某个具体网卡地址上，
-  需要自行调整（这是既有行为）。
+- **健康检查会自动跟随**：镜像的 `HEALTHCHECK` 执行的是 `nunt healthcheck`（服务自己的子命令，
+  不依赖 shell / sed / wget）。它按与主程序**完全相同**的优先级解析地址——
+  `NUNT_ADMIN_LISTEN` → `NUNT_ADMIN_PORT` → `/data/config.json` 里的 `system.adminListen` → 内置默认 `3113`
+  ——再请求 `http://<地址>/healthz`。因此在控制台里改过端口后，healthcheck 会自动跟到新端口；
+  配置写成压缩的一行 JSON 也不会失效。通配地址（`:3113`、`0.0.0.0:3113`、`[::]:3113`）会探 `127.0.0.1` /
+  `[::1]`，绑定具体网卡地址时直接探那个地址。
+- 手动排查时可单独运行（退出码 0 健康、1 不健康、2 参数错误，异常原因打印到 stderr）：
+  ```bash
+  docker exec nunt nunt healthcheck
+  docker exec nunt nunt healthcheck -d /data -timeout 2s
+  docker exec nunt nunt healthcheck -c /data/config.json
+  ```
+  如果数据目录不在 `/data`，`healthcheck` 会读 `DATA_DIR` 环境变量（镜像默认 `/data`），
+  也可以用 `-d` 显式指定。
 - **环境变量优先，且会锁住设置页的地址字段**：来源是 `env` 时，「管理监听地址」字段被禁用并说明原因；
   直接调 `PUT /api/v1/system/settings` 修改地址会被拒绝（`409` +
   「当前监听地址由环境变量 NUNT_ADMIN_LISTEN 控制，修改配置不会生效」），**配置不会写入**。

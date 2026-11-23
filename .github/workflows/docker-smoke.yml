@@ -34,13 +34,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build the image
-        run: docker build --build-arg VERSION=ci --build-arg COMMIT=${GITHUB_SHA::12} -t nunt:ci .
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the image and export the release style archive
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          build-args: |
+            VERSION=ci
+            COMMIT=${{ github.sha }}
+            BUILDTIME=${{ github.run_started_at }}
+          tags: nunt:ci
+          # The same exporter the release uses, so CI exercises the artifact
+          # users actually download: `docker load < nunt-<version>-<arch>.tar.gz`.
+          outputs: type=docker,dest=/tmp/nunt-ci.tar
+          cache-from: type=gha,scope=smoke
+          cache-to: type=gha,mode=max,scope=smoke
+
+      - name: Load the archive like a release download
+        run: |
+          set -euo pipefail
+          test -s /tmp/nunt-ci.tar
+          docker load -i /tmp/nunt-ci.tar
+          docker image inspect nunt:ci --format 'id={{.Id}} size={{.Size}}'
+          docker image inspect nunt:ci --format 'entrypoint={{.Config.Entrypoint}} healthcheck={{.Config.Healthcheck.Test}}'
+          test "$(docker image inspect nunt:ci --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')" = "ci"
+          test "$(docker image inspect nunt:ci --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "${GITHUB_SHA}"
 
       - name: Validate the compose files
         run: |
           docker compose -f docker-compose.yml config > /dev/null
-
 
       - name: Start the container with host networking
         run: |
@@ -127,6 +152,57 @@ jobs:
           curl -fsSL -b /tmp/cookies http://127.0.0.1:3113/api/v1/modules \
             | jq -e 'length >= 6' > /dev/null
 
+          # the health check is a subcommand of the service and works from
+          # inside the container (no shell, sed or wget involved)
+          docker exec nunt nunt healthcheck
+          docker exec nunt nunt healthcheck -d /data -timeout 2s
+
+          # the access log directory is created on start and owned by the
+          # runtime user, so records survive a container restart
+          docker exec nunt sh -c 'test -d /data/logs/access'
+          test "$(docker exec nunt stat -c %u /data/logs/access)" = "1000"
+
+          # build metadata is visible in the image, not only in the binary
+          test "$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' nunt)" = "ci"
+
       - name: Stop the container
         if: always()
         run: docker rm -f nunt || true
+
+      - name: Start through compose with an environment port override
+        run: |
+          set -euo pipefail
+          NUNT_IMAGE=nunt:ci NUNT_ADMIN_LISTEN=127.0.0.1:13113 docker compose up -d --no-build
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:13113/healthz > /dev/null; then
+              echo "compose stack healthy after $attempt attempts"
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:13113/healthz > /dev/null
+
+      - name: Verify the compose stack
+        run: |
+          set -euo pipefail
+          docker compose ps
+          # the health check must follow NUNT_ADMIN_LISTEN, not the default port
+          for attempt in $(seq 1 30); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' nunt || echo unknown)
+            if [ "$status" = "healthy" ]; then
+              break
+            fi
+            sleep 2
+          done
+          test "$status" = "healthy"
+          docker exec nunt nunt healthcheck
+          # the data volume is the bind mount from the compose file
+          test "$(docker exec nunt stat -c %u /data/config.json)" = "1000"
+
+      - name: Stop the compose stack
+        if: always()
+        run: docker compose down -v || true
+
+      - name: Clean up the compose data directory
+        if: always()
+        run: rm -rf "$PWD/data"

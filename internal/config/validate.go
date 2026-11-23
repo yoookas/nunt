@@ -66,6 +66,7 @@ func Normalize(c *model.Config) {
 	if c.ACME.KeyType == "" {
 		c.ACME.KeyType = "ec256"
 	}
+	normalizeLogs(&c.Logs)
 
 	for i := range c.Web.Listeners {
 		l := &c.Web.Listeners[i]
@@ -169,6 +170,35 @@ func Normalize(c *model.Config) {
 		}
 	}
 	c.System.IP2RegionDB = strings.TrimSpace(c.System.IP2RegionDB)
+}
+
+// normalizeLogs clamps the log retention settings into the range the store and
+// the rotating file logger support, so a typo in the UI cannot fill the disk.
+func normalizeLogs(l *model.LogConfig) {
+	if l.Access.KeepDays <= 0 {
+		l.Access.KeepDays = 7
+	}
+	if l.Access.KeepDays > 365 {
+		l.Access.KeepDays = 365
+	}
+	if l.Access.MaxFileMB <= 0 {
+		l.Access.MaxFileMB = 64
+	}
+	if l.Access.MaxFileMB > 1024 {
+		l.Access.MaxFileMB = 1024
+	}
+	if l.App.MaxFileMB <= 0 {
+		l.App.MaxFileMB = 8
+	}
+	if l.App.MaxFileMB > 1024 {
+		l.App.MaxFileMB = 1024
+	}
+	if l.App.KeepFiles <= 0 {
+		l.App.KeepFiles = 3
+	}
+	if l.App.KeepFiles > 10 {
+		l.App.KeepFiles = 10
+	}
 }
 
 // Validate rejects configurations that would break the service.

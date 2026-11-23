@@ -16,6 +16,7 @@
 | **动态域名 DDNS** | 内置阿里云 DNS、腾讯云 DNSPod 与「自定义回调」；支持多子域名、A/AAAA、TTL、间隔或 cron 调度、公网 IP 探测（网卡 / URL / 静态）、变化才更新 |
 | **ACME 自动证书** | 基于 `golang.org/x/crypto/acme` 自研签发流程，支持 http-01 / dns-01 / tls-alpn-01，DNS-01 复用 DDNS 的提供商；**http-01 / tls-alpn-01 复用 web 的 :80 / :443 监听**（端口被自家规则占用也能签发），自动续期（默认剩余 30 天，上限 30 天），证书热加载、无需重启；统一使用 Let's Encrypt；证书页可配置账户邮箱与默认密钥类型；支持手动上传证书；证书可备注，并可导出为 zip（证书链 + 私钥）用于备份迁移 |
 | **Coraza WAF** | 内嵌 OWASP CRS 规则集，支持检测/拦截模式、PL 等级、入站/出站阈值、规则文件勾选、自定义 SecLang 规则、请求体上限、拦截日志与在线测试；可保护管理后台本身 |
+| **日志** | 运行日志（SSE 实时推送 + 按大小轮转的文件，份数与单文件上限可配）、访问日志（Web / 端口转发 / WAF 三路统一落盘：按天与大小轮转、保留 N 天、进程重启不丢；可按来源 / 状态码 / IP 前缀 / 关键字 / 时间范围检索，带聚合统计与 CSV 导出） |
 
 管理界面：概览、Web 服务、端口转发、动态域名、证书、WAF、日志、设置。
 
@@ -27,6 +28,7 @@
 
 ```bash
 git clone <this-repo> nunt && cd nunt
+cp .env.example .env          # 可选：PUID/PGID、时区、镜像名、管理端口
 docker compose up -d --build
 ```
 
@@ -93,9 +95,10 @@ echo 'NUNT_ADMIN_LISTEN=:18080' >> .env && docker compose up -d
   要改用设置页（含运行中切换），先移除环境变量并重启一次。环境变量存在时，其它设置照常保存。
 - 非法值（如 `NUNT_ADMIN_LISTEN=abc`、`NUNT_ADMIN_PORT=70000`）会让进程**启动即失败**并打印原因，
   不会静默回退到旧端口。
-- 容器健康检查按同一优先级取端口：`NUNT_ADMIN_PORT` → `NUNT_ADMIN_LISTEN` 的端口部分 →
-  `/data/config.json` 里的 `system.adminListen` → 内置默认 `3113`。因此在控制台里改过端口后，
-  healthcheck 会自动跟到新端口（读取配置文件里的值）。
+- 容器健康检查执行的是 `nunt healthcheck`（服务自己的子命令，不依赖 shell / sed / wget），按同一优先级
+  解析地址：`NUNT_ADMIN_LISTEN` → `NUNT_ADMIN_PORT` → `/data/config.json` 里的 `system.adminListen` →
+  内置默认 `3113`，再请求 `/healthz`。所以在控制台里改过端口后，healthcheck 会自动跟到新端口。
+  手动排查：`docker exec nunt nunt healthcheck`（退出码 0 健康 / 1 不健康 / 2 参数错误）。
 
 ### 2. 使用 Release 里的镜像文件（不上传任何镜像仓库）
 
@@ -137,6 +140,7 @@ data/
 ├── certs/           # 证书仓库（cert.pem / key.pem / meta.json）
 ├── acme/            # ACME 账号密钥与注册信息
 └── logs/            # 运行日志（按大小轮转，保留 3 份）
+    └── access/      # 访问日志（JSONL，按天/大小轮转，保留 7 天）
 ```
 
 - 所有敏感字段（DDNS/DNS 凭据、BasicAuth 密码）**加密存储**；
@@ -176,6 +180,32 @@ data/
 
 ---
 
+## 日志
+
+管理界面的「日志」页分两个标签：
+
+**运行日志**：进程日志同时写 stdout 与 `<数据目录>/logs/nunt.log`，超过单文件上限后轮转为
+`nunt.log.1…n`（默认 8 MB × 3 份，可在「设置 → 日志」里改）。页面通过 SSE 实时接收，
+连接建立后先回放最近 100 条；支持按级别与关键字过滤、暂停与清屏。日志文件可以直接在设置页下载。
+
+**访问日志**：Web 请求、端口转发连接与 WAF 拦截统一写入 `<数据目录>/logs/access/access-YYYY-MM-DD.jsonl`：
+
+- 默认保留 **7 天**、单文件 **64 MB**，按天与大小轮转（`access-YYYY-MM-DD.001.jsonl` …），
+  启动时与每小时清理一次过期文件；保留天数、单文件上限、是否落盘都可以在「设置 → 日志」里改，保存即生效；
+- 写入走有界队列 + 单个写协程，**磁盘慢或写满都不会阻塞请求**；队列满时丢弃并计数，丢弃数在「日志 → 访问日志 → 存储状态」里可见；
+- 每条记录包含时间、来源（web / forward / waf）、站点或转发规则、监听地址、域名、方法、路径、
+  状态码、结果、客户端 IP、上游或目标、耗时、字节数（转发记录另有上下行拆分）、User-Agent 与 WAF 命中信息；
+- 检索支持来源、状态码（`2xx` 或 `404`）、客户端 IP 前缀、域名、方法、关键字（路径 / UA / 结果 / 消息）
+  与时间范围；分页用游标，翻页不会漏也不会重；
+- 顶部给出匹配数、4xx/5xx 占比、流量合计、最活跃客户端与平均耗时；统计基于当前筛选条件，
+  扫描有上限时页面会标明「基于部分记录」；
+- 支持一键 **导出 CSV**（带 UTF-8 BOM，Excel 直接打开）与 **清空**（清空会删除磁盘文件，需要二次确认）。
+
+> 关闭「写入磁盘」只停止写入，已经落盘的文件不会被删除；内存里的实时缓冲（各模块的访问日志弹窗）也不受影响。
+> 记录只保存请求元数据，不保存请求体与响应体，也不记录任何凭据。
+
+---
+
 ## 开发
 
 ```bash
@@ -200,6 +230,8 @@ internal/config     配置仓库（原子写、校验、订阅）
 internal/model      全部持久化类型
 internal/module     模块接口与注册表
 internal/modules/   各功能模块（web / forward / ddns / acme / waf）
+internal/logstore   访问日志落盘（JSONL、轮转、保留策略、游标查询与聚合）
+internal/logging    进程日志（ring buffer、SSE 订阅、按大小轮转的文件）
 internal/dnsprov    DNS 提供商（DDNS 与 ACME DNS-01 共用）
 internal/certs      证书仓库（SNI 热加载）
 internal/ip2region  IP 地理库（ip2region xdb：国家/省份）
@@ -212,7 +244,8 @@ web 前端            frontend/（React 19 + HeroUI + Tailwind 4 + Vite 8）
 ```
 
 模块开发约定见 [docs/CONTRACT.md](docs/CONTRACT.md)（模块接口、REST 约定、前端页面契约）；
-公网部署前的检查清单见 [docs/PUBLIC-EXPOSURE.md](docs/PUBLIC-EXPOSURE.md)。
+公网部署前的检查清单见 [docs/PUBLIC-EXPOSURE.md](docs/PUBLIC-EXPOSURE.md)；
+路线图（单管理员口径）见 [docs/ROADMAP.md](docs/ROADMAP.md)；双因子（TOTP + 前端本地二维码）的实施清单见 [docs/TOTP-PLAN.md](docs/TOTP-PLAN.md)（计划中，尚未实现）。
 
 ### 前端
 
@@ -260,8 +293,8 @@ go build -o nunt.exe ./cmd/nunt
 3. 压缩为 `.tar.gz`、生成 `SHA256SUMS`；
 4. 创建/更新 Release 并上传全部附件。**不登录、不推送任何镜像仓库。**
 
-`.github/workflows/ci.yml`：push / PR 时执行 `gofmt` 检查、`go vet`、`go test`、构建二进制与镜像（不推送），并跑**阻塞式**的 `govulncheck` 依赖漏洞扫描（依赖中存在可达的已知漏洞时 CI 直接失败）；另有独立的 `frontend` job 用 Node 构建 React 管理界面，并校验 `internal/webui/assets` 的提交产物与源码一致（过期即失败）。
-`.github/workflows/docker-smoke.yml`：在真实 docker daemon 上构建镜像并校验容器契约（非 root 用户、低端口 capability、配置与密钥权限、管理 UI 可访问、用日志里的随机密码登录）。
+`.github/workflows/ci.yml`：push / PR 时执行 `gofmt` 检查、`go vet`、`go test`、构建二进制，并按 `linux/amd64` + `linux/arm64` 构建镜像（不推送，arm64 只构建不运行）；跑**阻塞式**的 `govulncheck` 依赖漏洞扫描（依赖中存在可达的已知漏洞时 CI 直接失败）；用 **Trivy** 扫描镜像里「已有修复版本」的 CRITICAL 漏洞（当前为基线阶段，`continue-on-error`，基线确认干净后转阻塞；确认过的例外写进 [`.trivyignore`](.trivyignore) 并注明原因）；另有独立的 `frontend` job 用 Node 构建 React 管理界面，并校验 `internal/webui/assets` 的提交产物与源码一致（过期即失败）。
+`.github/workflows/docker-smoke.yml`：在真实 docker daemon 上按发布格式（`type=docker` 归档 + `docker load`）构建镜像并校验容器契约（非 root 用户、低端口 capability、配置与密钥权限、管理 UI 可访问、用日志里的随机密码登录、`nunt healthcheck`），再用 compose 起栈验证环境变量覆盖端口后健康检查仍然跟随。
 `.github/dependabot.yml`：gomod 每周、GitHub Actions 每月检查依赖更新（限制同时开启的 PR 数，minor/patch 自动分组）。
 
 ---

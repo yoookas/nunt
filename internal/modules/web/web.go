@@ -243,9 +243,19 @@ func (w *Web) Stop(ctx context.Context) error {
 	if cancel != nil {
 		cancel()
 	}
+	// Listeners drain in parallel: each one waits up to shutdownTimeout for its
+	// in flight requests, and the shutdown context (the caller's budget) caps
+	// the whole group. Draining them one after another would add up to
+	// listeners × timeout, which is exactly what docker's grace period kills.
+	var closing sync.WaitGroup
 	for _, l := range listeners {
-		l.close()
+		closing.Add(1)
+		go func(l *listener) {
+			defer closing.Done()
+			l.closeWithin(ctx, shutdownTimeout)
+		}(l)
 	}
+	closing.Wait()
 	for _, s := range sites {
 		closeSite(s)
 	}

@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nunt/nunt/internal/logstore"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/netutil"
@@ -429,6 +430,7 @@ func (w *WAF) record(out outcome, ruleName string, r *http.Request, clientIP, ac
 		base.Message = truncate(out.Message, maxURILen)
 		base.RuleIDs = ids
 		w.rec.add(base)
+		w.persistEvent(base)
 		return
 	}
 	for i, hit := range out.Matched {
@@ -442,7 +444,29 @@ func (w *WAF) record(out outcome, ruleName string, r *http.Request, clientIP, ac
 		ev.Tags = hit.Tags
 		ev.RuleIDs = ids
 		w.rec.add(ev)
+		w.persistEvent(ev)
 	}
+}
+
+// persistEvent copies an interception to the persistent access log so it
+// survives a restart and can be filtered together with the other sources.
+func (w *WAF) persistEvent(ev Event) {
+	if w.deps == nil || w.deps.Logs == nil {
+		return
+	}
+	w.deps.Logs.Append(logstore.Entry{
+		Time:      ev.Time,
+		Source:    logstore.SourceWAF,
+		Rule:      ev.Rule,
+		Host:      ev.Host,
+		Method:    ev.Method,
+		Path:      ev.URI,
+		Status:    ev.Status,
+		ClientIP:  ev.ClientIP,
+		Result:    ev.Action,
+		WAFRuleID: ev.RuleID,
+		Message:   ev.Message,
+	})
 }
 
 // blockPage is a static page: no part of the request is echoed back, so a

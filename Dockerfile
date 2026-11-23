@@ -1,9 +1,17 @@
 # syntax=docker/dockerfile:1
 
+# Base images are build arguments so a deployment can pin a digest without
+# editing this file (and so CI can be told to rebuild against a patched base):
+#   docker build --build-arg ALPINE_IMAGE=alpine@sha256:... .
+# The tags below are the versions the project is tested against.
+ARG NODE_IMAGE=node:24-alpine
+ARG GO_IMAGE=golang:1.26.10-alpine
+ARG ALPINE_IMAGE=alpine:3.21
+
 # ---------------------------------------------------------------------------
 # web stage: build the React admin interface into internal/webui/assets
 # ---------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM node:24-alpine AS web
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS web
 
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
@@ -15,7 +23,7 @@ RUN npm run build
 # ---------------------------------------------------------------------------
 # build stage
 # ---------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS build
+FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS build
 
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
@@ -53,7 +61,21 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # ---------------------------------------------------------------------------
 # runtime stage
 # ---------------------------------------------------------------------------
-FROM alpine:3.21
+FROM ${ALPINE_IMAGE}
+
+# OCI metadata so `docker inspect` (and registry UIs) show what the image is,
+# which commit built it and where the source lives.
+ARG VERSION=dev
+ARG COMMIT=none
+ARG BUILDTIME=unknown
+LABEL org.opencontainers.image.title="nunt" \
+      org.opencontainers.image.description="Self hosted edge service: reverse proxy, redirects, static hosting, port forwarding, DDNS, ACME certificates and a Coraza WAF behind one admin UI" \
+      org.opencontainers.image.url="https://github.com/nunt/nunt" \
+      org.opencontainers.image.source="https://github.com/nunt/nunt" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}" \
+      org.opencontainers.image.created="${BUILDTIME}" \
+      org.opencontainers.image.licenses="MIT"
 
 RUN apk add --no-cache ca-certificates tzdata libcap su-exec \
  && addgroup -g 1000 -S nunt \
@@ -62,7 +84,12 @@ RUN apk add --no-cache ca-certificates tzdata libcap su-exec \
  && chown -R nunt:nunt /data
 
 COPY --from=build /out/nunt /usr/local/bin/nunt
-# Allow the unprivileged runtime user to bind ports 80 and 443.
+# Allow the unprivileged runtime user to bind ports 80 and 443 without a
+# capability on the container. Note that this is why the image cannot be run
+# with `security_opt: [no-new-privileges]`: that option stops file capabilities
+# from being applied, so binding 80/443 would fail. Use `cap_add:
+# [NET_BIND_SERVICE]` instead when the file capability is not available
+# (rootless Docker, Podman, --cap-drop=ALL).
 RUN setcap 'cap_net_bind_service=+ep' /usr/local/bin/nunt
 
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -70,22 +97,17 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 VOLUME ["/data"]
 EXPOSE 3113 80 443
-# The admin console port follows the same priority as the application:
-#   1. NUNT_ADMIN_PORT
-#   2. the port part of NUNT_ADMIN_LISTEN
-#   3. system.adminListen from the stored configuration (/data/config.json),
-#      which the settings page can change at runtime without a restart
-#   4. the built-in default (3113)
-# Reading the configuration file is what keeps the health check correct after
-# somebody moved the console from the settings page.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD port="${NUNT_ADMIN_PORT:-}"; \
-      if [ -z "$port" ] && [ -n "${NUNT_ADMIN_LISTEN:-}" ]; then port="${NUNT_ADMIN_LISTEN##*:}"; fi; \
-      if [ -z "$port" ] && [ -r /data/config.json ]; then \
-        port=$(sed -n 's/.*"adminListen"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /data/config.json | head -n 1 | sed 's/^.*://'); \
-      fi; \
-      [ -n "$port" ] || port=3113; \
-      wget -q -O /dev/null "http://127.0.0.1:${port}/healthz" || exit 1
+# Read by the entrypoint (data directory) and by the health check below.
+ENV DATA_DIR=/data
+# The check is a subcommand of the service itself: it resolves the admin
+# address with exactly the server precedence (NUNT_ADMIN_LISTEN >
+# NUNT_ADMIN_PORT > system.adminListen in /data/config.json > :3113) and calls
+# /healthz, so no shell, sed or wget is involved and a minified configuration
+# cannot break it.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD ["nunt", "healthcheck"]
+# The service handles SIGTERM itself and shuts down gracefully (15 s budget).
+STOPSIGNAL SIGTERM
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["nunt", "-d", "/data"]

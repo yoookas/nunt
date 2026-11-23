@@ -17,6 +17,7 @@ import (
 	"github.com/nunt/nunt/internal/config"
 	"github.com/nunt/nunt/internal/ip2region"
 	"github.com/nunt/nunt/internal/logging"
+	"github.com/nunt/nunt/internal/logstore"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/secret"
@@ -50,6 +51,7 @@ type App struct {
 	sessions    *security.SessionStore
 	api         *api.Server
 	admin       *adminlisten.Server
+	logStore    *logstore.Store
 
 	initialPassword string
 }
@@ -81,7 +83,11 @@ func New(opts Options) (*App, error) {
 	if level == "" {
 		level = cfg.Snapshot().System.LogLevel
 	}
-	hub := logging.New(level, filepath.Join(opts.DataDir, "logs", "nunt.log"))
+	appLog := cfg.Snapshot().Logs.App
+	hub := logging.NewWithOptions(level, filepath.Join(opts.DataDir, "logs", "nunt.log"), logging.Options{
+		MaxFileMB: appLog.MaxFileMB,
+		KeepFiles: appLog.KeepFiles,
+	})
 	logger := hub.Logger()
 
 	a := &App{
@@ -109,6 +115,20 @@ func New(opts Options) (*App, error) {
 		logger.Warn("ip2region: cannot load the database", "error", err)
 	}
 
+	// The persistent access log lives next to the process log. Opening it
+	// before the modules start means their very first request is recorded.
+	accessLog := cfg.Snapshot().Logs.Access
+	logStore, err := logstore.Open(filepath.Join(opts.DataDir, "logs", "access"), logstore.Options{
+		Persist:   accessLog.Persist,
+		KeepDays:  accessLog.KeepDays,
+		MaxFileMB: accessLog.MaxFileMB,
+	})
+	if err != nil {
+		hub.Close()
+		return nil, err
+	}
+	a.logStore = logStore
+
 	a.registry = module.NewRegistry()
 	deps := &module.Deps{
 		Cfg:      cfg,
@@ -118,6 +138,7 @@ func New(opts Options) (*App, error) {
 		DataDir:  opts.DataDir,
 		Registry: a.registry,
 		Geo:      a.geo,
+		Logs:     logStore,
 	}
 
 	// Registration order defines the start order: the WAF must exist before
@@ -149,6 +170,7 @@ func New(opts Options) (*App, error) {
 		Sessions: a.sessions,
 		DataDir:  opts.DataDir,
 		Geo:      a.geo,
+		Logs:     logStore,
 		Reload:   a.Reload,
 		AdminWAF: adminWAF,
 	})
@@ -163,6 +185,14 @@ func New(opts Options) (*App, error) {
 
 	cfg.Subscribe(func(c *model.Config) {
 		hub.SetLevel(c.System.LogLevel)
+		hub.SetLimits(logging.Options{MaxFileMB: c.Logs.App.MaxFileMB, KeepFiles: c.Logs.App.KeepFiles})
+		if a.logStore != nil {
+			a.logStore.Configure(logstore.Options{
+				Persist:   c.Logs.Access.Persist,
+				KeepDays:  c.Logs.Access.KeepDays,
+				MaxFileMB: c.Logs.Access.MaxFileMB,
+			})
+		}
 		a.api.BroadcastLogs()
 	})
 	return a, nil
@@ -177,6 +207,9 @@ func (a *App) Config() *config.Store { return a.cfg }
 
 // Logger returns the log hub.
 func (a *App) Logger() *logging.Hub { return a.log }
+
+// LogStore returns the persistent access log store.
+func (a *App) LogStore() *logstore.Store { return a.logStore }
 
 // Registry returns the module registry.
 func (a *App) Registry() *module.Registry { return a.registry }
@@ -238,6 +271,11 @@ func (a *App) Shutdown() {
 		}
 	}
 	a.registry.StopAll(ctx)
+	if a.logStore != nil {
+		if err := a.logStore.Close(); err != nil {
+			a.log.Logger().Warn("access log shutdown", "error", err)
+		}
+	}
 	a.sessions.Close()
 	a.log.Close()
 }

@@ -47,6 +47,7 @@ Set-Location D:\Desktop\nunt; go build ./...
 | `internal/security` | 安全原语 | `HashPassword/VerifyPassword`、`RandomToken`、`Limiter`、`RateLimiter` |
 | `internal/dnsprov` | DNS 提供商 | `Registry.New(id, creds)`、`Provider.Set/Delete`、`Default()` |
 | `internal/httpc.PublicIP` | 获取公网 IP | `PublicIP(ctx, "4"|"6", extraURLs)` |
+| `internal/logstore` | 访问日志落盘 | `Store.Append(logstore.Entry{Source: ...})`、`Query/Stats/Meta/Clear`；`module.Deps.Logs` 可能为 nil |
 
 模块构造签名统一为 `func New(deps *module.Deps) *X`，`X` 内嵌 `module.Base`，
 通过 `m.Init(deps, "<name>", "<Title>")` 初始化，并实现：

@@ -12,6 +12,7 @@ import (
 	"github.com/nunt/nunt/internal/certs"
 	"github.com/nunt/nunt/internal/config"
 	"github.com/nunt/nunt/internal/logging"
+	"github.com/nunt/nunt/internal/logstore"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/secret"
@@ -24,6 +25,7 @@ type testEnv struct {
 	server   *Server
 	store    *config.Store
 	sessions *security.SessionStore
+	logs     *logstore.Store
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -59,6 +61,20 @@ func newTestEnv(t *testing.T) *testEnv {
 	t.Cleanup(sessions.Close)
 	registry := module.NewRegistry()
 
+	logStore, err := logstore.Open(filepath.Join(dir, "logs", "access"), logstore.Options{
+		Persist:   true,
+		KeepDays:  7,
+		MaxFileMB: 16,
+	})
+	if err != nil {
+		t.Fatalf("log store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := logStore.Close(); err != nil {
+			t.Errorf("close log store: %v", err)
+		}
+	})
+
 	server := New(Options{
 		Cfg:      store,
 		Log:      hub,
@@ -67,11 +83,12 @@ func newTestEnv(t *testing.T) *testEnv {
 		Box:      box,
 		Sessions: sessions,
 		DataDir:  dir,
+		Logs:     logStore,
 	})
 	// Deferred writes (token usage) must not outlive the test: t.TempDir
 	// removal races with them on Windows ("the directory is not empty").
 	t.Cleanup(server.WaitBackground)
-	return &testEnv{server: server, store: store, sessions: sessions}
+	return &testEnv{server: server, store: store, sessions: sessions, logs: logStore}
 }
 
 func (e *testEnv) do(t *testing.T, method, path string, body any, cookies []*http.Cookie, headers map[string]string) *httptest.ResponseRecorder {

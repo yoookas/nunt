@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"strings"
@@ -14,14 +15,26 @@ import (
 	"github.com/nunt/nunt/internal/model"
 )
 
+// freePort reserves a port for a test that will bind it later.
+//
+// Asking the kernel for :0 hands back a port from the ephemeral range; another
+// package running in parallel can be given the same port the moment this
+// listener closes, which made the rebind tests flaky. Ports below the usual
+// ephemeral window (32768+) are not handed out by :0 and are still
+// unprivileged, so a bounded random search is both stable and portable.
 func freePort(t *testing.T) int {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("reserve port: %v", err)
+	for attempt := 0; attempt < 50; attempt++ {
+		port := 20000 + rand.IntN(12000)
+		ln, err := net.Listen("tcp", addrOf(port))
+		if err != nil {
+			continue
+		}
+		_ = ln.Close()
+		return port
 	}
-	defer func() { _ = ln.Close() }()
-	return ln.Addr().(*net.TCPAddr).Port
+	t.Fatal("no free port in 20000-31999")
+	return 0
 }
 
 func addrOf(port int) string { return fmt.Sprintf("127.0.0.1:%d", port) }

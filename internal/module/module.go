@@ -16,6 +16,7 @@ import (
 	"github.com/nunt/nunt/internal/config"
 	"github.com/nunt/nunt/internal/ip2region"
 	"github.com/nunt/nunt/internal/logging"
+	"github.com/nunt/nunt/internal/logstore"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/rest"
 	"github.com/nunt/nunt/internal/secret"
@@ -99,6 +100,9 @@ type Deps struct {
 	Box      *secret.Box
 	DataDir  string
 	Registry *Registry
+	// Logs is the persistent access log shared by the web, forward and WAF
+	// modules; it may be nil in tests.
+	Logs *logstore.Store
 	// Geo resolves the country/province of a client address; it may be nil in
 	// tests.
 	Geo *ip2region.Service

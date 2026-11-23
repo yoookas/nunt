@@ -916,7 +916,9 @@ export default function Waf() {
                   options={LOG_FILTER_OPTIONS}
                 />
               </div>
-              <div className="text-xs text-muted">每 10 秒自动刷新；日志只保存在内存中，重启后清空。</div>
+              <div className="text-xs text-muted">
+                每 10 秒自动刷新；本页只显示内存中最近 500 条，历史记录可在「日志 → 访问日志」中按来源 WAF 检索。
+              </div>
             </div>
             <DataTable
               items={logs}

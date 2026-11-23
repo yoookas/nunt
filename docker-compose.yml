@@ -21,7 +21,8 @@ services:
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       DATA_DIR: /data
-      # PUID/PGID 必须与宿主机 ./data 目录的属主一致
+      # 容器内进程的 uid/gid。建议与宿主机 ./data 的属主一致：不一致时入口脚本会
+      # 递归 chown 数据目录（元数据操作，很快），root 启动后立即降权到这两个值。
       PUID: "${PUID:-1000}"
       PGID: "${PGID:-1000}"
       # 管理后台监听地址。留空表示沿用 ./data/config.json 里的值（全新数据卷默认 3113）；
@@ -34,4 +35,20 @@ services:
       NUNT_ADMIN_LISTEN: "${NUNT_ADMIN_LISTEN:-}"
     volumes:
       - ./data:/data
-    # 镜像本身已声明 HEALTHCHECK，且会自动跟随环境变量与配置里的端口，这里无需覆盖。
+    # 服务收到 SIGTERM 后最多用 15 秒把进行中的请求收尾；给 docker 留一点余量，
+    # 否则默认 10 秒会直接 SIGKILL，长连接（WebSocket / SSE）会被硬断。
+    stop_grace_period: 20s
+    # 不限制的话 docker 的 json-file 日志会随进程输出无限增长（host 网络下也没法
+    # 靠外部日志驱动兜底）。访问日志有自己的文件轮转，这里管的是 stdout。
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # 镜像不需要额外的 capability：二进制带 cap_net_bind_service 文件能力，
+    # 进程以非 root 运行。因此不要加 security_opt: [no-new-privileges]，它会阻止
+    # 文件能力生效，导致 80/443 绑定失败；真要收紧就用 cap_add: [NET_BIND_SERVICE]
+    # 配合 cap_drop: [ALL]（见 docs/DEPLOY.md）。
+    #
+    # 镜像本身已声明 HEALTHCHECK（nunt healthcheck，自动跟随环境变量与配置里的端口），
+    # 这里无需覆盖。

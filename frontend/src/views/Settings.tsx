@@ -35,7 +35,6 @@ interface SystemForm {
   loginLockMinutes: number
   trustProxy: boolean
   sessionBindIp: boolean
-  checkUpdate: boolean
   theme: string
   adminAllowIps: string[]
   ip2regionDb: string
@@ -173,7 +172,6 @@ const EMPTY_SYSTEM: SystemForm = {
   loginLockMinutes: 10,
   trustProxy: false,
   sessionBindIp: false,
-  checkUpdate: false,
   theme: 'dark',
   adminAllowIps: [],
   ip2regionDb: '',
@@ -196,6 +194,28 @@ const EMPTY_IP2REGION: IP2RegionState = {
   saving: false,
   reloading: false,
   looking: false,
+}
+
+interface LogForm {
+  persist: boolean
+  keepDays: number
+  maxFileMb: number
+  appMaxFileMb: number
+  appKeepFiles: number
+}
+
+const EMPTY_LOG: LogForm = {
+  persist: true,
+  keepDays: 7,
+  maxFileMb: 64,
+  appMaxFileMb: 8,
+  appKeepFiles: 3,
+}
+
+interface LogFileRow {
+  name: string
+  size: number
+  modTime: string
 }
 
 function emptyList<T>(): ListState<T> {
@@ -313,6 +333,12 @@ export default function Settings() {
   /* ---- ip2region ---- */
   const [ip2region, setIp2region] = useState<IP2RegionState>(EMPTY_IP2REGION)
 
+  /* ---- logs ---- */
+  const [logForm, setLogForm] = useState<LogForm>(EMPTY_LOG)
+  const [logLoading, setLogLoading] = useState(false)
+  const [logSaving, setLogSaving] = useState(false)
+  const [logFiles, setLogFiles] = useState<LogFileRow[]>([])
+
   /* ---- users ---- */
   const [users, setUsers] = useState<UserListState>({ ...emptyList<UserRow>(), busyId: '' })
   const [userDialog, setUserDialog] = useState<{
@@ -399,7 +425,6 @@ export default function Settings() {
       loginLockMinutes: Number(data.loginLockMinutes) || 10,
       trustProxy: !!data.trustProxy,
       sessionBindIp: !!data.sessionBindIp,
-      checkUpdate: data.checkUpdate !== false,
       theme: data.theme || 'dark',
       adminAllowIps: toList(data.adminAllowIps),
       ip2regionDb: data.ip2regionDb || '',
@@ -460,6 +485,60 @@ export default function Settings() {
     }
   }
 
+  /* ---- logs ---- */
+
+  const loadLogs = async () => {
+    if (logLoading) return
+    setLogLoading(true)
+    try {
+      const [cfg, files] = await Promise.all([
+        api.get<any>('/api/v1/logs/config'),
+        api.get<LogFileRow[]>('/api/v1/system/logs/files').catch(() => []),
+      ])
+      setLogForm({
+        persist: cfg?.access?.persist !== false,
+        keepDays: Number(cfg?.access?.keepDays) || 7,
+        maxFileMb: Number(cfg?.access?.maxFileMb) || 64,
+        appMaxFileMb: Number(cfg?.app?.maxFileMb) || 8,
+        appKeepFiles: Number(cfg?.app?.keepFiles) || 3,
+      })
+      setLogFiles(Array.isArray(files) ? files : [])
+    } catch (err) {
+      toast.danger(errorText(err))
+    } finally {
+      setLogLoading(false)
+    }
+  }
+
+  const saveLogs = async () => {
+    const rules: [number, number, number, string][] = [
+      [logForm.keepDays, 1, 365, '访问日志保留天数需要在 1–365 之间'],
+      [logForm.maxFileMb, 1, 1024, '访问日志单文件上限需要在 1–1024 MB 之间'],
+      [logForm.appMaxFileMb, 1, 1024, '运行日志单文件上限需要在 1–1024 MB 之间'],
+      [logForm.appKeepFiles, 1, 10, '运行日志保留份数需要在 1–10 之间'],
+    ]
+    for (const [value, min, max, message] of rules) {
+      const number = Number(value)
+      if (!Number.isFinite(number) || number < min || number > max) {
+        toast.warning(message)
+        return
+      }
+    }
+    setLogSaving(true)
+    try {
+      await api.put('/api/v1/logs/config', {
+        access: { persist: logForm.persist, keepDays: logForm.keepDays, maxFileMb: logForm.maxFileMb },
+        app: { maxFileMb: logForm.appMaxFileMb, keepFiles: logForm.appKeepFiles },
+      })
+      toast.success('日志设置已保存')
+      void loadLogs()
+    } catch (err) {
+      toast.danger(errorText(err))
+    } finally {
+      setLogSaving(false)
+    }
+  }
+
   const validateNumbers = (): boolean => {
     const rules: [number, number, number, string][] = [
       [system.sessionTtlHours, 1, 720, '会话有效期需要在 1–720 小时之间'],
@@ -488,7 +567,6 @@ export default function Settings() {
       loginMaxFail: Number(system.loginMaxFail),
       loginLockMinutes: Number(system.loginLockMinutes),
       theme: system.theme || 'dark',
-      checkUpdate: !!system.checkUpdate,
       baseUrl: String(system.baseUrl || '').trim(),
       ip2regionDb: String(system.ip2regionDb || '').trim(),
     }
@@ -970,7 +1048,8 @@ export default function Settings() {
   }, [])
 
   useEffect(() => {
-    if (tab === 'users') void loadUsers()
+    if (tab === 'logs') void loadLogs()
+    else if (tab === 'users') void loadUsers()
     else if (tab === 'tokens') void loadTokens()
     else if (tab === 'sessions') void loadSessions()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1147,6 +1226,7 @@ export default function Settings() {
         <Tabs.ListContainer>
           <Tabs.List aria-label="设置分类">
             <Tabs.Tab id="system">系统</Tabs.Tab>
+            <Tabs.Tab id="logs">日志</Tabs.Tab>
             <Tabs.Tab id="users">用户</Tabs.Tab>
             <Tabs.Tab id="tokens">Token</Tabs.Tab>
             <Tabs.Tab id="sessions">会话</Tabs.Tab>
@@ -1265,13 +1345,6 @@ export default function Settings() {
                       onChange={(value) => setSystem((prev) => ({ ...prev, sessionBindIp: value }))}
                       hint="开启后会话只能从登录时的地址使用（移动网络会频繁重登）；User-Agent 始终校验"
                     />
-                    <SwitchInput
-                      label="检查更新"
-                      value={system.checkUpdate}
-                      onChange={(value) => setSystem((prev) => ({ ...prev, checkUpdate: value }))}
-                      hint="启动时检查新版本"
-                    />
-
                     <div className="md:col-span-2">
                       <TagInput
                         label="管理后台 IP 白名单"
@@ -1367,6 +1440,104 @@ export default function Settings() {
                 <div className="mt-2 text-xs leading-6 text-muted">
                   省份按 ip2region 返回结果匹配，配置时可写「浙江」或「浙江省」；私有地址与 IPv6 不参与地理匹配。
                 </div>
+              </div>
+            </Panel>
+          </div>
+        </Tabs.Panel>
+
+        {/* ------------------------------------------------------------------ */}
+        <Tabs.Panel id="logs">
+          <div className="space-y-5 pt-4">
+            <Panel
+              title="访问日志（Web / 端口转发 / WAF）"
+              extra={
+                <Button variant="primary" isDisabled={logSaving || logLoading} onPress={() => void saveLogs()}>
+                  {logSaving ? '保存中…' : '保存'}
+                </Button>
+              }
+            >
+              <div className="grid gap-4 p-4 md:grid-cols-3">
+                <SwitchInput
+                  label="写入磁盘"
+                  value={logForm.persist}
+                  onChange={(value) => setLogForm((prev) => ({ ...prev, persist: value }))}
+                  hint="关闭后只保留内存缓冲，重启即丢失；已有文件不会被删除。"
+                />
+                <NumberInput
+                  label="保留天数"
+                  value={logForm.keepDays}
+                  onChange={(value) => setLogForm((prev) => ({ ...prev, keepDays: value }))}
+                  min={1}
+                  max={365}
+                  hint="超期的日志文件会在启动时与每小时清理一次。"
+                />
+                <NumberInput
+                  label="单文件上限（MB）"
+                  value={logForm.maxFileMb}
+                  onChange={(value) => setLogForm((prev) => ({ ...prev, maxFileMb: value }))}
+                  min={1}
+                  max={1024}
+                  hint="超过后当天会滚动到新的序号文件。"
+                />
+              </div>
+              <div className="border-t border-border px-4 py-3 text-xs leading-6 text-muted">
+                记录会同时进入各模块的内存缓冲（页面右上角的实时弹窗）与磁盘。可在「日志 → 访问日志」中按来源、状态、IP 与关键字检索并导出 CSV。
+              </div>
+            </Panel>
+
+            <Panel
+              title="运行日志文件"
+              extra={
+                <Button variant="secondary" isDisabled={logLoading} onPress={() => void loadLogs()}>
+                  刷新
+                </Button>
+              }
+            >
+              <div className="grid gap-4 p-4 md:grid-cols-3">
+                <NumberInput
+                  label="单文件上限（MB）"
+                  value={logForm.appMaxFileMb}
+                  onChange={(value) => setLogForm((prev) => ({ ...prev, appMaxFileMb: value }))}
+                  min={1}
+                  max={1024}
+                />
+                <NumberInput
+                  label="保留份数"
+                  value={logForm.appKeepFiles}
+                  onChange={(value) => setLogForm((prev) => ({ ...prev, appKeepFiles: value }))}
+                  min={1}
+                  max={10}
+                  hint="轮转后的 nunt.log.1…n 保留几份。"
+                />
+              </div>
+              <div className="border-t border-border">
+                <DataTable
+                  items={logFiles}
+                  ariaLabel="运行日志文件"
+                  rowKey={(row) => row.name}
+                  empty="还没有运行日志文件"
+                  columns={[
+                    { key: 'name', title: '文件', render: (row) => <span className="mono text-xs">{row.name}</span> },
+                    { key: 'size', title: '大小', render: (row) => <span className="text-xs text-muted">{fmtBytes(row.size)}</span> },
+                    {
+                      key: 'time',
+                      title: '修改时间',
+                      render: (row) => <span className="text-xs text-muted">{fmtTime(row.modTime)}</span>,
+                    },
+                    {
+                      key: 'download',
+                      title: '操作',
+                      render: (row) => (
+                        <a
+                          className="text-xs text-link underline"
+                          href={`/api/v1/system/logs/download?name=${encodeURIComponent(row.name)}`}
+                        >
+                          下载
+                        </a>
+                      ),
+                    },
+                  ]}
+                />
               </div>
             </Panel>
           </div>
