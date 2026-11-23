@@ -290,3 +290,30 @@ NUNT_IMAGE=nunt:v1.0.1 docker compose up -d
 ```
 
 配置格式带版本号（`version` 字段），升级时会自动补齐新增字段与默认值；跨大版本升级前建议备份数据目录。
+
+## 10. 监控（Prometheus）
+
+`GET /metrics` 输出 Prometheus 文本格式，**与后台同一套鉴权**：只能用 API Token 抓取（会话 cookie 不行，
+`/metrics` 也不对匿名请求开放）。在「设置 → API Token」建一个只读 Token，然后：
+
+```yaml
+scrape_configs:
+  - job_name: nunt
+    authorization:
+      credentials: <只读 API Token>
+    static_configs:
+      - targets: ["192.168.1.2:3113"]
+```
+
+指标：`nunt_up`、`nunt_uptime_seconds`、`nunt_build_info`、`nunt_web_rules`、`nunt_forward_rules`、
+`nunt_module_up{module=...}`、`nunt_certificates`、`nunt_certificate_expiry_timestamp_seconds{id=...}`、
+`nunt_access_log_written_total`、`nunt_access_log_dropped_total`、`nunt_access_log_bytes`。
+
+证书到期可以直接做成告警：
+
+```yaml
+- alert: NunTCertificateExpiring
+  expr: nunt_certificate_expiry_timestamp_seconds - time() < 7 * 86400
+  annotations:
+    summary: "nunt 证书 {{ $labels.id }} 将在 7 天内过期"
+```

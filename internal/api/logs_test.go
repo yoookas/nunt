@@ -251,3 +251,27 @@ func TestAccessLogSeries(t *testing.T) {
 		t.Fatalf("huge range = %d, want 400", rec.Code)
 	}
 }
+
+func TestMetricsEndpoint(t *testing.T) {
+	env := newTestEnv(t)
+
+	rec := env.do(t, http.MethodGet, "/metrics", nil, nil, nil)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated metrics = %d, want 401", rec.Code)
+	}
+
+	cookies, _ := login(t, env)
+	rec = env.do(t, http.MethodGet, "/metrics", nil, cookies, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("metrics = %d: %s", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain; version=0.0.4") {
+		t.Fatalf("content type = %q", ct)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"nunt_up 1", "# TYPE nunt_module_up gauge", "nunt_build_info"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics body is missing %q:\n%s", want, body)
+		}
+	}
+}

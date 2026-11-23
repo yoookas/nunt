@@ -140,6 +140,9 @@ func (s *Server) Handler() http.Handler {
 		apiHandler = s.opts.AdminWAF(apiHandler)
 	}
 	root.Handle("/api/", apiHandler)
+	// Metrics live outside /api but behind the same authentication, so a
+	// scraper needs a read-only API token instead of the admin session cookie.
+	root.Handle("/metrics", apiHandler)
 	root.Handle("/healthz", http.HandlerFunc(s.health))
 	root.Handle("/", rest.Chain(webui.Handler(), rest.SecurityHeaders()))
 	// The IP allow list guards the complete admin surface, including the sign
@@ -401,6 +404,7 @@ func (s *Server) register() {
 	s.registerSystem()
 	s.registerSystemHealth()
 	s.registerBackup()
+	s.mux.Get("/metrics", s.handleMetrics)
 	s.registerLogs()
 	s.registerModules()
 	s.registerEvents()
