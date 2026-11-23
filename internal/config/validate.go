@@ -206,6 +206,13 @@ func Validate(c *model.Config) error {
 	if len(c.Users) == 0 {
 		return fmt.Errorf("at least one administrator account is required")
 	}
+	for _, u := range c.Users {
+		// A factor that is on but has no seed can never be verified: refuse to
+		// persist it instead of locking the only administrator out later.
+		if u.TOTP.Enabled && strings.TrimSpace(u.TOTP.Secret) == "" {
+			return fmt.Errorf("user %q: TOTP is enabled without a secret", displayName(u.Username, u.ID))
+		}
+	}
 	listeners, err := validateWebListeners(c.Web.Listeners)
 	if err != nil {
 		return err

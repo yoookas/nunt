@@ -400,6 +400,12 @@ func (s *Server) handleImportConfig(w http.ResponseWriter, r *http.Request) {
 func maskConfigSecrets(cfg *model.Config) {
 	for i := range cfg.Users {
 		cfg.Users[i].PasswordHash = ""
+		// The TOTP seed is as sensitive as a password: an export must never
+		// contain a usable one. Recovery codes are one time credentials too.
+		if cfg.Users[i].TOTP.Secret != "" {
+			cfg.Users[i].TOTP.Secret = maskSentinel
+		}
+		cfg.Users[i].TOTP.Codes = nil
 	}
 	cfg.Tokens = nil
 	for i := range cfg.DDNS.Rules {
@@ -448,6 +454,29 @@ func restoreSecrets(old, next *model.Config) {
 		for k, v := range j.DNSCreds {
 			if isMasked(v) && prev != nil {
 				j.DNSCreds[k] = prev[k]
+			}
+		}
+	}
+
+	// TOTP seeds are masked in exports, so an import that carries the mask (or
+	// nothing) for a known user keeps the stored seed instead of wiping the
+	// factor. The enabled flag always comes from the imported document.
+	oldTOTP := map[string]model.TOTP{}
+	for _, u := range old.Users {
+		oldTOTP[u.ID] = u.TOTP
+	}
+	for i := range next.Users {
+		u := &next.Users[i]
+		prev, ok := oldTOTP[u.ID]
+		if !ok || prev.Secret == "" {
+			continue
+		}
+		if u.TOTP.Secret == "" || isMasked(u.TOTP.Secret) {
+			u.TOTP.Secret = prev.Secret
+			u.TOTP.Codes = prev.Codes
+			u.TOTP.LastStep = prev.LastStep
+			if u.TOTP.EnrolledAt == nil {
+				u.TOTP.EnrolledAt = prev.EnrolledAt
 			}
 		}
 	}

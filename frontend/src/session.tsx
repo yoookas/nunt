@@ -5,12 +5,28 @@ export interface AuthUser {
   username: string
   csrf: string
   mustChangePassword: boolean
+  totpEnabled?: boolean
+  recoveryCodesLeft?: number
+}
+
+// The password step of a two factor login: no session exists yet, only a short
+// lived challenge that has to be exchanged for one.
+export interface TOTPChallenge {
+  totpRequired: true
+  challenge: string
+}
+
+export type LoginResult = AuthUser | TOTPChallenge
+
+export function isTOTPChallenge(result: LoginResult): result is TOTPChallenge {
+  return (result as TOTPChallenge).totpRequired === true
 }
 
 interface AuthContextValue {
   user: AuthUser | null
   ready: boolean
-  login: (username: string, password: string) => Promise<AuthUser>
+  login: (username: string, password: string) => Promise<LoginResult>
+  loginTOTP: (challenge: string, code: string) => Promise<AuthUser>
   logout: () => Promise<void>
   changePassword: (current: string, next: string) => Promise<void>
 }
@@ -22,6 +38,8 @@ function applySession(data: any): AuthUser {
     username: data?.username || '',
     csrf: data?.csrf || '',
     mustChangePassword: !!data?.mustChangePassword,
+    totpEnabled: !!data?.totpEnabled,
+    recoveryCodesLeft: Number(data?.recoveryCodesLeft) || 0,
   }
   setCSRF(user.csrf)
   return user
@@ -60,6 +78,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (username: string, password: string) => {
     const data = await api.post('/api/v1/auth/login', { username, password })
+    if (data?.totpRequired) {
+      // No session yet: the caller has to collect the second factor.
+      return { totpRequired: true as const, challenge: String(data.challenge || '') }
+    }
+    const next = applySession(data)
+    setUser(next)
+    return next
+  }, [])
+
+  const loginTOTP = useCallback(async (challenge: string, code: string) => {
+    const data = await api.post('/api/v1/auth/login/totp', { challenge, code })
     const next = applySession(data)
     setUser(next)
     return next
@@ -80,8 +109,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo(
-    () => ({ user, ready, login, logout, changePassword }),
-    [user, ready, login, logout, changePassword],
+    () => ({ user, ready, login, loginTOTP, logout, changePassword }),
+    [user, ready, login, loginTOTP, logout, changePassword],
   )
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

@@ -2,29 +2,43 @@ import { useEffect, useState } from 'react'
 import { Button, Card, Typography } from '@heroui/react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { errorText } from '../api'
-import { useAuth } from '../session'
+import { isTOTPChallenge, useAuth, type AuthUser } from '../session'
 import { TextInput, toast } from '../ui'
 
 export default function Login() {
-  const { user, ready, login } = useAuth()
+  const { user, ready, login, loginTOTP } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [challenge, setChallenge] = useState('')
+  const [code, setCode] = useState('')
+  const [recovery, setRecovery] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
+  const from = String((location.state as any)?.from || '/')
+
   useEffect(() => {
     if (ready && user && !user.mustChangePassword) {
-      navigate(String((location.state as any)?.from || '/'), { replace: true })
+      navigate(from, { replace: true })
     }
-  }, [ready, user, navigate, location.state])
+  }, [ready, user, navigate, from])
 
   if (ready && user) {
     return <Navigate to={user.mustChangePassword ? '/password' : '/'} replace />
   }
 
-  const submit = async (event: React.FormEvent) => {
+  const afterLogin = (next: AuthUser) => {
+    if (next.mustChangePassword) {
+      toast.warning('首次登录，请先修改初始密码')
+      navigate('/password', { replace: true })
+      return
+    }
+    navigate(from, { replace: true })
+  }
+
+  const submitPassword = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!username.trim() || !password) {
       setError('请输入用户名和密码')
@@ -33,13 +47,16 @@ export default function Login() {
     setBusy(true)
     setError('')
     try {
-      const next = await login(username.trim(), password)
-      if (next.mustChangePassword) {
-        toast.warning('首次登录，请先修改初始密码')
-        navigate('/password', { replace: true })
-      } else {
-        navigate(String((location.state as any)?.from || '/'), { replace: true })
+      const result = await login(username.trim(), password)
+      if (isTOTPChallenge(result)) {
+        // The password was right but a second factor is required: keep the
+        // challenge and ask for the code instead of navigating away.
+        setChallenge(result.challenge)
+        setPassword('')
+        setCode('')
+        return
       }
+      afterLogin(result)
     } catch (err) {
       setError(errorText(err))
       toast.danger(errorText(err))
@@ -47,6 +64,34 @@ export default function Login() {
       setBusy(false)
     }
   }
+
+  const submitCode = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!code.trim()) {
+      setError(recovery ? '请输入恢复码' : '请输入验证码')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      const next = await loginTOTP(challenge, code.trim())
+      afterLogin(next)
+    } catch (err) {
+      setError(errorText(err))
+      setCode('')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const back = () => {
+    setChallenge('')
+    setCode('')
+    setError('')
+    setRecovery(false)
+  }
+
+  const secondStep = challenge !== ''
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
@@ -61,25 +106,63 @@ export default function Login() {
                 nunt
               </Typography.Heading>
               <Typography.Paragraph className="text-xs text-muted">
-                登录到管理后台
+                {secondStep ? '两步验证' : '登录到管理后台'}
               </Typography.Paragraph>
             </div>
           </div>
-          <form onSubmit={submit} className="space-y-5">
-            <TextInput label="用户名" value={username} onChange={setUsername} placeholder="admin" required />
-            <TextInput
-              label="密码"
-              type="password"
-              value={password}
-              onChange={setPassword}
-              placeholder="密码"
-              required
-            />
-            {error ? <div className="text-sm text-danger">{error}</div> : null}
-            <Button type="submit" variant="primary" fullWidth isDisabled={busy}>
-              {busy ? '登录中…' : '登录'}
-            </Button>
-          </form>
+
+          {secondStep ? (
+            <form onSubmit={submitCode} className="space-y-5">
+              <Typography.Paragraph className="text-xs leading-5 text-muted">
+                {recovery
+                  ? '输入一枚未使用的恢复码（形如 xxxxx-xxxxx）。每枚只能用一次。'
+                  : '输入验证器应用里当前显示的 6 位验证码。'}
+              </Typography.Paragraph>
+              <TextInput
+                label={recovery ? '恢复码' : '验证码'}
+                value={code}
+                onChange={setCode}
+                placeholder={recovery ? 'xxxxx-xxxxx' : '000000'}
+                required
+              />
+              {error ? <div className="text-sm text-danger">{error}</div> : null}
+              <Button type="submit" variant="primary" fullWidth isDisabled={busy}>
+                {busy ? '验证中…' : '验证并登录'}
+              </Button>
+              <div className="flex items-center justify-between text-xs">
+                <button
+                  type="button"
+                  className="text-link underline"
+                  onClick={() => {
+                    setRecovery((prev) => !prev)
+                    setCode('')
+                    setError('')
+                  }}
+                >
+                  {recovery ? '改用验证码' : '改用恢复码'}
+                </button>
+                <button type="button" className="text-muted underline" onClick={back}>
+                  返回
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={submitPassword} className="space-y-5">
+              <TextInput label="用户名" value={username} onChange={setUsername} placeholder="admin" required />
+              <TextInput
+                label="密码"
+                type="password"
+                value={password}
+                onChange={setPassword}
+                placeholder="密码"
+                required
+              />
+              {error ? <div className="text-sm text-danger">{error}</div> : null}
+              <Button type="submit" variant="primary" fullWidth isDisabled={busy}>
+                {busy ? '登录中…' : '登录'}
+              </Button>
+            </form>
+          )}
         </Card.Content>
       </Card>
     </div>

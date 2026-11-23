@@ -59,7 +59,11 @@ type Server struct {
 	loginLimiter *security.Limiter
 	apiLimiter   *security.RateLimiter
 	events       *eventHub
-	logOnce      sync.Once
+	// totpChallenges are the pending second factor logins (password accepted,
+	// code not yet verified). totpPending holds half finished enrollments.
+	totpChallenges *security.ChallengeStore
+	totpPending    *totpPendingStore
+	logOnce        sync.Once
 	// allowList caches the parsed admin IP allow list and allowDenied counts
 	// the requests that the allow list guard rejected.
 	allowList   atomic.Pointer[ipAllowList]
@@ -104,11 +108,13 @@ func (s *Server) goBackground(fn func()) {
 func New(opts Options) *Server {
 	log := opts.Log.Logger().With("component", "api")
 	s := &Server{
-		opts:         opts,
-		log:          log,
-		loginLimiter: security.NewLimiter(opts.Cfg.Snapshot().System.LoginMaxFail, time.Duration(opts.Cfg.Snapshot().System.LoginLockMin)*time.Minute, 30*time.Minute),
-		apiLimiter:   security.NewRateLimiter(50, 100),
-		events:       newEventHub(),
+		opts:           opts,
+		log:            log,
+		loginLimiter:   security.NewLimiter(opts.Cfg.Snapshot().System.LoginMaxFail, time.Duration(opts.Cfg.Snapshot().System.LoginLockMin)*time.Minute, 30*time.Minute),
+		apiLimiter:     security.NewRateLimiter(50, 100),
+		events:         newEventHub(),
+		totpChallenges: security.NewChallengeStore(totpChallengeTTL),
+		totpPending:    newTOTPPendingStore(),
 	}
 	// The admin IP allow list is parsed once here and refreshed by the
 	// configuration subscriber, never on the request path.

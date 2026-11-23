@@ -20,9 +20,15 @@ func hashTokenValue(token string) string {
 func (s *Server) registerAuth() {
 	g := s.mux.Group("/api/v1/auth")
 	g.Public().Post("/login", s.handleLogin)
+	g.Public().Post("/login/totp", s.handleLoginTOTP)
 	g.Post("/logout", s.handleLogout)
 	g.Get("/session", s.handleSession)
 	g.Post("/password", s.handleChangePassword)
+
+	g.Post("/totp/setup", s.handleTOTPSetup)
+	g.Post("/totp/confirm", s.handleTOTPConfirm)
+	g.Post("/totp/disable", s.handleTOTPDisable)
+	g.Post("/totp/recovery", s.handleTOTPNewRecoveryCodes)
 
 	g.Get("/users", s.handleListUsers)
 	g.Post("/users", s.handleCreateUser)
@@ -70,6 +76,28 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	s.loginLimiter.Reset(limitKey)
 
+	// The password is correct, but a second factor is required: hand out a
+	// short lived challenge instead of a session. No cookie is set here.
+	if user.TOTP.Enabled {
+		challenge, err := s.totpChallenges.Issue(user.ID, ip, r.UserAgent())
+		if err != nil {
+			rest.Fail(w, http.StatusInternalServerError, "无法开始二次验证：%s", err)
+			return
+		}
+		rest.OK(w, map[string]any{
+			"totpRequired": true,
+			"challenge":    challenge.Token,
+			"expiresAt":    challenge.ExpiresAt,
+		})
+		return
+	}
+
+	s.startSession(w, r, user, ip)
+}
+
+// startSession creates the session, sets the cookie and writes the login
+// response. The single factor login and the second factor login both end here.
+func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user *model.User, ip string) {
 	cfg := s.opts.Cfg.Snapshot()
 	ttl := time.Duration(cfg.System.SessionTTLHours) * time.Hour
 	sess, token, err := s.opts.Sessions.Create(user.ID, user.Username, ip, r.UserAgent(), ttl)
@@ -128,11 +156,15 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg := s.opts.Cfg.Snapshot()
 	mustChange := false
+	totpEnabled := false
+	recoveryLeft := 0
 	username := id.Username
 	for _, u := range cfg.Users {
 		if u.ID == id.UserID {
 			mustChange = u.MustChangePassword
 			username = u.Username
+			totpEnabled = u.TOTP.Enabled
+			recoveryLeft = len(u.TOTP.Codes)
 			break
 		}
 	}
@@ -141,6 +173,8 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		"username":           username,
 		"csrf":               id.CSRF,
 		"mustChangePassword": mustChange,
+		"totpEnabled":        totpEnabled,
+		"recoveryCodesLeft":  recoveryLeft,
 		"admin":              isAdmin(r),
 	})
 }

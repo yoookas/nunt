@@ -3,6 +3,7 @@ import { Alert, Button, Switch, Tabs } from '@heroui/react'
 import { api, errorText } from '../api'
 import { fmtBytes, fmtTime } from '../format'
 import { useAuth } from '../session'
+import TotpPanel from './settings/TotpPanel'
 import { useTheme } from '../theme'
 import {
   ConfirmModal,
@@ -1227,6 +1228,7 @@ export default function Settings() {
           <Tabs.List aria-label="设置分类">
             <Tabs.Tab id="system">系统</Tabs.Tab>
             <Tabs.Tab id="logs">日志</Tabs.Tab>
+            <Tabs.Tab id="security">安全</Tabs.Tab>
             <Tabs.Tab id="users">用户</Tabs.Tab>
             <Tabs.Tab id="tokens">Token</Tabs.Tab>
             <Tabs.Tab id="sessions">会话</Tabs.Tab>
@@ -1540,6 +1542,13 @@ export default function Settings() {
                 />
               </div>
             </Panel>
+          </div>
+        </Tabs.Panel>
+
+        {/* ------------------------------------------------------------------ */}
+        <Tabs.Panel id="security">
+          <div className="space-y-5 pt-4">
+            <TotpPanel />
           </div>
         </Tabs.Panel>
 

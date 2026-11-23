@@ -101,6 +101,22 @@ type User struct {
 	MustChangePassword bool       `json:"mustChangePassword"`
 	CreatedAt          time.Time  `json:"createdAt"`
 	LastLogin          *time.Time `json:"lastLogin,omitempty"`
+	TOTP               TOTP       `json:"totp,omitempty"`
+}
+
+// TOTP is the second factor of one account. The secret is sealed with the
+// deployment key before it is written, so config.json never holds a usable
+// seed; the recovery codes are stored as SHA-256 hashes.
+type TOTP struct {
+	Enabled bool   `json:"enabled"`
+	Secret  string `json:"secret,omitempty"`
+	// Codes are one-time recovery codes (SHA-256 hex), each removed on use.
+	Codes []string `json:"codes,omitempty"`
+	// EnrolledAt records when the factor was confirmed.
+	EnrolledAt *time.Time `json:"enrolledAt,omitempty"`
+	// LastStep is the last accepted time step, which makes a code single use
+	// even inside its 30 second window.
+	LastStep int64 `json:"lastStep,omitempty"`
 }
 
 // APIToken is an open API credential (the plain token is shown once).
