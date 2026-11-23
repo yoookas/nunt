@@ -17,7 +17,6 @@ import (
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/mounts"
-	"github.com/nunt/nunt/internal/secret"
 	"github.com/nunt/nunt/internal/security"
 	"github.com/nunt/nunt/internal/vfs"
 )
@@ -917,13 +916,9 @@ func TestModuleStartServesAndStopCloses(t *testing.T) {
 	}
 
 	store := testConfigStoreWithListener(t, testListener("l1", []string{addr}, model.TLSModeOff), raw)
-	box, err := secret.Open(filepath.Join(filepath.Dir(store.Path()), "secret.key"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	deps := &module.Deps{
 		Cfg:      store,
-		Mounts:   mounts.New(store, box, nil),
+		Mounts:   mounts.New(store),
 		DataDir:  filepath.Dir(store.Path()),
 		Registry: module.NewRegistry(),
 	}
@@ -1020,13 +1015,9 @@ func TestModuleReloadReplacesListeners(t *testing.T) {
 	rule.Static = &model.StaticTgt{Root: t.TempDir()}
 
 	store := testConfigStoreWithListener(t, testListener("l1", []string{first}, model.TLSModeOff), rule)
-	box, err := secret.Open(filepath.Join(filepath.Dir(store.Path()), "secret.key"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	deps := &module.Deps{
 		Cfg:      store,
-		Mounts:   mounts.New(store, box, nil),
+		Mounts:   mounts.New(store),
 		DataDir:  filepath.Dir(store.Path()),
 		Registry: module.NewRegistry(),
 	}
@@ -1075,13 +1066,9 @@ func TestModuleReloadReplacesListeners(t *testing.T) {
 
 func TestModuleRuleValidation(t *testing.T) {
 	store := testConfigStore(t)
-	box, err := secret.Open(filepath.Join(filepath.Dir(store.Path()), "secret.key"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	deps := &module.Deps{
 		Cfg:      store,
-		Mounts:   mounts.New(store, box, nil),
+		Mounts:   mounts.New(store),
 		DataDir:  filepath.Dir(store.Path()),
 		Registry: module.NewRegistry(),
 	}

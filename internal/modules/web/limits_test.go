@@ -20,7 +20,6 @@ import (
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/mounts"
-	"github.com/nunt/nunt/internal/secret"
 )
 
 // ---------------------------------------------------------------------------
@@ -32,13 +31,9 @@ import (
 func newTestModule(t *testing.T, listener model.WebListener, rules ...model.WebRule) *Web {
 	t.Helper()
 	store := testConfigStoreWithListener(t, listener, rules...)
-	box, err := secret.Open(filepath.Join(filepath.Dir(store.Path()), "secret.key"))
-	if err != nil {
-		t.Fatalf("secret: %v", err)
-	}
 	deps := &module.Deps{
 		Cfg:      store,
-		Mounts:   mounts.New(store, box, nil),
+		Mounts:   mounts.New(store),
 		DataDir:  filepath.Dir(store.Path()),
 		Registry: module.NewRegistry(),
 	}

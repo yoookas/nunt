@@ -15,7 +15,6 @@ import (
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/mounts"
-	"github.com/nunt/nunt/internal/secret"
 )
 
 // wsEchoUpstream answers the upgrade handshake by hand and then echoes every
@@ -59,13 +58,9 @@ func TestWebSocketUpgradeIsProxied(t *testing.T) {
 	rule.WAF = true
 
 	store := testConfigStoreWithListener(t, testListener("l1", []string{addr}, model.TLSModeOff), rule)
-	box, err := secret.Open(filepath.Join(filepath.Dir(store.Path()), "secret.key"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	deps := &module.Deps{
 		Cfg:      store,
-		Mounts:   mounts.New(store, box, nil),
+		Mounts:   mounts.New(store),
 		DataDir:  filepath.Dir(store.Path()),
 		Registry: module.NewRegistry(),
 	}

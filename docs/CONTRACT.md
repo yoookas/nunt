@@ -91,7 +91,6 @@ Lucky v1.10.8 源码（Go module 缓存里已下载好）：
 | B | `internal/modules/forward` | TCP/UDP 端口转发（连接计数、访问控制、日志） |
 | C | `internal/modules/ddns`、`internal/dnsprov/*` | DDNS 规则调度、公网 IP 探测（网卡/URL/静态）、自定义回调、各家 DNS 提供商 |
 | D | `internal/modules/acme` | ACME 账号与订单（`golang.org/x/crypto/acme`）、http-01 / dns-01、证书入库、续期循环 |
-| E | `internal/mounts/webdav.go` | 远程 WebDAV 挂载后端（供静态托管的存储使用） |
 | F | `internal/modules/waf` | Coraza v3 引擎、CRS 内置规则、自定义规则、按规则开关、拦截统计与日志、管理接口 |
 | G/H | `frontend/` 与 `internal/webui/assets` | React 19 + HeroUI 管理界面（构建产物提交） |
 

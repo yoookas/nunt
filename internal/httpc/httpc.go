@@ -1,5 +1,5 @@
 // Package httpc builds the outbound HTTP clients used by DDNS providers,
-// ACME, notifications and webdav mounts.
+// ACME and DNS providers.
 package httpc
 
 import (

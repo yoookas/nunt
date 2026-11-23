@@ -28,7 +28,6 @@ import (
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/modules/waf"
 	"github.com/nunt/nunt/internal/mounts"
-	"github.com/nunt/nunt/internal/secret"
 )
 
 // testDeps wires the minimum a web module needs. The firewall is registered
@@ -36,10 +35,6 @@ import (
 // web module shares the instance of the registry instead of building its own.
 func testDeps(t *testing.T, store *config.Store) *module.Deps {
 	t.Helper()
-	box, err := secret.Open(filepath.Join(filepath.Dir(store.Path()), "secret.key"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	certStore, err := certs.Open(filepath.Join(filepath.Dir(store.Path()), "certs"))
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +42,7 @@ func testDeps(t *testing.T, store *config.Store) *module.Deps {
 	deps := &module.Deps{
 		Cfg:      store,
 		Certs:    certStore,
-		Mounts:   mounts.New(store, box, nil),
+		Mounts:   mounts.New(store),
 		DataDir:  filepath.Dir(store.Path()),
 		Registry: module.NewRegistry(),
 	}

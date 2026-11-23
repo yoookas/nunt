@@ -105,7 +105,7 @@ func New(opts Options) (*App, error) {
 		return nil, err
 	}
 	a.certs = certStore
-	a.mounts = mounts.New(cfg, box, logger.With("component", "mounts"))
+	a.mounts = mounts.New(cfg)
 	a.sessions = security.NewSessionStore()
 	a.geo = ip2region.New()
 	if err := a.geo.Configure(cfg.Snapshot().System.IP2RegionDB); err != nil {

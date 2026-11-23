@@ -416,11 +416,6 @@ func maskConfigSecrets(cfg *model.Config) {
 			cfg.ACME.Jobs[i].DNSCreds[k] = secret.Mask(v)
 		}
 	}
-	for i := range cfg.Storage.Mounts {
-		if cfg.Storage.Mounts[i].Password != "" {
-			cfg.Storage.Mounts[i].Password = maskSentinel
-		}
-	}
 }
 
 func restoreSecrets(old, next *model.Config) {
@@ -455,16 +450,6 @@ func restoreSecrets(old, next *model.Config) {
 			if isMasked(v) && prev != nil {
 				j.DNSCreds[k] = prev[k]
 			}
-		}
-	}
-	oldMounts := map[string]string{}
-	for _, m := range old.Storage.Mounts {
-		oldMounts[m.ID] = m.Password
-	}
-	for i := range next.Storage.Mounts {
-		m := &next.Storage.Mounts[i]
-		if isMasked(m.Password) {
-			m.Password = oldMounts[m.ID]
 		}
 	}
 }

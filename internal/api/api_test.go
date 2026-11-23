@@ -65,7 +65,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		Log:      hub,
 		Registry: registry,
 		Certs:    certStore,
-		Mounts:   mounts.New(store, box, hub.Logger()),
+		Mounts:   mounts.New(store),
 		Box:      box,
 		Sessions: sessions,
 		DataDir:  dir,

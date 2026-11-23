@@ -10,7 +10,6 @@ import {
   Page,
   PageHeader,
   Panel,
-  SelectInput,
   SwitchInput,
   TextInput,
   toast,
@@ -24,20 +23,14 @@ import {
 //   DELETE /api/v1/storage/mounts/{id}           删除
 //   POST   /api/v1/storage/mounts/test           测试连接（body: { mount, id }）
 //   GET    /api/v1/storage/mounts/{id}/list?path= 浏览目录
-const PASSWORD_MASK = '********'
 const PAGE_SIZE = 20
 
-const TYPE_LABELS: Record<string, string> = { local: '本地目录', webdav: 'WebDAV' }
 
 interface Mount {
   id: string
   name?: string
   type?: string
   root?: string
-  url?: string
-  username?: string
-  password?: string
-  insecureTls?: boolean
   readOnly?: boolean
   enable?: boolean
   remark?: string
@@ -47,35 +40,25 @@ interface Mount {
 interface MountPayload {
   id: string
   name: string
-  type: 'local' | 'webdav'
+  type: 'local'
   enable: boolean
   readOnly: boolean
   remark: string
   root: string
-  url: string
-  username: string
-  password: string
-  insecureTls: boolean
   createdAt?: string
 }
 
 interface MountForm {
   name: string
-  type: 'local' | 'webdav'
   enable: boolean
   readOnly: boolean
   root: string
-  url: string
-  username: string
-  password: string
-  insecureTls: boolean
   remark: string
 }
 
 interface FormErrors {
   name?: string
   root?: string
-  url?: string
 }
 
 interface TestResult {
@@ -113,12 +96,8 @@ function parentPath(value: string): string {
   return index <= 0 ? '/' : clean.slice(0, index)
 }
 
-function typeLabel(type: unknown): string {
-  return TYPE_LABELS[String(type || '')] || '本地目录'
-}
-
 function locationOf(row: Mount): string {
-  return String((row.type === 'webdav' ? row.url : row.root) || '')
+  return String(row.root || '')
 }
 
 function normalizeEntries(list: unknown, base: string): BrowseEntry[] {
@@ -160,14 +139,9 @@ function hintWithError(error: string | undefined, hint?: ReactNode): ReactNode {
 function formOf(row: Mount | null): MountForm {
   return {
     name: row?.name || '',
-    type: row?.type === 'webdav' ? 'webdav' : 'local',
     enable: !row || row.enable !== false,
     readOnly: !!row?.readOnly,
     root: row?.root || '',
-    url: row?.url || '',
-    username: row?.username || '',
-    password: row?.password || '',
-    insecureTls: !!row?.insecureTls,
     remark: row?.remark || '',
   }
 }
@@ -175,30 +149,19 @@ function formOf(row: Mount | null): MountForm {
 function validateMount(form: MountForm): FormErrors {
   const errors: FormErrors = {}
   if (!form.name.trim()) errors.name = '请输入名称'
-  if (form.type === 'local') {
-    if (!form.root.trim()) errors.root = '请填写本地路径'
-  } else {
-    const url = form.url.trim()
-    if (!url) errors.url = '请填写 WebDAV 地址'
-    else if (!/^https?:\/\//i.test(url)) errors.url = '请填写以 http:// 或 https:// 开头的地址'
-  }
+  if (!form.root.trim()) errors.root = '请填写本地路径'
   return errors
 }
 
 function buildPayload(form: MountForm, id: string, createdAt: string): MountPayload {
-  const type: 'local' | 'webdav' = form.type === 'webdav' ? 'webdav' : 'local'
   const payload: MountPayload = {
     id,
     name: form.name.trim(),
-    type,
+    type: 'local',
     enable: !!form.enable,
     readOnly: !!form.readOnly,
     remark: form.remark.trim(),
-    root: type === 'local' ? form.root.trim() : '',
-    url: type === 'webdav' ? form.url.trim() : '',
-    username: type === 'webdav' ? form.username.trim() : '',
-    password: type === 'webdav' ? form.password : '',
-    insecureTls: type === 'webdav' ? !!form.insecureTls : false,
+    root: form.root.trim(),
   }
   if (createdAt) payload.createdAt = createdAt
   return payload
@@ -452,16 +415,6 @@ export default function Storage() {
       ),
     },
     {
-      key: 'type',
-      title: '类型',
-      className: 'whitespace-nowrap',
-      render: (row) => (
-        <Chip size="sm" variant="soft" color="default">
-          {typeLabel(row.type)}
-        </Chip>
-      ),
-    },
-    {
       key: 'location',
       title: '位置',
       render: (row) => (
@@ -589,7 +542,7 @@ export default function Storage() {
     <Page>
       <PageHeader
         title="存储"
-        sub="本地目录与远程 WebDAV 挂载，作为静态托管的只读存储后端"
+        sub="本地目录挂载，作为静态托管的只读存储后端"
         actions={
           <>
             <Button variant="secondary" isDisabled={loading} onPress={() => void load()}>
@@ -644,8 +597,7 @@ export default function Storage() {
           />
           <Pager page={mountPageSafe} pageCount={mountPageCount} onChange={setMountPage} />
           <div className="border-t border-border px-4 py-3 text-xs leading-relaxed text-muted">
-            密码由服务端加密保存；列表里的 <span className="mono">{PASSWORD_MASK}</span>{' '}
-            表示已有密码，编辑时不改动它就不会被覆盖。类型在编辑时不可修改，需要更换类型请删除后重新创建。
+            存储挂载只支持本地目录，供静态托管读取；目录路径创建后仍可修改。
           </div>
         </div>
       </Panel>
@@ -670,27 +622,14 @@ export default function Storage() {
         }
       >
         <div className="flex flex-col gap-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <TextInput
-              label="名称"
-              required
-              value={form.name}
-              onChange={(value) => updateForm('name', value)}
-              placeholder="例如：NAS 备份"
-              hint={hintWithError(formErrors.name)}
-            />
-            <SelectInput
-              label="类型"
-              value={form.type}
-              onChange={(value) => updateForm('type', value === 'webdav' ? 'webdav' : 'local')}
-              options={[
-                { value: 'local', label: '本地目录' },
-                { value: 'webdav', label: 'WebDAV' },
-              ]}
-              disabled={!editorIsNew}
-              hint={!editorIsNew ? '类型在创建后不可修改，需要更换请删除后重新创建' : undefined}
-            />
-          </div>
+          <TextInput
+            label="名称"
+            required
+            value={form.name}
+            onChange={(value) => updateForm('name', value)}
+            placeholder="例如：NAS 备份"
+            hint={hintWithError(formErrors.name)}
+          />
 
           <div className="grid gap-4 sm:grid-cols-2">
             <SwitchInput
@@ -705,52 +644,17 @@ export default function Storage() {
             />
           </div>
 
-          {form.type === 'local' ? (
-            <TextInput
-              label="本地目录"
-              required
-              value={form.root}
-              onChange={(value) => updateForm('root', value)}
-              placeholder="/data/media"
-              hint={hintWithError(
-                formErrors.root,
-                '目录必须存在且服务进程可读，例如 /data/media 或 D:/media',
-              )}
-            />
-          ) : (
-            <>
-              <TextInput
-                label="WebDAV 地址"
-                required
-                value={form.url}
-                onChange={(value) => updateForm('url', value)}
-                placeholder="https://dav.example.com/remote.php/dav"
-                hint={hintWithError(formErrors.url, '需要以 http:// 或 https:// 开头')}
-              />
-              <div className="grid gap-4 sm:grid-cols-2">
-                <TextInput
-                  label="用户名"
-                  value={form.username}
-                  onChange={(value) => updateForm('username', value)}
-                  placeholder="可选"
-                />
-                <TextInput
-                  label="密码"
-                  type="password"
-                  value={form.password}
-                  onChange={(value) => updateForm('password', value)}
-                  placeholder={editorIsNew ? '密码' : '不修改请留空'}
-                  hint={editorIsNew ? undefined : `留空或保持 ${PASSWORD_MASK} 表示不修改`}
-                />
-              </div>
-              <SwitchInput
-                label="跳过证书校验"
-                value={form.insecureTls}
-                onChange={(value) => updateForm('insecureTls', value)}
-                hint="自签名证书场景使用，会降低连接安全性"
-              />
-            </>
-          )}
+          <TextInput
+            label="本地目录"
+            required
+            value={form.root}
+            onChange={(value) => updateForm('root', value)}
+            placeholder="/data/media"
+            hint={hintWithError(
+              formErrors.root,
+              '目录必须存在且服务进程可读，例如 /data/media 或 D:/media',
+            )}
+          />
 
           <TextInput
             label="备注"

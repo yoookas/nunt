@@ -332,26 +332,19 @@ type StorageConfig struct {
 	Mounts []Mount `json:"mounts"`
 }
 
-// Mount types.
-const (
-	MountLocal  = "local"
-	MountWebDAV = "webdav"
-)
+// MountLocal is the only supported storage backend: a directory on disk.
+const MountLocal = "local"
 
 // Mount is a storage backend addressable by id.
 type Mount struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Enable      bool      `json:"enable"`
-	Type        string    `json:"type"`
-	Root        string    `json:"root,omitempty"`
-	URL         string    `json:"url,omitempty"`
-	Username    string    `json:"username,omitempty"`
-	Password    string    `json:"password,omitempty"`
-	InsecureTLS bool      `json:"insecureTls,omitempty"`
-	ReadOnly    bool      `json:"readOnly"`
-	Remark      string    `json:"remark,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Enable    bool      `json:"enable"`
+	Type      string    `json:"type"`
+	Root      string    `json:"root,omitempty"`
+	ReadOnly  bool      `json:"readOnly"`
+	Remark    string    `json:"remark,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 // ---------------------------------------------------------------------------

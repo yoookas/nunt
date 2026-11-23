@@ -6,7 +6,6 @@ import (
 
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/rest"
-	"github.com/nunt/nunt/internal/secret"
 )
 
 func (s *Server) registerStorage() {
@@ -24,11 +23,6 @@ func (s *Server) handleListMounts(w http.ResponseWriter, r *http.Request) {
 	if mounts == nil {
 		mounts = []model.Mount{}
 	}
-	for i := range mounts {
-		if mounts[i].Password != "" {
-			mounts[i].Password = maskSentinel
-		}
-	}
 	rest.OK(w, mounts)
 }
 
@@ -44,10 +38,6 @@ func (s *Server) handleCreateMount(w http.ResponseWriter, r *http.Request) {
 	req.CreatedAt = time.Now()
 	if req.Type == "" {
 		req.Type = model.MountLocal
-	}
-	if err := s.sealInto(&req); err != nil {
-		rest.Fail(w, http.StatusInternalServerError, "无法加密保存的密码：%s", err)
-		return
 	}
 	if err := s.opts.Cfg.Update(func(c *model.Config) error {
 		c.Storage.Mounts = append(c.Storage.Mounts, req)
@@ -68,16 +58,6 @@ func (s *Server) handleUpdateMount(w http.ResponseWriter, r *http.Request) {
 	id := idParam(r, "id")
 	var req model.Mount
 	if !jsonBody(w, r, &req) {
-		return
-	}
-	// A masked or empty password means "keep the stored one".
-	if req.Password == "" || isMasked(req.Password) {
-		if existing, ok := s.opts.Mounts.Find(id); ok {
-			req.Password = existing.Password
-		}
-	}
-	if err := s.sealInto(&req); err != nil {
-		rest.Fail(w, http.StatusInternalServerError, "无法加密保存的密码：%s", err)
 		return
 	}
 	err := s.opts.Cfg.Update(func(c *model.Config) error {
@@ -169,36 +149,12 @@ func (s *Server) handleTestMount(w http.ResponseWriter, r *http.Request) {
 	if mnt.ID == "" {
 		mnt.ID = req.ID
 	}
-	if mnt.ID != "" {
-		if existing, ok := s.opts.Mounts.Find(mnt.ID); ok {
-			if mnt.Password == "" || isMasked(mnt.Password) {
-				mnt.Password = existing.Password
-			}
-		}
-	}
 	if mnt.Type == "" {
 		mnt.Type = model.MountLocal
-	}
-	if err := s.sealInto(&mnt); err != nil {
-		rest.Fail(w, http.StatusInternalServerError, "无法加密保存的密码：%s", err)
-		return
 	}
 	if err := s.opts.Mounts.Test(mnt); err != nil {
 		rest.Fail(w, http.StatusBadGateway, "连接失败：%s", err)
 		return
 	}
 	rest.OK(w, map[string]any{"status": "ok"})
-}
-
-// sealInto encrypts the mount password in place.
-func (s *Server) sealInto(mnt *model.Mount) error {
-	if mnt.Password == "" || secret.IsSealed(mnt.Password) {
-		return nil
-	}
-	sealed, err := s.opts.Box.Seal(mnt.Password)
-	if err != nil {
-		return err
-	}
-	mnt.Password = sealed
-	return nil
 }

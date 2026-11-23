@@ -1,27 +1,23 @@
-// Package mounts turns the configured storage backends into vfs file systems
-// that the static server and the WebDAV mount backend can share.
+// Package mounts turns the configured local storage directories into vfs file
+// systems used by static web hosting.
 package mounts
 
 import (
 	"fmt"
-	"log/slog"
 
 	"github.com/nunt/nunt/internal/config"
 	"github.com/nunt/nunt/internal/model"
-	"github.com/nunt/nunt/internal/secret"
 	"github.com/nunt/nunt/internal/vfs"
 )
 
 // Manager resolves mount ids to file systems.
 type Manager struct {
 	cfg *config.Store
-	box *secret.Box
-	log *slog.Logger
 }
 
 // New creates a manager bound to the configuration store.
-func New(cfg *config.Store, box *secret.Box, log *slog.Logger) *Manager {
-	return &Manager{cfg: cfg, box: box, log: log}
+func New(cfg *config.Store) *Manager {
+	return &Manager{cfg: cfg}
 }
 
 // Invalidate is kept for the callers that used to drop a shared cache. Backends
@@ -74,16 +70,6 @@ func (m *Manager) open(mnt model.Mount) (vfs.FS, func() error, error) {
 			return nil, nil, err
 		}
 		return local, local.Close, nil
-	case model.MountWebDAV:
-		password := mnt.Password
-		if m.box != nil {
-			plain, err := m.box.Open(mnt.Password)
-			if err != nil {
-				return nil, nil, fmt.Errorf("decrypt mount password: %w", err)
-			}
-			password = plain
-		}
-		return openWebDAV(mnt, password, m.log)
 	default:
 		return nil, nil, fmt.Errorf("unsupported mount type %q", mnt.Type)
 	}

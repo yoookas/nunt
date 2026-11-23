@@ -151,7 +151,7 @@ data/
 - **CSRF**：会话鉴权的写操作必须带 `X-CSRF-Token`（登录时下发）。
 - **暴力破解**：登录失败按「用户名 + IP」计数，超过阈值指数退避锁定；API 有令牌桶限流。
 - **开放 API**：Bearer Token 或 `X-API-Token`，令牌只存 SHA-256 哈希，可限制 scope，可随时吊销。
-- **文件安全**：静态托管与远程 WebDAV 挂载全部走基于 `os.Root` 的虚拟文件系统，符号链接与 `..` 逃逸在内核层面被拒绝。
+- **文件安全**：静态托管的本地目录全部走基于 `os.Root` 的虚拟文件系统，符号链接与 `..` 逃逸在内核层面被拒绝。
 - **反向代理**：剥离 hop-by-hop 头、可控超时、上游仅允许 http/https，响应头可裁剪。
 - **WAF**：Coraza + CRS，可保护后台接口本身；拦截页面不回显用户输入；请求体检查由 Coraza 自己按 `bodyLimitKb` 截断（见下方「WAF」）。
 - **TLS**：最低 TLS 1.2、仅 ECDHE 系列套件、按 SNI 热加载证书。
@@ -205,7 +205,7 @@ internal/certs      证书仓库（SNI 热加载）
 internal/ip2region  IP 地理库（ip2region xdb：国家/省份）
 internal/ipfilter    访问控制过滤器（CIDR + 国家/省份）
 internal/vfs        安全文件系统抽象（os.Root）
-internal/mounts     存储挂载（本地 / 远程 WebDAV）
+internal/mounts     存储挂载（本地目录）
 internal/security   密码、会话、限流
 internal/rest       路由与 JSON 工具
 internal/webui      管理界面构建产物（go:embed，源码在 frontend/）

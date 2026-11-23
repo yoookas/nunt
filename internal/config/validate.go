@@ -282,11 +282,11 @@ func Validate(c *model.Config) error {
 		}
 	}
 	for _, m := range c.Storage.Mounts {
-		if m.Type == model.MountLocal && strings.TrimSpace(m.Root) == "" {
-			return fmt.Errorf("mount %q: local root path is required", displayName(m.Name, m.ID))
+		if m.Type != model.MountLocal {
+			return fmt.Errorf("mount %q: unsupported type %q (only %q is supported)", displayName(m.Name, m.ID), m.Type, model.MountLocal)
 		}
-		if m.Type == model.MountWebDAV && strings.TrimSpace(m.URL) == "" {
-			return fmt.Errorf("mount %q: webdav url is required", displayName(m.Name, m.ID))
+		if strings.TrimSpace(m.Root) == "" {
+			return fmt.Errorf("mount %q: local root path is required", displayName(m.Name, m.ID))
 		}
 	}
 	return nil
