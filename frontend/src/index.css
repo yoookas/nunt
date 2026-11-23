@@ -24,3 +24,11 @@ body {
   font-size: 0.72rem;
   color: var(--muted);
 }
+
+/* HeroUI chips are labels, never wrapping content: on narrow tables a chip
+   squeezed into one character per line is unreadable. The table scrolls
+   horizontally instead. */
+[data-slot="chip"],
+[data-slot="chip-label"] {
+  white-space: nowrap;
+}

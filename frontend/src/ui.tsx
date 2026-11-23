@@ -670,7 +670,12 @@ export function StatusChip({
   children: ReactNode
 }) {
   return (
-    <Chip color={color === 'primary' ? 'accent' : color || 'default'} size="sm" variant="soft">
+    <Chip
+      color={color === 'primary' ? 'accent' : color || 'default'}
+      size="sm"
+      variant="soft"
+      className="shrink-0 whitespace-nowrap"
+    >
       {children}
     </Chip>
   )
