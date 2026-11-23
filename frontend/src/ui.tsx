@@ -25,7 +25,7 @@ import {
   Typography,
   toast,
 } from '@heroui/react'
-import { ChevronDown, Minus, Plus, X } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Minus, Plus, X } from 'lucide-react'
 
 export { toast }
 
@@ -160,6 +160,40 @@ export function DataTable<T>({
   ariaLabel?: string
   loading?: boolean
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [overflow, setOverflow] = useState(false)
+  const [atStart, setAtStart] = useState(true)
+  const [atEnd, setAtEnd] = useState(false)
+
+  const measure = useMemo(
+    () => () => {
+      const el = scrollRef.current
+      if (!el) return
+      const max = el.scrollWidth - el.clientWidth
+      setOverflow(max > 2)
+      setAtStart(el.scrollLeft <= 2)
+      setAtEnd(el.scrollLeft >= max - 2)
+    },
+    [],
+  )
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    if (el.firstElementChild) observer.observe(el.firstElementChild)
+    return () => observer.disconnect()
+  }, [measure, items, columns])
+
+  const nudge = (direction: 1 | -1) => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollBy({ left: direction * Math.max(160, el.clientWidth * 0.7), behavior: 'smooth' })
+  }
+
   if (loading) return <TableSkeleton columns={columns.length} />
   if (items.length === 0) {
     return (
@@ -170,32 +204,68 @@ export function DataTable<T>({
       </EmptyState>
     )
   }
+
   return (
-    <div className="data-table-scroll w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain">
-      <div className="min-w-[600px] sm:min-w-0">
-    <Table>
-      <Table.Content aria-label={ariaLabel}>
-        <Table.Header>
-          {columns.map((column, index) => (
-            <Table.Column key={column.key} isRowHeader={index === 0} className={column.className}>
-              {column.title}
-            </Table.Column>
-          ))}
-        </Table.Header>
-        <Table.Body>
-          {items.map((row) => (
-            <Table.Row key={rowKey(row)} id={rowKey(row)}>
-              {columns.map((column) => (
-                <Table.Cell key={column.key} className={column.className}>
-                  {column.render(row)}
-                </Table.Cell>
-              ))}
-            </Table.Row>
-          ))}
-        </Table.Body>
-      </Table.Content>
-    </Table>
+    <div className="relative">
+      <div
+        ref={scrollRef}
+        onScroll={measure}
+        tabIndex={0}
+        className="data-table-scroll w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain"
+        role="region"
+        aria-label={`${ariaLabel}（可横向滚动）`}
+      >
+        <div className="min-w-[600px] md:min-w-0">
+          <Table>
+            <Table.Content aria-label={ariaLabel}>
+              <Table.Header>
+                {columns.map((column, index) => (
+                  <Table.Column key={column.key} isRowHeader={index === 0} className={column.className}>
+                    {column.title}
+                  </Table.Column>
+                ))}
+              </Table.Header>
+              <Table.Body>
+                {items.map((row) => (
+                  <Table.Row key={rowKey(row)} id={rowKey(row)}>
+                    {columns.map((column) => (
+                      <Table.Cell key={column.key} className={column.className}>
+                        {column.render(row)}
+                      </Table.Cell>
+                    ))}
+                  </Table.Row>
+                ))}
+              </Table.Body>
+            </Table.Content>
+          </Table>
+        </div>
       </div>
+
+      {overflow ? (
+        <div className="mt-1 flex items-center justify-end gap-1.5 px-1 md:hidden">
+          <span className="mr-auto text-[11px] text-muted">左右滑动查看完整表格</span>
+          <Button
+            isIconOnly
+            size="sm"
+            variant="tertiary"
+            aria-label="向左滚动表格"
+            isDisabled={atStart}
+            onPress={() => nudge(-1)}
+          >
+            <ChevronLeft size={15} />
+          </Button>
+          <Button
+            isIconOnly
+            size="sm"
+            variant="tertiary"
+            aria-label="向右滚动表格"
+            isDisabled={atEnd}
+            onPress={() => nudge(1)}
+          >
+            <ChevronRight size={15} />
+          </Button>
+        </div>
+      ) : null}
     </div>
   )
 }
