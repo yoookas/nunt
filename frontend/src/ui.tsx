@@ -143,6 +143,41 @@ export function StatCard({
   )
 }
 
+/**
+ * LiveStatus is the small, quiet replacement for a "refresh" button on pages
+ * that poll: it says how often the data refreshes, when it last did, and turns
+ * into a retry button when polling fails. Clicking it refreshes immediately.
+ */
+export function LiveStatus({
+  status,
+  intervalMs,
+  className = '',
+}: {
+  status: { updatedAt: number | null; failed: boolean; refresh: () => unknown }
+  intervalMs: number
+  className?: string
+}) {
+  const clock = status.updatedAt
+    ? new Date(status.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })
+    : ''
+  return (
+    <button
+      type="button"
+      onClick={() => void status.refresh()}
+      title="点击立即刷新"
+      className={`rounded-field px-2 py-1 text-xs transition-colors hover:bg-default ${className}`.trim()}
+    >
+      {status.failed ? (
+        <span className="text-danger">刷新失败，点击重试</span>
+      ) : (
+        <span className="text-muted">
+          自动刷新 {Math.round(intervalMs / 1000)}s{clock ? ` · ${clock}` : ''}
+        </span>
+      )}
+    </button>
+  )
+}
+
 /* -------------------------------------------------------------------------- */
 /* Tables                                                                     */
 /* -------------------------------------------------------------------------- */

@@ -9,6 +9,7 @@ import {
   FormModal,
   NumberInput,
   Page,
+  LiveStatus,
   PageHeader,
   Panel,
   SelectInput,
@@ -383,19 +384,19 @@ export default function Ddns() {
   // Success and failure counters come from the status endpoint; poll it so the
   // cards do not stay frozen at whatever the page saw when it opened.
   const refreshStatus = async () => {
-    try {
-      const data = await api.get<DdnsStatus[] | { rules?: DdnsStatus[] }>('/api/v1/ddns/status')
-      setStatusList(Array.isArray(data) ? data : data?.rules || [])
-    } catch {
-      // keep the last good values
-    }
+    const data = await api.get<DdnsStatus[] | { rules?: DdnsStatus[] }>('/api/v1/ddns/status')
+    setStatusList(Array.isArray(data) ? data : data?.rules || [])
   }
 
-  usePolling(refreshStatus, 10000)
+  // Rules carry the schedule and the last result, so they are polled too.
+  const refreshRules = async () => {
+    const data = await api.get<DdnsRule[] | { rules?: DdnsRule[]; items?: DdnsRule[] }>('/api/v1/ddns/rules')
+    setRules(Array.isArray(data) ? data : data?.rules || data?.items || [])
+  }
 
-  const refreshAll = useCallback(async () => {
-    await Promise.all([loadProviders(), loadRules(), loadStatus()])
-  }, [loadProviders, loadRules, loadStatus])
+  const live = usePolling(async () => {
+    await Promise.all([refreshStatus(), refreshRules()])
+  }, 10000)
 
   useEffect(() => {
     void loadProviders()
@@ -933,13 +934,7 @@ export default function Ddns() {
         sub="把域名持续指向当前公网 IP：提供商凭据、探测方式、调度与运行状态"
         actions={
           <>
-            <Button
-              variant="secondary"
-              isDisabled={loading || providersLoading || statusLoading}
-              onPress={() => void refreshAll()}
-            >
-              刷新
-            </Button>
+            <LiveStatus status={live} intervalMs={10000} />
             <Button variant="primary" isDisabled={!providers.length} onPress={openCreate}>
               新建规则
             </Button>

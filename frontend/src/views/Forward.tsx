@@ -15,6 +15,7 @@ import {
   Panel,
   StatCard,
   SelectInput,
+  LiveStatus,
   StatusChip,
   TagInput,
   TextAreaInput,
@@ -299,10 +300,6 @@ export default function Forward() {
     [logRule, logLimit],
   )
 
-  const refreshAll = useCallback(async () => {
-    await Promise.all([loadRules(), loadLogs()])
-  }, [loadRules, loadLogs])
-
   useEffect(() => {
     void loadRules()
     void loadLogs()
@@ -312,17 +309,13 @@ export default function Forward() {
   // is enough to keep the stat cards live. No loading flag: the table must not
   // blink every five seconds.
   const refreshCounters = async () => {
-    try {
-      const data = await api.get<ForwardRule[] | { rules?: ForwardRule[]; items?: ForwardRule[] }>(
-        '/api/v1/forward/rules',
-      )
-      setRules(Array.isArray(data) ? data : data?.rules || data?.items || [])
-    } catch {
-      // keep the last good counters
-    }
+    const data = await api.get<ForwardRule[] | { rules?: ForwardRule[]; items?: ForwardRule[] }>(
+      '/api/v1/forward/rules',
+    )
+    setRules(Array.isArray(data) ? data : data?.rules || data?.items || [])
   }
 
-  usePolling(refreshCounters, 5000)
+  const live = usePolling(refreshCounters, 5000)
 
   useEffect(() => {
     if (!logsOpen || !autoRefresh) return
@@ -679,9 +672,7 @@ export default function Forward() {
         sub="TCP / UDP 端口映射、访问控制、并发限制与实时运行统计"
         actions={
           <>
-            <Button variant="secondary" isDisabled={loading || logsLoading} onPress={() => void refreshAll()}>
-              刷新
-            </Button>
+            <LiveStatus status={live} intervalMs={5000} />
             <Button variant="primary" onPress={openCreate}>
               新建规则
             </Button>

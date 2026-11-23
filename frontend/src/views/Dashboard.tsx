@@ -12,6 +12,7 @@ import {
   PageHeader,
   Section,
   StatCard,
+  LiveStatus,
   StatusChip,
   toast,
   type Column,
@@ -91,26 +92,28 @@ export default function Dashboard() {
   // logs), so refresh them in place. The 24 hour series is left alone: it is
   // hourly data and re-reading a day of logs every few seconds is wasteful.
   const refreshLive = async () => {
-    try {
-      const [infoData, statsData, moduleData, logData, healthData] = await Promise.all([
-        api.get('/api/v1/system/info'),
-        api.get('/api/v1/system/stats'),
-        api.get('/api/v1/modules'),
-        api.get('/api/v1/system/logs', { limit: 30 }),
-        api.get('/api/v1/system/health').catch(() => null),
-      ])
-      if (infoData) setInfo(infoData)
-      if (statsData) setStats(statsData)
-      if (Array.isArray(moduleData)) setModules(moduleData)
-      if (Array.isArray(logData?.entries)) setLogs(logData.entries)
-      if (healthData) setHealth(healthData)
-    } catch {
-      // A poll failure keeps the last good values; the manual refresh button
-      // still surfaces errors.
-    }
+    const [infoData, statsData, moduleData, logData, healthData] = await Promise.all([
+      api.get('/api/v1/system/info'),
+      api.get('/api/v1/system/stats'),
+      api.get('/api/v1/modules'),
+      api.get('/api/v1/system/logs', { limit: 30 }),
+      api.get('/api/v1/system/health').catch(() => null),
+    ])
+    if (infoData) setInfo(infoData)
+    if (statsData) setStats(statsData)
+    if (Array.isArray(moduleData)) setModules(moduleData)
+    if (Array.isArray(logData?.entries)) setLogs(logData.entries)
+    if (healthData) setHealth(healthData)
   }
 
-  usePolling(refreshLive, 5000)
+  const live = usePolling(refreshLive, 5000)
+
+  // The 24 hour trend is hourly data: refreshing it every few seconds would
+  // rescan a day of access logs for nothing.
+  usePolling(async () => {
+    const data = await api.get('/api/v1/logs/access/series', { bucket: 3600 })
+    if (Array.isArray(data?.points)) setSeries(data.points)
+  }, 300000)
 
   const seriesMax = series.reduce((max, point) => Math.max(max, point.total), 0)
 
@@ -161,11 +164,7 @@ export default function Dashboard() {
       <PageHeader
         title="概览"
         sub="运行状态、模块健康度与最近的日志"
-        actions={
-          <Button variant="secondary" isDisabled={loading} onPress={() => void load()}>
-            刷新
-          </Button>
-        }
+        actions={<LiveStatus status={live} intervalMs={5000} />}
       />
 
       {loading && !info ? (
