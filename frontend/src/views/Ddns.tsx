@@ -13,6 +13,7 @@ import {
   SelectInput,
   StatCard,
   StatusChip,
+  SwitchInput,
   TextAreaInput,
   TextInput,
   toast,
@@ -254,6 +255,7 @@ export default function Ddns() {
   const [creds, setCreds] = useState<Record<string, string>>({})
   const [credDrafts, setCredDrafts] = useState<Record<string, Record<string, string>>>({})
   const lastProviderRef = useRef('')
+  const [advanced, setAdvanced] = useState(false)
   const [form, setForm] = useState<DdnsForm>(() => ({
     name: '',
     enable: true,
@@ -482,6 +484,12 @@ export default function Ddns() {
       ipv4: ipForm(rule.ipv4, false),
       ipv6: ipForm(rule.ipv6, false),
     })
+    setAdvanced(
+      Number(rule.ttl || 600) !== 600 ||
+        Number(rule.intervalSec || 300) !== 300 ||
+        !!rule.cron ||
+        !!rule.remark,
+    )
     setErrors({})
     setModalOpen(true)
   }
@@ -1182,6 +1190,17 @@ export default function Ddns() {
                 hint="实际写入的 A / AAAA 记录由下方 IPv4 / IPv6 探测开关决定。"
               />
             </FormField>
+            <FormField full>
+              <SwitchInput
+                label="高级选项"
+                value={advanced}
+                onChange={setAdvanced}
+                hint="TTL、检查间隔、Cron、备注；不展开也能正常保存"
+              />
+            </FormField>
+
+            {advanced ? (
+              <>
             <FormField>
               <NumberInput
                 label="TTL（秒）"
@@ -1219,6 +1238,8 @@ export default function Ddns() {
                 placeholder="备注（可选）"
               />
             </FormField>
+              </>
+            ) : null}
           </div>
 
           <GroupHead title="公网 IP 探测" extra={<span className="text-xs text-muted">至少启用一个地址族</span>} />
