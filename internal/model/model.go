@@ -19,6 +19,13 @@ const (
 	WebTypeStatic   = "static"
 )
 
+// Client certificate modes for a TLS listener.
+const (
+	ClientAuthOff     = "off"
+	ClientAuthRequest = "request"
+	ClientAuthRequire = "require"
+)
+
 // TLS modes for a web rule.
 const (
 	TLSModeOff    = "off"
@@ -197,6 +204,12 @@ type WebTLS struct {
 	Mode   string `json:"mode"`
 	CertID string `json:"certId,omitempty"`
 	HSTS   bool   `json:"hsts"`
+	// ClientAuth is off, request or require. "require" only completes the
+	// handshake for a certificate signed by ClientCA.
+	ClientAuth string `json:"clientAuth,omitempty"`
+	// ClientCA is the PEM bundle that signs client certificates. It may hold
+	// multiple certificates.
+	ClientCA string `json:"clientCa,omitempty"`
 }
 
 // Access is an IP / User-Agent filter.

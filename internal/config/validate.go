@@ -1,7 +1,9 @@
 package config
 
 import (
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net"
 	"sort"
@@ -79,6 +81,20 @@ func Normalize(c *model.Config) {
 		}
 		l.TLS.Mode = normalizeWebTLSMode(l.TLS.Mode)
 		l.TLS.CertID = strings.TrimSpace(l.TLS.CertID)
+		l.TLS.ClientAuth = strings.ToLower(strings.TrimSpace(l.TLS.ClientAuth))
+		switch l.TLS.ClientAuth {
+		case "", model.ClientAuthOff:
+			l.TLS.ClientAuth = model.ClientAuthOff
+			l.TLS.ClientCA = ""
+		case model.ClientAuthRequest, model.ClientAuthRequire:
+		default:
+			l.TLS.ClientAuth = model.ClientAuthOff
+		}
+		if l.TLS.Mode == model.TLSModeOff {
+			// Client certificates only make sense on a TLS listener.
+			l.TLS.ClientAuth = model.ClientAuthOff
+			l.TLS.ClientCA = ""
+		}
 		for j := range l.Listen {
 			l.Listen[j] = strings.TrimSpace(l.Listen[j])
 		}
@@ -198,6 +214,34 @@ func Normalize(c *model.Config) {
 
 // normalizeLogs clamps the log retention settings into the range the store and
 // the rotating file logger support, so a typo in the UI cannot fill the disk.
+// validateClientCA rejects a bundle that would leave the listener unable to
+// verify any client certificate.
+func validateClientCA(bundle string) error {
+	rest := []byte(strings.TrimSpace(bundle))
+	if len(rest) == 0 {
+		return fmt.Errorf("client certificate verification needs a CA bundle")
+	}
+	certs := 0
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+			return fmt.Errorf("client CA: %w", err)
+		}
+		certs++
+	}
+	if certs == 0 {
+		return fmt.Errorf("client CA bundle contains no certificate")
+	}
+	return nil
+}
+
 func normalizeLogs(l *model.LogConfig) {
 	if l.Access.KeepDays <= 0 {
 		l.Access.KeepDays = 7
@@ -240,6 +284,13 @@ func Validate(c *model.Config) error {
 	listeners, err := validateWebListeners(c.Web.Listeners)
 	if err != nil {
 		return err
+	}
+	for _, l := range c.Web.Listeners {
+		if l.TLS.ClientAuth == model.ClientAuthRequest || l.TLS.ClientAuth == model.ClientAuthRequire {
+			if err := validateClientCA(l.TLS.ClientCA); err != nil {
+				return fmt.Errorf("listener %q: %w", l.Name, err)
+			}
+		}
 	}
 	seenRoutes := map[string]string{}
 	for _, r := range c.Web.Rules {

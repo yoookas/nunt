@@ -544,6 +544,16 @@ func (w *Web) compileWeb(cfg *model.Config) ([]*rule, map[string]*listenerPlan, 
 			certID: strings.TrimSpace(l.TLS.CertID),
 			hsts:   l.TLS.HSTS,
 		}
+		if auth, on := clientAuthFor(l.TLS.ClientAuth); on {
+			pool, err := clientCAPool(l.TLS.ClientCA)
+			if err != nil {
+				w.logger().Error("web: client certificates disabled", "listener", l.Name, "error", err)
+				w.SetError(fmt.Errorf("listener %q: %w", l.Name, err))
+			} else {
+				tls.clientAuth = auth
+				tls.clientCAs = pool
+			}
+		}
 		seen := map[string]bool{}
 		for _, addr := range l.Listen {
 			norm, err := netutil.NormalizeListen(addr)

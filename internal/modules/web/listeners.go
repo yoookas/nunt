@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -72,6 +73,9 @@ type listenerTLS struct {
 	hsts   bool
 	// certDomains is the SAN list of a pinned custom certificate.
 	certDomains []string
+	// clientAuth is set when the listener requires client certificates.
+	clientAuth tls.ClientAuthType
+	clientCAs  *x509.CertPool
 }
 
 // listenerPlan is one socket to bind plus the routes served on it.
@@ -133,6 +137,10 @@ func (l *listener) start(plan *listenerPlan) error {
 	}
 
 	tlsCfg := l.web.tlsConfig(l.router.currentMatcher, l.router.currentPlan)
+	if plan.tls.clientAuth != tls.NoClientCert {
+		tlsCfg.ClientAuth = plan.tls.clientAuth
+		tlsCfg.ClientCAs = plan.tls.clientCAs
+	}
 	ln, err := listenWithRetry(l.addr)
 	if err != nil {
 		l.cancel()

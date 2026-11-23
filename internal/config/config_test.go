@@ -143,3 +143,27 @@ func TestNormalizeDisablesSeedlessTOTP(t *testing.T) {
 		t.Fatalf("the repaired configuration must be valid: %v", err)
 	}
 }
+
+func TestClientCertificateValidation(t *testing.T) {
+	cfg := Default()
+	cfg.Web.Listeners = []model.WebListener{{
+		ID: "l1", Name: "tls", Listen: []string{":8443"},
+		TLS: model.WebTLS{Mode: model.TLSModeAuto, ClientAuth: model.ClientAuthRequire},
+	}}
+	Normalize(cfg)
+	if err := Validate(cfg); err == nil {
+		t.Fatal("require without a CA bundle must be rejected")
+	}
+}
+
+func TestClientCertificateClearedOnPlainListener(t *testing.T) {
+	cfg := Default()
+	cfg.Web.Listeners = []model.WebListener{{
+		ID: "l1", Name: "plain", Listen: []string{":8080"},
+		TLS: model.WebTLS{Mode: model.TLSModeOff, ClientAuth: model.ClientAuthRequire, ClientCA: "x"},
+	}}
+	Normalize(cfg)
+	if cfg.Web.Listeners[0].TLS.ClientAuth != model.ClientAuthOff || cfg.Web.Listeners[0].TLS.ClientCA != "" {
+		t.Fatalf("plain listener kept client auth: %+v", cfg.Web.Listeners[0].TLS)
+	}
+}

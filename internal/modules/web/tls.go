@@ -3,13 +3,58 @@ package web
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/netutil"
 )
+
+// clientAuthFor maps the configured mode to the TLS constant. Unknown values
+// behave like "off" (the normaliser already repaired them).
+func clientAuthFor(mode string) (tls.ClientAuthType, bool) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case model.ClientAuthRequest:
+		return tls.RequestClientCert, true
+	case model.ClientAuthRequire:
+		return tls.RequireAndVerifyClientCert, true
+	default:
+		return tls.NoClientCert, false
+	}
+}
+
+// clientCAPool parses the configured PEM bundle. An empty or invalid bundle
+// yields an error so the listener can refuse to start rather than silently
+// accepting any client certificate.
+func clientCAPool(bundle string) (*x509.CertPool, error) {
+	pool := x509.NewCertPool()
+	rest := []byte(bundle)
+	added := 0
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("parse client CA: %w", err)
+		}
+		pool.AddCert(cert)
+		added++
+	}
+	if added == 0 {
+		return nil, fmt.Errorf("client CA bundle contains no certificate")
+	}
+	return pool, nil
+}
 
 // acmeTimeout bounds one on demand certificate request.
 const acmeTimeout = 3 * time.Minute
