@@ -36,6 +36,9 @@ type accountManager struct {
 	mu      sync.Mutex
 	client  *acme.Client
 	account *acme.Account
+	// directory is the CA directory the current client and registration belong
+	// to. It is set by clientFor and used when the registration is persisted.
+	directory string
 }
 
 // storedAccount is the on disk representation of a registration.
@@ -78,12 +81,18 @@ func (m *accountManager) clientFor(ctx context.Context, cfg *model.ACMEConfig) (
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.client != nil {
+	directory := directoryURL(cfg != nil && cfg.Staging)
+	if m.client != nil && m.directory == directory {
 		if err := m.syncContact(ctx, email); err != nil {
 			return nil, err
 		}
 		return m.client, nil
 	}
+	// The directory changed (staging toggled): drop the client, the account key
+	// is shared but the registration belongs to one directory.
+	m.client = nil
+	m.account = nil
+	m.directory = directory
 
 	key, err := m.loadOrCreateKey()
 	if err != nil {
@@ -91,7 +100,7 @@ func (m *accountManager) clientFor(ctx context.Context, cfg *model.ACMEConfig) (
 	}
 	client := &acme.Client{
 		Key:          key,
-		DirectoryURL: letsencryptDirectory,
+		DirectoryURL: directory,
 		HTTPClient:   httpc.New(60*time.Second, false),
 		UserAgent:    version.Name + "/" + version.Version + " (acme)",
 	}
@@ -101,7 +110,7 @@ func (m *accountManager) clientFor(ctx context.Context, cfg *model.ACMEConfig) (
 		return nil, err
 	}
 	var registered *acme.Account
-	if stored != nil && stored.URI != "" && stored.Directory == letsencryptDirectory {
+	if stored != nil && stored.URI != "" && stored.Directory == directory {
 		client.KID = acme.KeyID(stored.URI)
 		registered, err = client.GetReg(ctx, stored.URI)
 		if err != nil {
@@ -129,7 +138,7 @@ func (m *accountManager) clientFor(ctx context.Context, cfg *model.ACMEConfig) (
 	if err := m.syncContact(ctx, email); err != nil {
 		return nil, err
 	}
-	m.log.Info("acme account ready", "directory", letsencryptDirectory, "account", registered.URI)
+	m.log.Info("acme account ready", "directory", directory, "account", registered.URI)
 	return m.client, nil
 }
 
@@ -241,8 +250,12 @@ func (m *accountManager) saveAccount(acct *acme.Account) error {
 	if acct == nil {
 		return nil
 	}
+	directory := m.directory
+	if directory == "" {
+		directory = letsencryptDirectory
+	}
 	rec := storedAccount{
-		Directory: letsencryptDirectory,
+		Directory: directory,
 		URI:       acct.URI,
 		Status:    acct.Status,
 		Contact:   acct.Contact,

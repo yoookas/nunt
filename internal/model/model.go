@@ -353,8 +353,12 @@ type CustomCallback struct {
 
 // ACMEConfig is the certificate module configuration.
 type ACMEConfig struct {
-	Email   string    `json:"email"`
-	KeyType string    `json:"keyType"`
+	Email   string `json:"email"`
+	KeyType string `json:"keyType"`
+	// Staging switches the account and the orders to the Let's Encrypt staging
+	// directory. The certificates it returns are not trusted by browsers; it
+	// exists to debug a challenge without spending the production rate limits.
+	Staging bool      `json:"staging,omitempty"`
 	Jobs    []CertJob `json:"jobs"`
 }
 

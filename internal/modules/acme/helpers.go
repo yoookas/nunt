@@ -32,8 +32,21 @@ const (
 	wireTLSALPN01 = "tls-alpn-01"
 )
 
-// letsencryptDirectory is the only ACME directory this build talks to.
-const letsencryptDirectory = "https://acme-v02.api.letsencrypt.org/directory"
+// The two Let's Encrypt directories this build talks to. Staging issues real
+// looking but untrusted certificates with much higher rate limits, which is what
+// a first DNS-01 or HTTP-01 setup should use.
+const (
+	letsencryptDirectory        = "https://acme-v02.api.letsencrypt.org/directory"
+	letsencryptStagingDirectory = "https://acme-staging-v02.api.letsencrypt.org/directory"
+)
+
+// directoryURL returns the ACME directory for the configured mode.
+func directoryURL(staging bool) string {
+	if staging {
+		return letsencryptStagingDirectory
+	}
+	return letsencryptDirectory
+}
 
 // normalizeChallenge returns the canonical (stored) form of a challenge
 // selector. Both the short form used by the configuration and the RFC 8555

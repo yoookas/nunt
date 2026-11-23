@@ -528,15 +528,18 @@ func (a *ACME) handleProviders(w http.ResponseWriter, r *http.Request) {
 // acmeConfigView is the instance wide account configuration plus the option
 // catalogs the UI needs to render the form.
 type acmeConfigView struct {
-	Email    string              `json:"email"`
-	KeyType  string              `json:"keyType"`
-	KeyTypes []map[string]string `json:"keyTypes"`
+	Email     string              `json:"email"`
+	KeyType   string              `json:"keyType"`
+	Staging   bool                `json:"staging"`
+	Directory string              `json:"directory"`
+	KeyTypes  []map[string]string `json:"keyTypes"`
 }
 
 // acmeConfigUpdate is the writable subset of acmeConfigView.
 type acmeConfigUpdate struct {
 	Email   string `json:"email"`
 	KeyType string `json:"keyType"`
+	Staging bool   `json:"staging"`
 }
 
 func configView(cfg *model.ACMEConfig) acmeConfigView {
@@ -545,9 +548,11 @@ func configView(cfg *model.ACMEConfig) acmeConfigView {
 		keyType = keyEC256
 	}
 	return acmeConfigView{
-		Email:    cfg.Email,
-		KeyType:  keyType,
-		KeyTypes: keyCatalog(),
+		Email:     cfg.Email,
+		KeyType:   keyType,
+		Staging:   cfg.Staging,
+		Directory: directoryURL(cfg.Staging),
+		KeyTypes:  keyCatalog(),
 	}
 }
 
@@ -580,6 +585,7 @@ func (a *ACME) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	if err := a.deps.Cfg.Update(func(c *model.Config) error {
 		c.ACME.Email = email
 		c.ACME.KeyType = keyType
+		c.ACME.Staging = req.Staging
 		return nil
 	}); err != nil {
 		rest.Fail(w, http.StatusBadRequest, "cannot save the ACME configuration: %s", err)

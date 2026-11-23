@@ -24,3 +24,12 @@ func publicKeyEqual(a, b crypto.PublicKey) bool {
 	}
 	return false
 }
+
+func TestDirectoryURL(t *testing.T) {
+	if got := directoryURL(false); got != letsencryptDirectory {
+		t.Fatalf("production directory = %q", got)
+	}
+	if got := directoryURL(true); got != letsencryptStagingDirectory {
+		t.Fatalf("staging directory = %q", got)
+	}
+}

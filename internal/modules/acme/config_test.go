@@ -2,12 +2,17 @@ package acme
 
 import (
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/acme"
 
 	"github.com/nunt/nunt/internal/config"
 	"github.com/nunt/nunt/internal/model"
@@ -99,5 +104,39 @@ func TestUpdateConfigRejectsInvalidInput(t *testing.T) {
 				t.Fatalf("a rejected update changed the configuration: %+v", after)
 			}
 		})
+	}
+}
+
+func TestConfigViewExposesStaging(t *testing.T) {
+	view := configView(&model.ACMEConfig{Email: "ops@example.com", Staging: true})
+	if !view.Staging {
+		t.Fatal("staging must be reported")
+	}
+	if view.Directory != letsencryptStagingDirectory {
+		t.Fatalf("directory = %q", view.Directory)
+	}
+	prod := configView(&model.ACMEConfig{})
+	if prod.Staging || prod.Directory != letsencryptDirectory {
+		t.Fatalf("production view = %+v", prod)
+	}
+}
+
+func TestStoredAccountKeepsTheDirectory(t *testing.T) {
+	deps := &module.Deps{DataDir: t.TempDir()}
+	m := newAccountManager(deps, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	m.directory = letsencryptStagingDirectory
+	if err := m.saveAccount(&acme.Account{URI: "https://acme-staging-v02.api.letsencrypt.org/acct/1", Status: "valid"}); err != nil {
+		t.Fatalf("saveAccount: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(deps.DataDir, "acme", "account.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored storedAccount
+	if err := json.Unmarshal(data, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Directory != letsencryptStagingDirectory {
+		t.Fatalf("stored directory = %q, want staging", stored.Directory)
 	}
 }

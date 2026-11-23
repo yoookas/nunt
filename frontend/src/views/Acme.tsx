@@ -3,6 +3,7 @@ import { Button, Tabs } from '@heroui/react'
 import { api, errorText } from '../api'
 import { fmtTime, splitLines, splitList } from '../format'
 import {
+  AlertBox,
   ConfirmModal,
   DataTable,
   FormModal,
@@ -89,6 +90,8 @@ interface Certificate {
 interface AcmeConfig {
   email: string
   keyType: string
+  staging?: boolean
+  directory?: string
   keyTypes?: { id: string; title: string }[]
 }
 
@@ -222,7 +225,7 @@ export default function Acme() {
     key: '',
     chain: '',
   })
-  const [configForm, setConfigForm] = useState({ email: '', keyType: 'ec256' as KeyType })
+  const [configForm, setConfigForm] = useState({ email: '', keyType: 'ec256' as KeyType, staging: false })
 
   const [deleteJobTarget, setDeleteJobTarget] = useState<AcmeJob | null>(null)
   const [deleteCertTarget, setDeleteCertTarget] = useState<Certificate | null>(null)
@@ -275,10 +278,11 @@ export default function Acme() {
       const next: AcmeConfig = {
         email: data?.email || '',
         keyType: normalizeKeyType(data?.keyType),
+        staging: !!data?.staging,
         keyTypes: Array.isArray(data?.keyTypes) ? data.keyTypes : undefined,
       }
       setConfig(next)
-      setConfigForm({ email: next.email, keyType: next.keyType as KeyType })
+      setConfigForm({ email: next.email, keyType: next.keyType as KeyType, staging: !!next.staging })
     } catch (err) {
       toast.danger(errorText(err))
     }
@@ -389,7 +393,7 @@ export default function Acme() {
     }
     setConfigSaving(true)
     try {
-      await api.put('/api/v1/acme/config', { email, keyType: configForm.keyType })
+      await api.put('/api/v1/acme/config', { email, keyType: configForm.keyType, staging: configForm.staging })
       toast.success('ACME 设置已保存')
       setConfigOpen(false)
       await loadConfig()
@@ -1030,6 +1034,17 @@ export default function Acme() {
           <div className="rounded-md border border-border bg-background-secondary p-3 text-sm text-muted">
             证书颁发机构固定为 Let&apos;s Encrypt，所有证书任务共用一个 ACME 账户。
           </div>
+          <SwitchInput
+            label="使用 staging（测试）环境"
+            value={configForm.staging}
+            onChange={(value) => setConfigForm((prev) => ({ ...prev, staging: value }))}
+            hint="staging 签发的是浏览器不信任的测试证书，配额宽松，适合调试挑战；切换后需要重新签发，正式使用前务必关掉。"
+          />
+          {configForm.staging ? (
+            <AlertBox status="warning" title="当前是测试环境">
+              staging 证书不能被浏览器信任，不要把它配到对外的 Web 规则上。切换回正式环境后重新签发一次即可。
+            </AlertBox>
+          ) : null}
           <TextInput
             label="联系邮箱"
             value={configForm.email}
