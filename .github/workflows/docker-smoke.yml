@@ -207,4 +207,6 @@ jobs:
 
       - name: Clean up the compose data directory
         if: always()
-        run: rm -rf "$PWD/data"
+        # The entrypoint chowns the bind mount to PUID (1000), which the runner
+        # user cannot traverse, so removing it needs root.
+        run: sudo rm -rf "$PWD/data"
