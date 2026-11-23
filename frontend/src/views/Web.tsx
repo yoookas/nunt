@@ -340,6 +340,11 @@ export default function Web() {
                 {certDomainsText(row.tls?.certId, certificates)}
               </span>
             ) : null}
+            {row.tls?.clientAuth && row.tls.clientAuth !== 'off' ? (
+              <span className="text-xs text-muted">
+                mTLS：{row.tls.clientAuth === 'require' ? '必须' : '可选'}
+              </span>
+            ) : null}
           </div>,
         )
       },
@@ -597,12 +602,17 @@ export default function Web() {
                       <span className="truncate text-sm font-medium">{listener.name || listener.id}</span>
                       <StatusChip color={tlsColor(mode)}>{TLS_LABEL[mode] || '关闭'}</StatusChip>
                     </div>
-                    <div className="mt-1 flex flex-wrap gap-1">
+                    <div className="mt-1 flex flex-wrap items-center gap-1">
                       {(Array.isArray(listener.listen) ? listener.listen : []).map((item) => (
                         <span key={item} className="mono rounded-full bg-default px-2 py-0.5 text-[11px]">
                           {item}
                         </span>
                       ))}
+                      {listener.tls?.clientAuth && listener.tls.clientAuth !== 'off' ? (
+                        <StatusChip color={listener.tls.clientAuth === 'require' ? 'success' : 'warning'}>
+                          mTLS
+                        </StatusChip>
+                      ) : null}
                     </div>
                     <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-muted">
                       <span>{listenerRouteCount(listener)} 条路由</span>

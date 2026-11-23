@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button, Input, TextField } from '@heroui/react'
 import { api, errorText } from '../../api'
-import { splitLines } from '../../format'
+import { splitLines, splitList } from '../../format'
 import { useProvinces } from '../../useProvinces'
 import {
   FormModal,
@@ -73,6 +73,12 @@ interface RouteForm {
   proxyH2C: boolean
   proxyRateLimit: number
   proxyMaxBody: number
+  corsEnable: boolean
+  corsOrigins: string
+  corsMethods: string
+  corsHeaders: string
+  corsCredentials: boolean
+  corsMaxAge: number
   redirectTo: string
   redirectStatus: number
   redirectKeep: boolean
@@ -115,6 +121,12 @@ function blankForm(): RouteForm {
     proxyH2C: false,
     proxyRateLimit: 0,
     proxyMaxBody: 0,
+    corsEnable: false,
+    corsOrigins: '',
+    corsMethods: '',
+    corsHeaders: '',
+    corsCredentials: false,
+    corsMaxAge: 0,
     redirectTo: '',
     redirectStatus: 302,
     redirectKeep: false,
@@ -219,6 +231,12 @@ export default function RouteModal({
       proxyH2C: !!proxy?.h2c,
       proxyRateLimit: num(proxy?.rateLimitPerSec, 0),
       proxyMaxBody: num(proxy?.maxBodyBytes, 0),
+      corsEnable: !!proxy?.cors,
+      corsOrigins: (Array.isArray(proxy?.cors?.origins) ? proxy?.cors?.origins ?? [] : []).join('\n'),
+      corsMethods: (Array.isArray(proxy?.cors?.methods) ? proxy?.cors?.methods ?? [] : []).join(', '),
+      corsHeaders: (Array.isArray(proxy?.cors?.headers) ? proxy?.cors?.headers ?? [] : []).join(', '),
+      corsCredentials: !!proxy?.cors?.credentials,
+      corsMaxAge: num(proxy?.cors?.maxAge, 0),
       redirectTo: redirect?.to || '',
       redirectStatus: num(redirect?.status, 302) || 302,
       redirectKeep: !!redirect?.keepPath,
@@ -255,7 +273,8 @@ export default function RouteModal({
         !!p?.pathPrefix ||
         !!p?.pathReplace ||
         Object.keys(p?.headers || {}).length > 0 ||
-        Object.keys(p?.respHeaders || {}).length > 0,
+        Object.keys(p?.respHeaders || {}).length > 0 ||
+        !!p?.cors,
     )
   }, [rule])
 
@@ -284,6 +303,10 @@ export default function RouteModal({
     const proxyTargets = splitLines(form.proxyTargets)
     if (type === 'proxy' && !proxyTargets.length) {
       toast.warning('反向代理路由至少需要一个上游地址')
+      return
+    }
+    if (type === 'proxy' && form.corsEnable && !splitLines(form.corsOrigins).length) {
+      toast.warning('启用 CORS 后至少需要一个允许的来源（* 表示全部）')
       return
     }
     if (type === 'redirect' && !form.redirectTo.trim()) {
@@ -391,6 +414,15 @@ export default function RouteModal({
         h2c: !!form.proxyH2C,
         rateLimitPerSec: num(form.proxyRateLimit, 0),
         maxBodyBytes: num(form.proxyMaxBody, 0),
+        cors: form.corsEnable
+          ? {
+              origins: splitLines(form.corsOrigins),
+              methods: splitList(form.corsMethods),
+              headers: splitList(form.corsHeaders),
+              credentials: !!form.corsCredentials,
+              maxAge: num(form.corsMaxAge, 0),
+            }
+          : null,
       }
     } else if (type === 'redirect') {
       payload.redirect = {
@@ -500,7 +532,7 @@ export default function RouteModal({
               label="高级选项"
               value={advanced}
               onChange={setAdvanced}
-              hint="优先级、备注、超时、限速、请求体上限、路径重写、自定义请求/响应头；不展开也能正常保存"
+              hint="优先级、备注、超时、限速、请求体上限、路径重写、自定义请求/响应头、CORS；不展开也能正常保存"
             />
           </div>
 
@@ -619,6 +651,56 @@ export default function RouteModal({
                   placeholder="每行一条，例如 X-Frame-Options: DENY"
                 />
               </div>
+              <div className="md:col-span-2 mt-1 border-t border-border pt-3">
+                <SwitchInput
+                  label="启用 CORS"
+                  value={form.corsEnable}
+                  onChange={(value) => patch({ corsEnable: value })}
+                  hint="由代理直接回应对跨域预检（OPTIONS）并补 Access-Control-* 头；关闭时完全交给上游"
+                />
+              </div>
+              {form.corsEnable ? (
+                <>
+                  <div className="md:col-span-2">
+                    <TextAreaInput
+                      label="允许的来源"
+                      value={form.corsOrigins}
+                      onChange={(value) => patch({ corsOrigins: value })}
+                      rows={2}
+                      required
+                      placeholder="每行一个，例如 https://app.example.com"
+                      hint="精确匹配（忽略大小写与末尾斜杠）；填 * 表示允许任何来源"
+                    />
+                  </div>
+                  <TextInput
+                    label="允许的方法"
+                    value={form.corsMethods}
+                    onChange={(value) => patch({ corsMethods: value })}
+                    placeholder="GET, POST"
+                    hint="逗号或空格分隔；留空表示常用方法（GET/HEAD/POST/PUT/PATCH/DELETE/OPTIONS）"
+                  />
+                  <TextInput
+                    label="允许的请求头"
+                    value={form.corsHeaders}
+                    onChange={(value) => patch({ corsHeaders: value })}
+                    placeholder="Content-Type, Authorization"
+                    hint="逗号分隔；留空表示回显预检请求里的头"
+                  />
+                  <SwitchInput
+                    label="允许携带凭据"
+                    value={form.corsCredentials}
+                    onChange={(value) => patch({ corsCredentials: value })}
+                    hint="开启后浏览器不接受 * 作为来源，会回显具体 Origin"
+                  />
+                  <NumberInput
+                    label="预检缓存（秒）"
+                    value={form.corsMaxAge}
+                    onChange={(value) => patch({ corsMaxAge: Number.isFinite(value) ? value : 0 })}
+                    min={0}
+                    hint="Access-Control-Max-Age；0 表示不设置"
+                  />
+                </>
+              ) : null}
                 </>
               ) : null}
             </>

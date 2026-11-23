@@ -1,12 +1,23 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@heroui/react'
 import { api, errorText } from '../../api'
-import { FormModal, SelectInput, SwitchInput, TagInput, TextInput, toast } from '../../ui'
 import {
+  FormModal,
+  SelectInput,
+  SwitchInput,
+  TagInput,
+  TextAreaInput,
+  TextInput,
+  toast,
+} from '../../ui'
+import {
+  CLIENT_AUTH_OPTIONS,
   TLS_OPTIONS,
   certOptions,
+  normalizeClientAuth,
   normalizeTLSMode,
   type Certificate,
+  type ClientAuthMode,
   type TLSMode,
   type WebListenerView,
 } from './types'
@@ -17,6 +28,8 @@ interface ListenerForm {
   tlsMode: TLSMode
   tlsCertId: string
   tlsHsts: boolean
+  clientAuth: ClientAuthMode
+  clientCa: string
   remark: string
 }
 
@@ -27,6 +40,8 @@ function blankForm(): ListenerForm {
     tlsMode: 'off',
     tlsCertId: '',
     tlsHsts: false,
+    clientAuth: 'off',
+    clientCa: '',
     remark: '',
   }
 }
@@ -59,6 +74,8 @@ export default function ListenerModal({
       tlsMode: normalizeTLSMode(listener.tls?.mode),
       tlsCertId: listener.tls?.certId || '',
       tlsHsts: !!listener.tls?.hsts,
+      clientAuth: normalizeClientAuth(listener.tls?.clientAuth),
+      clientCa: listener.tls?.clientCa || '',
       remark: listener.remark || '',
     })
   }, [open, listener])
@@ -76,6 +93,11 @@ export default function ListenerModal({
       toast.warning('指定证书模式必须选择一个证书')
       return
     }
+    const clientAuth: ClientAuthMode = mode === 'off' ? 'off' : normalizeClientAuth(form.clientAuth)
+    if (clientAuth !== 'off' && !form.clientCa.trim()) {
+      toast.warning('要求客户端证书时必须提供签发它的 CA 证书（PEM）')
+      return
+    }
 
     const payload = {
       name: form.name.trim(),
@@ -84,6 +106,8 @@ export default function ListenerModal({
         mode,
         certId: mode === 'custom' ? form.tlsCertId.trim() : '',
         hsts: mode !== 'off' && form.tlsHsts,
+        clientAuth,
+        clientCa: clientAuth === 'off' ? '' : form.clientCa.trim(),
       },
       remark: form.remark.trim(),
     }
@@ -160,6 +184,27 @@ export default function ListenerModal({
           disabled={form.tlsMode === 'off'}
           hint="仅 TLS 非关闭时可用，对 TLS 响应附加 Strict-Transport-Security"
         />
+        <SelectInput
+          label="客户端证书（mTLS）"
+          value={form.tlsMode === 'off' ? 'off' : form.clientAuth}
+          onChange={(value) => patch({ clientAuth: normalizeClientAuth(value) })}
+          options={CLIENT_AUTH_OPTIONS}
+          disabled={form.tlsMode === 'off'}
+          hint="要求访问者出示由指定 CA 签发的证书，适合设备或脚本的双向认证"
+        />
+        {form.tlsMode !== 'off' && form.clientAuth !== 'off' ? (
+          <div className="md:col-span-2">
+            <TextAreaInput
+              label="客户端 CA 证书（PEM）"
+              value={form.clientCa}
+              onChange={(value) => patch({ clientCa: value })}
+              rows={5}
+              required
+              placeholder={'-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----'}
+              hint="可包含多张 CA；保存时会校验能否解析出至少一张证书，解析失败会被拒绝。"
+            />
+          </div>
+        ) : null}
         {form.tlsMode === 'custom' ? (
           <div className="md:col-span-2">
             <SelectInput

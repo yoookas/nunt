@@ -6,6 +6,7 @@ import type { SelectOption } from '../../ui'
 
 export type RouteType = 'proxy' | 'redirect' | 'static'
 export type TLSMode = 'off' | 'auto' | 'custom'
+export type ClientAuthMode = 'off' | 'request' | 'require'
 export type AccessMode = 'off' | 'allow' | 'deny'
 export type UAMode = 'off' | 'allow' | 'deny'
 
@@ -13,6 +14,8 @@ export interface WebTLS {
   mode: TLSMode
   certId?: string
   hsts?: boolean
+  clientAuth?: ClientAuthMode
+  clientCa?: string
 }
 
 export interface WebListener {
@@ -48,9 +51,18 @@ export interface BasicAuth {
   users?: BasicAuthUser[]
 }
 
+export interface CORS {
+  origins: string[]
+  methods?: string[]
+  headers?: string[]
+  credentials?: boolean
+  maxAge?: number
+}
+
 export interface ProxyTarget {
   targets: string[]
   balance?: string
+  cors?: CORS | null
   hostHeader?: string
   headers?: Record<string, string>
   respHeaders?: Record<string, string>
@@ -165,6 +177,12 @@ export const TLS_LABEL: Record<string, string> = {
   custom: '指定证书',
 }
 
+export const CLIENT_AUTH_OPTIONS: SelectOption[] = [
+  { value: 'off', label: '不要求（默认）' },
+  { value: 'request', label: '可选：带证书则校验' },
+  { value: 'require', label: '必须：无有效证书拒绝握手' },
+]
+
 export const ACCESS_OPTIONS: SelectOption[] = [
   { value: 'off', label: '关闭' },
   { value: 'allow', label: '白名单（仅允许以下列表）' },
@@ -204,6 +222,12 @@ export const REDIRECT_STATUS_OPTIONS: SelectOption[] = [
 export function normalizeTLSMode(value: unknown): TLSMode {
   const mode = String(value ?? '').trim().toLowerCase()
   if (mode === 'auto' || mode === 'custom') return mode
+  return 'off'
+}
+
+export function normalizeClientAuth(value: unknown): ClientAuthMode {
+  const mode = String(value ?? '').trim().toLowerCase()
+  if (mode === 'request' || mode === 'require') return mode
   return 'off'
 }
 
