@@ -171,7 +171,8 @@ export function DataTable<T>({
     )
   }
   return (
-    <div className="w-full overflow-x-auto">
+    <div className="data-table-scroll w-full overflow-x-auto overscroll-x-contain">
+      <div className="min-w-[600px] sm:min-w-0">
     <Table>
       <Table.Content aria-label={ariaLabel}>
         <Table.Header>
@@ -194,6 +195,7 @@ export function DataTable<T>({
         </Table.Body>
       </Table.Content>
     </Table>
+      </div>
     </div>
   )
 }

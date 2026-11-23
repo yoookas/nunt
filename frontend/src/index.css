@@ -32,3 +32,14 @@ body {
 [data-slot="chip-label"] {
   white-space: nowrap;
 }
+
+/* Wide data tables are read by horizontal scrolling on phones. Keep the
+   scrollbar thin and make the gesture feel native. */
+.data-table-scroll {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.data-table-scroll::-webkit-scrollbar {
+  height: 6px;
+}

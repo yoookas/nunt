@@ -693,15 +693,13 @@ export default function Web() {
             </div>
           ) : null}
 
-          <div className="overflow-x-auto">
-            <DataTable
+          <DataTable
               items={filteredRules}
               columns={routeColumns}
               rowKey={(row) => row.id}
               ariaLabel="Web 路由"
               empty={loading ? '加载中…' : routeEmptyText}
             />
-          </div>
         </Panel>
       </div>
 

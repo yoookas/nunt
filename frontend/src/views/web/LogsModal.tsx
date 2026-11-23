@@ -160,15 +160,13 @@ export default function LogsModal({
           <div className="flex-1" />
           <span className="text-xs text-muted">最近 {logs.length} 条</span>
         </div>
-        <div className="overflow-x-auto">
-          <DataTable
+        <DataTable
             items={logs}
             columns={columns}
             rowKey={(row) => row._key}
             ariaLabel="访问日志"
             empty={loading ? '加载中…' : '暂无访问日志（可能未开启访问日志记录）'}
           />
-        </div>
       </div>
     </FormModal>
   )
