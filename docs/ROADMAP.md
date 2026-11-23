@@ -73,7 +73,7 @@
 | 2 | Let's Encrypt staging 开关 | ✅ 完成 | 证书页可切 staging；账号注册 URL 与目录绑定，切换后重新注册，正式证书不受影响 |
 | 3 | 流量历史图表 | ✅ 完成 | 概览页按小时画最近 24 小时的请求量（5xx 标红），数据来自访问日志分桶，不新增存储 |
 | 4 | `/metrics`（Prometheus） | ✅ 完成 | 文本格式，挂在同一个鉴权后面（用只读 API Token 抓取） |
-| 5 | CORS（预检短路） | 0.5 天 | 前后端分离 + 静态路由需要跨域时 |
+| 5 | CORS（预检短路） | ✅ 完成 | 代理规则可配 origins/methods/headers/credentials/maxAge，OPTIONS 本地 204 |
 | 6 | mTLS（客户端证书） | 1 天 | 给设备/脚本做双向认证，替代 BasicAuth |
 
 ---

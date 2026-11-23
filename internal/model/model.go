@@ -245,6 +245,20 @@ type ProxyTarget struct {
 	// MaxBodyBytes caps the size of a request body the rule forwards. Zero (the
 	// default) means the body size is not limited.
 	MaxBodyBytes int64 `json:"maxBodyBytes,omitempty"`
+	// CORS answers cross-origin requests and preflight checks in front of the
+	// upstream. Nil keeps the upstream in charge of its own CORS headers.
+	CORS *CORS `json:"cors,omitempty"`
+}
+
+// CORS is the cross-origin policy of one proxy rule. Origins accepts exact
+// origins ("https://app.example.com") or "*"; methods and headers are the
+// values echoed to the preflight request.
+type CORS struct {
+	Origins     []string `json:"origins"`
+	Methods     []string `json:"methods,omitempty"`
+	Headers     []string `json:"headers,omitempty"`
+	Credentials bool     `json:"credentials,omitempty"`
+	MaxAge      int      `json:"maxAge,omitempty"`
 }
 
 // RedirectTgt is a redirect / URL rewrite definition.

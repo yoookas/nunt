@@ -319,7 +319,14 @@ func (w *Web) proxySite(r *rule, cfg *model.Config) (*webSite, error) {
 		return nil, fmt.Errorf("rule %q: %w", r.name, err)
 	}
 
+	cors := newCORSPolicy(target.CORS)
+
 	var handler http.Handler = http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		// CORS runs before anything that reads the body: a preflight has no
+		// body and must be answered without touching the upstream.
+		if cors != nil && cors.applyCORS(rw, req) {
+			return
+		}
 		// The body limit is applied here, right in front of the upstream, so a
 		// request that the WAF already inspected is not read twice.
 		if !w.capRequestBody(rw, r, req) {
