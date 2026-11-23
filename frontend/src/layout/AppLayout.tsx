@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Avatar, Button, Drawer, Dropdown, Menu, useOverlayState } from '@heroui/react'
-import { LogOut, Menu as MenuIcon, Moon, Sun } from 'lucide-react'
+import { LogOut, Menu as MenuIcon, Monitor, Moon, Sun } from 'lucide-react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { menu } from '../menu'
 import { useAuth } from '../session'
-import { useTheme } from '../theme'
+import { useTheme, type ThemeMode } from '../theme'
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   const location = useLocation()
@@ -40,7 +40,7 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
 
 export default function AppLayout() {
   const { user, logout } = useAuth()
-  const { theme, toggle } = useTheme()
+  const { theme, setTheme } = useTheme()
   const navigate = useNavigate()
   const location = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -104,14 +104,30 @@ export default function AppLayout() {
             <div className="truncate text-[11px] text-muted">nunt 管理后台</div>
           </div>
           <div className="flex-1" />
-          <Button
-            isIconOnly
-            variant="ghost"
-            aria-label={theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'}
-            onPress={toggle}
-          >
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-          </Button>
+          <Dropdown>
+            <Dropdown.Trigger>
+              <Button isIconOnly variant="ghost" aria-label="颜色模式">
+                {theme === 'system' ? <Monitor size={18} /> : theme === 'light' ? <Sun size={18} /> : <Moon size={18} />}
+              </Button>
+            </Dropdown.Trigger>
+            <Dropdown.Popover>
+              <Dropdown.Menu
+                selectionMode="single"
+                selectedKeys={[theme]}
+                onAction={(key) => setTheme(String(key) as ThemeMode)}
+              >
+                <Dropdown.Item id="light" textValue="浅色">
+                  浅色
+                </Dropdown.Item>
+                <Dropdown.Item id="dark" textValue="深色">
+                  深色
+                </Dropdown.Item>
+                <Dropdown.Item id="system" textValue="跟随系统">
+                  跟随系统
+                </Dropdown.Item>
+              </Dropdown.Menu>
+            </Dropdown.Popover>
+          </Dropdown>
           <Dropdown>
             <Dropdown.Trigger>
               <Button variant="ghost">

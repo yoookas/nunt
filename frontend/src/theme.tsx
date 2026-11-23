@@ -1,18 +1,34 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 
-type Theme = 'dark' | 'light'
+export type ThemeMode = 'system' | 'light' | 'dark'
+type ResolvedTheme = 'light' | 'dark'
 
 const STORAGE_KEY = 'nunt.theme'
+const MEDIA = '(prefers-color-scheme: dark)'
 
 interface ThemeContextValue {
-  theme: Theme
-  setTheme: (theme: Theme) => void
+  /** What the user picked, including "follow the system". */
+  theme: ThemeMode
+  /** What is actually painted right now. */
+  resolved: ResolvedTheme
+  setTheme: (theme: ThemeMode) => void
   toggle: () => void
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null)
 
-function apply(theme: Theme) {
+function prefersDark(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia(MEDIA).matches
+    : false
+}
+
+function resolve(mode: ThemeMode): ResolvedTheme {
+  if (mode === 'system') return prefersDark() ? 'dark' : 'light'
+  return mode
+}
+
+function apply(theme: ResolvedTheme) {
   const root = document.documentElement
   root.classList.toggle('dark', theme === 'dark')
   root.dataset.theme = theme
@@ -20,19 +36,39 @@ function apply(theme: Theme) {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(() => {
+  // "system" is the default so a fresh browser follows the OS out of the box.
+  const [theme, setThemeState] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem(STORAGE_KEY)
-    return saved === 'light' ? 'light' : 'dark'
+    return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system'
   })
+  const [resolved, setResolved] = useState<ResolvedTheme>(() => resolve(theme))
 
   useEffect(() => {
-    apply(theme)
+    const next = resolve(theme)
+    setResolved(next)
+    apply(next)
     localStorage.setItem(STORAGE_KEY, theme)
+    if (theme !== 'system' || typeof window.matchMedia !== 'function') return
+    // Follow the OS live: switching the system theme repaints without a reload.
+    const media = window.matchMedia(MEDIA)
+    const onChange = () => {
+      const value: ResolvedTheme = media.matches ? 'dark' : 'light'
+      setResolved(value)
+      apply(value)
+    }
+    media.addEventListener('change', onChange)
+    return () => media.removeEventListener('change', onChange)
   }, [theme])
 
-  const setTheme = useCallback((next: Theme) => setThemeState(next), [])
-  const toggle = useCallback(() => setThemeState((prev) => (prev === 'dark' ? 'light' : 'dark')), [])
-  const value = useMemo(() => ({ theme, setTheme, toggle }), [theme, setTheme, toggle])
+  const setTheme = useCallback((next: ThemeMode) => setThemeState(next), [])
+  const toggle = useCallback(
+    () => setThemeState((prev) => (resolve(prev) === 'dark' ? 'light' : 'dark')),
+    [],
+  )
+  const value = useMemo(
+    () => ({ theme, resolved, setTheme, toggle }),
+    [theme, resolved, setTheme, toggle],
+  )
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }

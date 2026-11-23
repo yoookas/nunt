@@ -120,6 +120,7 @@ const LOG_LEVELS: SelectOption[] = [
 ]
 
 const THEMES: SelectOption[] = [
+  { value: 'system', label: '跟随系统' },
   { value: 'dark', label: '深色' },
   { value: 'light', label: '浅色' },
 ]
@@ -561,7 +562,7 @@ export default function Settings() {
         applySettingsForm(payload)
         setListen((prev) => ({ ...prev, config: payload.adminListen, actual: payload.adminListen || prev.actual }))
       }
-      if (payload.theme === 'dark' || payload.theme === 'light') {
+      if (payload.theme === 'dark' || payload.theme === 'light' || payload.theme === 'system') {
         setTheme(payload.theme)
       }
       const effective = result?.adminListen || listen.actual || payload.adminListen
