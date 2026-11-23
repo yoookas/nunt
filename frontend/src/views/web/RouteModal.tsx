@@ -160,6 +160,7 @@ export default function RouteModal({
   const [form, setForm] = useState<RouteForm>(blankForm)
   const [existingAuthNames, setExistingAuthNames] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
+  const [advanced, setAdvanced] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -233,6 +234,30 @@ export default function RouteModal({
   }, [open, rule, defaultListenerId])
 
   const patch = (next: Partial<RouteForm>) => setForm((prev) => ({ ...prev, ...next }))
+
+  // Advanced fields stay folded unless the rule already uses one of them, so
+  // editing a simple rule does not show a wall of options.
+  useEffect(() => {
+    if (!rule) {
+      setAdvanced(false)
+      return
+    }
+    const p = rule.proxy
+    setAdvanced(
+      Number(rule.priority || 0) !== 0 ||
+        !!rule.remark ||
+        Number(p?.timeoutSec || 0) > 0 ||
+        Number(p?.rateLimitPerSec || 0) > 0 ||
+        Number(p?.maxBodyBytes || 0) > 0 ||
+        !!p?.insecureTls ||
+        !!p?.disableCompression ||
+        !!p?.h2c ||
+        !!p?.pathPrefix ||
+        !!p?.pathReplace ||
+        Object.keys(p?.headers || {}).length > 0 ||
+        Object.keys(p?.respHeaders || {}).length > 0,
+    )
+  }, [rule])
 
   const updateUser = (index: number, next: Partial<AuthUserForm>) => {
     setForm((prev) => ({
@@ -453,13 +478,6 @@ export default function RouteModal({
             placeholder="/"
             hint="前缀匹配，例如 /blog"
           />
-          <NumberInput
-            label="优先级"
-            value={form.priority}
-            onChange={(value) => patch({ priority: Number.isFinite(value) ? value : 0 })}
-            min={0}
-            hint="数字越小越优先"
-          />
           <SwitchInput
             label="启用"
             value={form.enable}
@@ -476,14 +494,33 @@ export default function RouteModal({
               hint="留空表示匹配任意 Host，支持 *.example.com 通配"
             />
           </div>
-          <div className="md:col-span-2">
-            <TextInput
-              label="备注"
-              value={form.remark}
-              onChange={(value) => patch({ remark: value })}
-              placeholder="可选"
+
+          <div className="md:col-span-2 mt-1">
+            <SwitchInput
+              label="高级选项"
+              value={advanced}
+              onChange={setAdvanced}
+              hint="优先级、备注、超时、限速、请求体上限、路径重写、自定义请求/响应头；不展开也能正常保存"
             />
           </div>
+
+          {advanced ? (
+            <>
+              <NumberInput
+                label="优先级"
+                value={form.priority}
+                onChange={(value) => patch({ priority: Number.isFinite(value) ? value : 0 })}
+                min={0}
+                hint="数字越小越优先，默认 0"
+              />
+              <TextInput
+                label="备注"
+                value={form.remark}
+                onChange={(value) => patch({ remark: value })}
+                placeholder="可选"
+              />
+            </>
+          ) : null}
 
           {form.type === 'proxy' ? (
             <>
@@ -511,6 +548,8 @@ export default function RouteModal({
                 onChange={(value) => patch({ proxyHostHeader: value })}
                 placeholder="留空透传客户端 Host"
               />
+              {advanced ? (
+                <>
               <NumberInput
                 label="超时（秒）"
                 value={form.proxyTimeout}
@@ -580,6 +619,8 @@ export default function RouteModal({
                   placeholder="每行一条，例如 X-Frame-Options: DENY"
                 />
               </div>
+                </>
+              ) : null}
             </>
           ) : null}
 
@@ -662,43 +703,50 @@ export default function RouteModal({
             onChange={(value) => patch({ uaMode: normalizeAccessMode(value) })}
             options={ACCESS_OPTIONS}
           />
-          <div className="md:col-span-2">
-            <TextAreaInput
-              label="IP 列表"
-              value={form.accessIps}
-              onChange={(value) => patch({ accessIps: value })}
-              rows={2}
-              placeholder="每行一条，支持 CIDR，例如 192.168.1.0/24"
-            />
-          </div>
-          <div className="md:col-span-2">
-            <TagInput
-              label="国家/地区（ip2region）"
-              value={form.accessCountries}
-              onChange={(value) => patch({ accessCountries: value })}
-              placeholder="输入国家名后回车，例如 中国、美国"
-              hint="与 IP 列表取并集；需把 IP 策略设为白名单/黑名单，并先在「设置 → IP 地址库」配置数据库。"
-            />
-          </div>
-          <div className="md:col-span-2">
-            <MultiSelectInput
-              label="省份（ip2region）"
-              value={form.accessProvinces}
-              onChange={(value) => patch({ accessProvinces: value })}
-              options={provinces.options}
-              placeholder="选择省份"
-              hint={`与 IP 列表取并集；省份列表${provinces.source === 'database' ? '来自 ip2region 地址库' : '为内置列表'}，私有地址不参与地理匹配。`}
-            />
-          </div>
-          <div className="md:col-span-2">
-            <TextAreaInput
-              label="UA 列表"
-              value={form.uaList}
-              onChange={(value) => patch({ uaList: value })}
-              rows={2}
-              placeholder="每行一条，支持 * 通配，例如 *bot*"
-            />
-          </div>
+          {form.accessMode !== 'off' ? (
+            <>
+              <div className="md:col-span-2">
+                <TextAreaInput
+                  label="IP 列表"
+                  value={form.accessIps}
+                  onChange={(value) => patch({ accessIps: value })}
+                  rows={2}
+                  placeholder="每行一条，支持 CIDR，例如 192.168.1.0/24"
+                  hint="与下面的国家/省份取并集，命中任意一条即放行（白名单）或拒绝（黑名单）"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <TagInput
+                  label="国家/地区（ip2region）"
+                  value={form.accessCountries}
+                  onChange={(value) => patch({ accessCountries: value })}
+                  placeholder="输入国家名后回车，例如 中国、美国"
+                  hint="与 IP 列表取并集；需先在「设置 → IP 地址库」配置数据库"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <MultiSelectInput
+                  label="省份（ip2region）"
+                  value={form.accessProvinces}
+                  onChange={(value) => patch({ accessProvinces: value })}
+                  options={provinces.options}
+                  placeholder="选择省份"
+                  hint={`省份列表${provinces.source === 'database' ? '来自 ip2region 地址库' : '为内置列表'}，私有地址不参与地理匹配`}
+                />
+              </div>
+            </>
+          ) : null}
+          {form.uaMode !== 'off' ? (
+            <div className="md:col-span-2">
+              <TextAreaInput
+                label="UA 列表"
+                value={form.uaList}
+                onChange={(value) => patch({ uaList: value })}
+                rows={2}
+                placeholder="每行一条，支持 * 通配，例如 *bot*"
+              />
+            </div>
+          ) : null}
 
           <Section title="BasicAuth" />
           <SwitchInput
