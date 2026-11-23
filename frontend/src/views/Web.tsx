@@ -569,20 +569,24 @@ export default function Web() {
             </div>
           ) : null}
           <div className="space-y-2 p-2">
-            <button
-              type="button"
-              onClick={() => setSelectedListenerId('all')}
-              className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition-colors ${
-                selectedListenerId === 'all'
-                  ? 'border-accent bg-accent-soft text-accent-soft-foreground'
-                  : 'border-border hover:bg-default'
-              }`}
-            >
-              <span className="text-sm font-medium">全部监听器</span>
-              <StatusChip color={selectedListenerId === 'all' ? 'primary' : 'default'}>
-                {listeners.length}
-              </StatusChip>
-            </button>
+            {/* "All listeners" is a filter: with no listeners at all it says
+                nothing the empty state below does not already say. */}
+            {listeners.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setSelectedListenerId('all')}
+                className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                  selectedListenerId === 'all'
+                    ? 'border-accent bg-accent-soft text-accent-soft-foreground'
+                    : 'border-border hover:bg-default'
+                }`}
+              >
+                <span className="text-sm font-medium">全部监听器</span>
+                <StatusChip color={selectedListenerId === 'all' ? 'primary' : 'default'}>
+                  {listeners.length}
+                </StatusChip>
+              </button>
+            ) : null}
             {listeners.map((listener) => {
               const mode = tlsModeOf(listener)
               const active = selectedListenerId === listener.id

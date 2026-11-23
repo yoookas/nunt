@@ -163,6 +163,7 @@ const routes = [
   ['/settings', '设置'],
 ]
 const failures = []
+const emptyStateChecks = []
 for (const [route, title] of routes) {
   const before = errors.length
   window.location.hash = `#${route}`
@@ -176,6 +177,9 @@ for (const [route, title] of routes) {
     if (heading.includes(title)) break
   }
   if (!heading.includes(title)) failures.push(`${route}: heading is "${heading}", want "${title}"`)
+  if (route === '/web' && window.document.body.textContent.includes('全部监听器')) {
+    failures.push('/web: the all-listeners filter is shown with no listeners')
+  }
   const fresh = errors.splice(before)
   if (fresh.length) failures.push(`${route}: ${fresh.join(' | ')}`)
 }
