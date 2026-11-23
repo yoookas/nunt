@@ -12,6 +12,7 @@ const Ddns = lazy(() => import('./views/Ddns'))
 const Acme = lazy(() => import('./views/Acme'))
 const Waf = lazy(() => import('./views/Waf'))
 const Logs = lazy(() => import('./views/Logs'))
+const IpDatabase = lazy(() => import('./views/IpDatabase'))
 const Settings = lazy(() => import('./views/Settings'))
 
 function RequireAuth() {
@@ -57,6 +58,7 @@ const router = createHashRouter([
           { path: 'acme', element: <Acme /> },
           { path: 'waf', element: <Waf /> },
           { path: 'logs', element: <Logs /> },
+          { path: 'ipdb', element: <IpDatabase /> },
           { path: 'settings', element: <Settings /> },
           { path: 'password', element: <PasswordChange /> },
         ],

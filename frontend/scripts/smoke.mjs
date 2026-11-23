@@ -159,6 +159,7 @@ const routes = [
   ['/acme', '证书'],
   ['/waf', 'WAF'],
   ['/logs', '日志'],
+  ['/ipdb', 'IP 地址库'],
   ['/settings', '设置'],
 ]
 const failures = []

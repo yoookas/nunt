@@ -2,6 +2,7 @@ import type { ComponentType } from 'react'
 import {
   ArrowLeftRight,
   Cloud,
+  Database,
   Flame,
   Globe,
   LayoutDashboard,
@@ -24,5 +25,6 @@ export const menu: MenuItem[] = [
   { path: '/acme', title: '证书', icon: ShieldCheck },
   { path: '/waf', title: 'WAF', icon: Flame },
   { path: '/logs', title: '日志', icon: ScrollText },
+  { path: '/ipdb', title: 'IP 地址库', icon: Database },
   { path: '/settings', title: '设置', icon: Settings },
 ]

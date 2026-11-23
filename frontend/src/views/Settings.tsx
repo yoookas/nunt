@@ -38,7 +38,6 @@ interface SystemForm {
   sessionBindIp: boolean
   theme: string
   adminAllowIps: string[]
-  ip2regionDb: string
 }
 
 interface ListenState {
@@ -73,36 +72,6 @@ interface SystemSettingsResponse extends Partial<SystemForm> {
   adminListenEnv?: string
   adminListenApplied?: boolean
   adminListenNotice?: string
-}
-
-interface IP2RegionStatus {
-  path?: string
-  loaded?: boolean
-  ipVersion?: number
-  size?: number
-  createdAt?: string
-  error?: string
-}
-
-interface IP2RegionLookup {
-  ip?: string
-  country?: string
-  region?: string
-  province?: string
-  provinceNormalized?: string
-  city?: string
-  isp?: string
-  raw?: string
-}
-
-interface IP2RegionState {
-  path: string
-  status: IP2RegionStatus
-  testIP: string
-  result: IP2RegionLookup | null
-  saving: boolean
-  reloading: boolean
-  looking: boolean
 }
 
 interface UserRow {
@@ -175,7 +144,6 @@ const EMPTY_SYSTEM: SystemForm = {
   sessionBindIp: false,
   theme: 'dark',
   adminAllowIps: [],
-  ip2regionDb: '',
 }
 
 const EMPTY_LISTEN: ListenState = {
@@ -185,16 +153,6 @@ const EMPTY_LISTEN: ListenState = {
   env: '',
   applied: true,
   notice: '',
-}
-
-const EMPTY_IP2REGION: IP2RegionState = {
-  path: '',
-  status: {},
-  testIP: '',
-  result: null,
-  saving: false,
-  reloading: false,
-  looking: false,
 }
 
 interface LogForm {
@@ -306,6 +264,26 @@ function Note({ children }: { children: ReactNode }) {
   return <div className="p-4 text-sm leading-6 text-muted">{children}</div>
 }
 
+function FieldGroup({
+  title,
+  hint,
+  children,
+}: {
+  title: string
+  hint?: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <section className="border-t border-border pt-5 first:border-t-0 first:pt-0">
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold">{title}</h3>
+        {hint ? <p className="mt-0.5 text-xs leading-5 text-muted">{hint}</p> : null}
+      </div>
+      {children}
+    </section>
+  )
+}
+
 function Separator() {
   return <div className="my-4 border-t border-border" />
 }
@@ -330,9 +308,6 @@ export default function Settings() {
   const [listen, setListen] = useState<ListenState>(EMPTY_LISTEN)
   const [allowInfo, setAllowInfo] = useState<AdminAllowInfo | null>(null)
   const [switched, setSwitched] = useState<{ addr: string; url: string } | null>(null)
-
-  /* ---- ip2region ---- */
-  const [ip2region, setIp2region] = useState<IP2RegionState>(EMPTY_IP2REGION)
 
   /* ---- logs ---- */
   const [logForm, setLogForm] = useState<LogForm>(EMPTY_LOG)
@@ -462,7 +437,6 @@ export default function Settings() {
       sessionBindIp: !!data.sessionBindIp,
       theme: data.theme || 'dark',
       adminAllowIps: toList(data.adminAllowIps),
-      ip2regionDb: data.ip2regionDb || '',
     })
   }
 
@@ -509,9 +483,6 @@ export default function Settings() {
       const actual = info?.adminListen || settings?.adminListen || ''
       setListen((prev) => ({ ...prev, config: configListen, actual }))
       setSystem((prev) => ({ ...prev, adminListen: configListen }))
-      setIp2region((prev) =>
-        prev.path ? prev : { ...prev, path: String(settings?.ip2regionDb || prev.path) },
-      )
       setSystemLoaded(true)
     } catch (err) {
       setSystemError(errorText(err))
@@ -603,7 +574,6 @@ export default function Settings() {
       loginLockMinutes: Number(system.loginLockMinutes),
       theme: system.theme || 'dark',
       baseUrl: String(system.baseUrl || '').trim(),
-      ip2regionDb: String(system.ip2regionDb || '').trim(),
     }
     const previous = listen.actual || listen.config
     setSystemSaving(true)
@@ -630,70 +600,6 @@ export default function Settings() {
       toast.danger(errorText(err))
     } finally {
       setSystemSaving(false)
-    }
-  }
-
-  /* ---- ip2region ---- */
-
-  const loadIP2Region = async () => {
-    try {
-      const data = await api.get<{ status?: IP2RegionStatus; provinces?: string[] }>(
-        '/api/v1/system/ip2region',
-      )
-      const status = data?.status || {}
-      setIp2region((prev) => ({
-        ...prev,
-        status,
-        path: status.path || prev.path || system.ip2regionDb,
-      }))
-    } catch (err) {
-      toast.danger(`读取 IP 地址库状态失败：${errorText(err)}`)
-    }
-  }
-
-  const saveIP2Region = async () => {
-    setIp2region((prev) => ({ ...prev, saving: true }))
-    try {
-      const path = ip2region.path.trim()
-      const data = await api.put<{ status?: IP2RegionStatus }>('/api/v1/system/ip2region', { path })
-      setIp2region((prev) => ({ ...prev, status: data?.status || {}, path }))
-      setSystem((prev) => ({ ...prev, ip2regionDb: path }))
-      toast.success(path ? 'IP 地址库已加载' : '已停用 IP 地址库')
-    } catch (err) {
-      toast.danger(`保存失败：${errorText(err)}`)
-    } finally {
-      setIp2region((prev) => ({ ...prev, saving: false }))
-    }
-  }
-
-  const reloadIP2Region = async () => {
-    setIp2region((prev) => ({ ...prev, reloading: true }))
-    try {
-      const data = await api.post<{ status?: IP2RegionStatus }>('/api/v1/system/ip2region/reload')
-      setIp2region((prev) => ({ ...prev, status: data?.status || {} }))
-      toast.success('IP 地址库已重新加载')
-    } catch (err) {
-      toast.danger(`重新加载失败：${errorText(err)}`)
-    } finally {
-      setIp2region((prev) => ({ ...prev, reloading: false }))
-    }
-  }
-
-  const lookupIP2Region = async () => {
-    const ip = ip2region.testIP.trim()
-    if (!ip) {
-      toast.warning('请输入要查询的 IP')
-      return
-    }
-    setIp2region((prev) => ({ ...prev, looking: true }))
-    try {
-      const result = await api.post<IP2RegionLookup>('/api/v1/system/ip2region/lookup', { ip })
-      setIp2region((prev) => ({ ...prev, result: result || null }))
-    } catch (err) {
-      setIp2region((prev) => ({ ...prev, result: null }))
-      toast.danger(`查询失败：${errorText(err)}`)
-    } finally {
-      setIp2region((prev) => ({ ...prev, looking: false }))
     }
   }
 
@@ -1078,7 +984,6 @@ export default function Settings() {
 
   useEffect(() => {
     void loadSystem()
-    void loadIP2Region()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -1313,84 +1218,95 @@ export default function Settings() {
                     void saveSystem()
                   }}
                 >
-                  <div className="grid gap-4 p-4 md:grid-cols-2">
-                    <TextInput
-                      label="管理监听地址"
-                      value={system.adminListen}
-                      onChange={(value) => setSystem((prev) => ({ ...prev, adminListen: value }))}
-                      placeholder=":8080 或 127.0.0.1:8080"
-                      disabled={envControlled}
-                      hint={
-                        envControlled
-                          ? `当前由环境变量 ${listen.env || 'NUNT_ADMIN_LISTEN / NUNT_ADMIN_PORT'} 控制，修改配置不会改变运行中的端口`
-                          : '保存后先绑定新地址再关闭旧地址；端口被占用或环境变量接管时会保留旧监听'
-                      }
-                    />
-                    <TextInput
-                      label="外部访问地址"
-                      value={system.baseUrl}
-                      onChange={(value) => setSystem((prev) => ({ ...prev, baseUrl: value }))}
-                      placeholder="https://admin.example.com"
-                      hint="用于生成回跳链接，可留空"
-                    />
+                  <div className="space-y-5 p-4">
+                    <FieldGroup title="基础" hint="监听地址保存后立即生效；其余项在下次请求时生效。">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <TextInput
+                          label="管理监听地址"
+                          value={system.adminListen}
+                          onChange={(value) => setSystem((prev) => ({ ...prev, adminListen: value }))}
+                          placeholder=":8080 或 127.0.0.1:8080"
+                          disabled={envControlled}
+                          hint={
+                            envControlled
+                              ? `当前由环境变量 ${listen.env || 'NUNT_ADMIN_LISTEN / NUNT_ADMIN_PORT'} 控制，修改配置不会改变运行中的端口`
+                              : '保存后先绑定新地址再关闭旧地址；端口被占用或环境变量接管时会保留旧监听'
+                          }
+                        />
+                        <TextInput
+                          label="外部访问地址"
+                          value={system.baseUrl}
+                          onChange={(value) => setSystem((prev) => ({ ...prev, baseUrl: value }))}
+                          placeholder="https://admin.example.com"
+                          hint="用于生成回跳链接，可留空"
+                        />
+                        <SelectInput
+                          label="日志级别"
+                          value={system.logLevel}
+                          onChange={(value) => setSystem((prev) => ({ ...prev, logLevel: value }))}
+                          options={LOG_LEVELS}
+                        />
+                        <SelectInput
+                          label="默认主题"
+                          value={system.theme}
+                          onChange={(value) => setSystem((prev) => ({ ...prev, theme: value }))}
+                          options={THEMES}
+                          hint="仅作为新设备的默认值，本机选择保存在浏览器中"
+                        />
+                      </div>
+                    </FieldGroup>
 
-                    <SelectInput
-                      label="日志级别"
-                      value={system.logLevel}
-                      onChange={(value) => setSystem((prev) => ({ ...prev, logLevel: value }))}
-                      options={LOG_LEVELS}
-                    />
-                    <SelectInput
-                      label="默认主题"
-                      value={system.theme}
-                      onChange={(value) => setSystem((prev) => ({ ...prev, theme: value }))}
-                      options={THEMES}
-                      hint="仅作为新设备的默认值，本机选择保存在浏览器中"
-                    />
+                    <FieldGroup title="网络" hint="客户端 IP 的识别方式；只有管理端位于可信代理之后时才需要改动。">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <SwitchInput
+                          label="信任反向代理"
+                          value={system.trustProxy}
+                          onChange={(value) => setSystem((prev) => ({ ...prev, trustProxy: value }))}
+                          hint="使用 X-Forwarded-For 识别客户端 IP，仅在管理端位于可信代理之后时开启"
+                        />
+                        <SwitchInput
+                          label="会话绑定客户端 IP"
+                          value={system.sessionBindIp}
+                          onChange={(value) => setSystem((prev) => ({ ...prev, sessionBindIp: value }))}
+                          hint="开启后会话只能从登录时的地址使用（移动网络会频繁重登）；User-Agent 始终校验"
+                        />
+                      </div>
+                    </FieldGroup>
 
-                    <NumberInput
-                      label="会话有效期（小时）"
-                      value={system.sessionTtlHours}
-                      min={1}
-                      max={720}
-                      onChange={(value) => setSystem((prev) => ({ ...prev, sessionTtlHours: value }))}
-                    />
-                    <NumberInput
-                      label="登录失败次数上限"
-                      value={system.loginMaxFail}
-                      min={1}
-                      max={100}
-                      onChange={(value) => setSystem((prev) => ({ ...prev, loginMaxFail: value }))}
-                    />
-                    <NumberInput
-                      label="锁定时长（分钟）"
-                      value={system.loginLockMinutes}
-                      min={1}
-                      max={1440}
-                      onChange={(value) => setSystem((prev) => ({ ...prev, loginLockMinutes: value }))}
-                    />
-
-                    <SwitchInput
-                      label="信任反向代理"
-                      value={system.trustProxy}
-                      onChange={(value) => setSystem((prev) => ({ ...prev, trustProxy: value }))}
-                      hint="使用 X-Forwarded-For 识别客户端 IP，仅在管理端位于可信代理之后时开启"
-                    />
-                    <SwitchInput
-                      label="会话绑定客户端 IP"
-                      value={system.sessionBindIp}
-                      onChange={(value) => setSystem((prev) => ({ ...prev, sessionBindIp: value }))}
-                      hint="开启后会话只能从登录时的地址使用（移动网络会频繁重登）；User-Agent 始终校验"
-                    />
-                    <div className="md:col-span-2">
-                      <TagInput
-                        label="管理后台 IP 白名单"
-                        value={system.adminAllowIps}
-                        onChange={(value) => setSystem((prev) => ({ ...prev, adminAllowIps: value }))}
-                        placeholder="输入 IP 或 CIDR 后按回车添加"
-                        hint="留空表示不限制；支持单个地址与 CIDR，输入后按回车、逗号或分号添加"
-                      />
-                    </div>
+                    <FieldGroup title="安全" hint="登录限制与管理后台的访问白名单。">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <NumberInput
+                          label="会话有效期（小时）"
+                          value={system.sessionTtlHours}
+                          min={1}
+                          max={720}
+                          onChange={(value) => setSystem((prev) => ({ ...prev, sessionTtlHours: value }))}
+                        />
+                        <NumberInput
+                          label="登录失败次数上限"
+                          value={system.loginMaxFail}
+                          min={1}
+                          max={100}
+                          onChange={(value) => setSystem((prev) => ({ ...prev, loginMaxFail: value }))}
+                        />
+                        <NumberInput
+                          label="锁定时长（分钟）"
+                          value={system.loginLockMinutes}
+                          min={1}
+                          max={1440}
+                          onChange={(value) => setSystem((prev) => ({ ...prev, loginLockMinutes: value }))}
+                        />
+                        <div className="md:col-span-2">
+                          <TagInput
+                            label="管理后台 IP 白名单"
+                            value={system.adminAllowIps}
+                            onChange={(value) => setSystem((prev) => ({ ...prev, adminAllowIps: value }))}
+                            placeholder="输入 IP 或 CIDR 后按回车添加"
+                            hint="留空表示不限制；支持单个地址与 CIDR，输入后按回车、逗号或分号添加"
+                          />
+                        </div>
+                      </div>
+                    </FieldGroup>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2 px-4 pb-4">
@@ -1416,68 +1332,6 @@ export default function Settings() {
                   ) : null}
                 </form>
               )}
-            </Panel>
-
-            <Panel title="IP 地址库（ip2region）" extra={<span className="text-xs text-muted">用于 Web / 端口转发的国家、省份过滤</span>}>
-              <div className="p-4">
-                <TextInput
-                  label="数据库路径"
-                  value={ip2region.path}
-                  onChange={(value) => setIp2region((prev) => ({ ...prev, path: value }))}
-                  placeholder="/data/ip2region.xdb"
-                  hint="ip2region.xdb 文件路径；留空表示不启用地理过滤。数据库可从 github.com/lionsoul2014/ip2region 下载。"
-                />
-
-                <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <Button variant="primary" isDisabled={ip2region.saving} onPress={() => void saveIP2Region()}>
-                    {ip2region.saving ? '保存中…' : '保存并加载'}
-                  </Button>
-                  <Button variant="secondary" isDisabled={ip2region.reloading} onPress={() => void reloadIP2Region()}>
-                    {ip2region.reloading ? '重新加载中…' : '重新加载'}
-                  </Button>
-                  <StatusChip color={ip2region.status.loaded ? 'success' : 'default'}>
-                    {ip2region.status.loaded ? '已加载' : '未加载'}
-                  </StatusChip>
-                  {ip2region.status.createdAt ? (
-                    <span className="text-xs text-muted">数据日期：{fmtTime(ip2region.status.createdAt)}</span>
-                  ) : null}
-                  {ip2region.status.size ? (
-                    <span className="text-xs text-muted">大小：{fmtBytes(ip2region.status.size)}</span>
-                  ) : null}
-                </div>
-
-                {ip2region.status.error ? (
-                  <div className="mt-3">
-                    <Notice status="danger">{ip2region.status.error}</Notice>
-                  </div>
-                ) : null}
-
-                <Separator />
-
-                <div className="flex flex-wrap items-end gap-3">
-                  <div className="w-full sm:w-56">
-                    <TextInput
-                      label="查询测试"
-                      value={ip2region.testIP}
-                      onChange={(value) => setIp2region((prev) => ({ ...prev, testIP: value }))}
-                      placeholder="1.1.1.1"
-                    />
-                  </div>
-                  <Button variant="secondary" isDisabled={ip2region.looking} onPress={() => void lookupIP2Region()}>
-                    {ip2region.looking ? '查询中…' : '查询'}
-                  </Button>
-                  {ip2region.result ? (
-                    <span className="mono text-sm text-muted">
-                      {ip2region.result.country || '-'} /{' '}
-                      {ip2region.result.provinceNormalized || ip2region.result.province || '-'} /{' '}
-                      {ip2region.result.isp || '-'}
-                    </span>
-                  ) : null}
-                </div>
-                <div className="mt-2 text-xs leading-6 text-muted">
-                  省份按 ip2region 返回结果匹配，配置时可写「浙江」或「浙江省」；私有地址与 IPv6 不参与地理匹配。
-                </div>
-              </div>
             </Panel>
           </div>
         </Tabs.Panel>

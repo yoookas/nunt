@@ -211,6 +211,18 @@ data/
 
 ---
 
+## IP 地址库
+
+国家 / 省份过滤（Web 路由与端口转发）依赖一份离线地址库。它是独立的「IP 地址库」页面，不再放在设置页里：
+
+- 目前支持 **ip2region** 的 xdb 离线库：单文件、完全离线，填入路径后「保存并加载」；
+- 页面显示加载状态、数据日期、文件大小、IP 版本，以及省份下拉当前用的是地址库还是内置列表；
+- 保存前会先用新文件试加载一次，**校验失败不会写入配置**，原地址库继续生效；替换同名文件后点「重新加载」即可；
+- 「查询测试」用来核对某个 IP 的解析结果，确认过滤值与地址库对得上；
+- 页面按「类型 + 各自字段」组织，接入其它离线库时只需增加一种类型，现有逻辑不用改。
+
+---
+
 ## 开发
 
 ```bash
@@ -260,7 +272,7 @@ web 前端            frontend/（React 19 + HeroUI + Tailwind 4 + Vite 8）
 
 - 构建：`npm ci --prefix frontend && npm run build --prefix frontend`（或 `make web`），产物会整体重写
   `internal/webui/assets`；**改了前端必须重新构建并提交产物**，CI 会重跑构建并检查产物是否最新；
-- 开发：`cd frontend && npm run dev`，页面热更新；9 个页面 + 登录/改密都在 `frontend/src/views/`；
+- 开发：`cd frontend && npm run dev`，页面热更新；9 个页面（含 IP 地址库）+ 登录/改密都在 `frontend/src/views/`；
 - 约束：零外部请求（CSP `script-src 'self'`）、明暗主题用根元素 `.dark` class 切换、页面使用 HeroUI 组件、
   Tailwind 语义色（`bg-background`/`text-foreground`/`border-border` 等）。详细约定见
   [docs/CONTRACT.md 第 7 节](docs/CONTRACT.md)。
