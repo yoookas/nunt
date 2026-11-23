@@ -17,12 +17,12 @@ func idsOf(metas []Meta) []string {
 func TestRegisterBuiltinsMeta(t *testing.T) {
 	registry := Default()
 	metas := registry.List()
-	if len(metas) != 4 {
-		t.Fatalf("registered providers = %d, want 4", len(metas))
+	if len(metas) != 5 {
+		t.Fatalf("registered providers = %d, want 5", len(metas))
 	}
 	// The ids are part of the configuration format: renaming one breaks stored
 	// DDNS rules and ACME jobs.
-	want := []string{"alidns", "cloudflare", "custom", "tencent"}
+	want := []string{"alidns", "cloudflare", "custom", "spaceship", "tencent"}
 	for i, meta := range metas {
 		if meta.ID != want[i] {
 			t.Fatalf("provider %d = %q, want %q (all: %v)", i, meta.ID, want[i], idsOf(metas))

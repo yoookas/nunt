@@ -9,5 +9,6 @@ func registerBuiltins(r *Registry) {
 	registerAliDNS(r)
 	registerTencent(r)
 	registerCloudflare(r)
+	registerSpaceship(r)
 	registerCustom(r)
 }
