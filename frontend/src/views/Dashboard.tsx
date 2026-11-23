@@ -164,7 +164,7 @@ export default function Dashboard() {
       <PageHeader
         title="概览"
         sub="运行状态、模块健康度与最近的日志"
-        actions={<LiveStatus status={live} intervalMs={5000} />}
+        actions={<LiveStatus status={live} />}
       />
 
       {loading && !info ? (

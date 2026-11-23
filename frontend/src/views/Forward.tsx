@@ -672,7 +672,7 @@ export default function Forward() {
         sub="TCP / UDP 端口映射、访问控制、并发限制与实时运行统计"
         actions={
           <>
-            <LiveStatus status={live} intervalMs={5000} />
+            <LiveStatus status={live} />
             <Button variant="primary" onPress={openCreate}>
               新建规则
             </Button>

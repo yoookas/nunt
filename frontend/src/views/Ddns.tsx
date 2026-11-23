@@ -934,7 +934,7 @@ export default function Ddns() {
         sub="把域名持续指向当前公网 IP：提供商凭据、探测方式、调度与运行状态"
         actions={
           <>
-            <LiveStatus status={live} intervalMs={10000} />
+            <LiveStatus status={live} />
             <Button variant="primary" isDisabled={!providers.length} onPress={openCreate}>
               新建规则
             </Button>
