@@ -88,13 +88,13 @@ export function Section({
   const headerActions = actions ?? extra
   const header =
     title || description || headerActions ? (
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
+      <div className="flex flex-col gap-2 border-b border-border px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="min-w-0">
           {title ? <div className="text-sm font-semibold sm:text-base">{title}</div> : null}
           {description ? <div className="mt-0.5 text-xs text-muted">{description}</div> : null}
         </div>
         {headerActions ? (
-          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{headerActions}</div>
+          <div className="flex flex-wrap items-center gap-2 sm:ml-auto sm:justify-end">{headerActions}</div>
         ) : null}
       </div>
     ) : null
@@ -126,11 +126,13 @@ export function StatCard({
   // three times this height for the same information.
   return (
     <Card>
-      <Card.Content className="flex items-center gap-2.5 px-3 py-2">
+      {/* flex-row is explicit: Card.Content is a column by default, and without
+          it the icon sat centred above the text on narrow screens. */}
+      <Card.Content className="flex flex-row items-center gap-2.5 px-3 py-2">
         {icon ? <div className="shrink-0 rounded-md bg-default p-1.5 text-foreground">{icon}</div> : null}
         <div className="min-w-0 flex-1">
           <div className="truncate text-[11px] leading-4 text-muted">{label}</div>
-          <div className="flex items-baseline gap-2">
+          <div className="flex flex-col sm:flex-row sm:items-baseline sm:gap-2">
             <span className="truncate text-base font-semibold leading-5">{value}</span>
             {hint ? (
               <span className="truncate text-[11px] leading-4 text-muted" title={typeof hint === 'string' ? hint : undefined}>
