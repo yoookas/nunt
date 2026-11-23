@@ -14,6 +14,7 @@ import {
   MenuItem,
   Modal,
   NumberField,
+  SearchField,
   Select,
   Skeleton,
   Spinner,
@@ -158,14 +159,9 @@ export function LiveStatus({
 }) {
   if (!status.failed) return null
   return (
-    <button
-      type="button"
-      onClick={() => void status.refresh()}
-      title="点击立即重试"
-      className={`rounded-field px-2 py-1 text-xs text-danger transition-colors hover:bg-default ${className}`.trim()}
-    >
+    <Button size="sm" variant="danger-soft" className={className} onPress={() => void status.refresh()}>
       刷新失败，点击重试
-    </button>
+    </Button>
   )
 }
 
@@ -639,13 +635,13 @@ export function ToolbarSearch({
   className?: string
 }) {
   return (
-    <input
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-      aria-label={label}
-      className={`h-9 rounded-field border border-border bg-surface px-3 text-sm text-foreground outline-none placeholder:text-muted focus:border-focus ${className}`.trim()}
-    />
+    <SearchField value={value} onChange={onChange} aria-label={label} className={className}>
+      <SearchField.Group>
+        <SearchField.SearchIcon />
+        <SearchField.Input placeholder={placeholder} />
+        <SearchField.ClearButton />
+      </SearchField.Group>
+    </SearchField>
   )
 }
 
@@ -729,14 +725,10 @@ export function TagInput({
       {value.map((item) => (
         <Tag key={item} className="gap-1">
           {item}
-          <button
-            type="button"
+          <Tag.RemoveButton
             aria-label={`移除 ${item}`}
-            className="text-muted hover:text-danger"
-            onClick={() => onChange(value.filter((entry) => entry !== item))}
-          >
-            <X size={12} />
-          </button>
+            onPress={() => onChange(value.filter((entry) => entry !== item))}
+          />
         </Tag>
       ))}
       <input

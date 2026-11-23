@@ -129,21 +129,21 @@ export default function Login() {
               <Button type="submit" variant="primary" fullWidth isDisabled={busy}>
                 {busy ? '验证中…' : '验证并登录'}
               </Button>
-              <div className="flex items-center justify-between text-xs">
-                <button
-                  type="button"
-                  className="text-link underline"
-                  onClick={() => {
+              <div className="flex items-center justify-between">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onPress={() => {
                     setRecovery((prev) => !prev)
                     setCode('')
                     setError('')
                   }}
                 >
                   {recovery ? '改用验证码' : '改用恢复码'}
-                </button>
-                <button type="button" className="text-muted underline" onClick={back}>
+                </Button>
+                <Button size="sm" variant="ghost" onPress={back}>
                   返回
-                </button>
+                </Button>
               </div>
             </form>
           ) : (

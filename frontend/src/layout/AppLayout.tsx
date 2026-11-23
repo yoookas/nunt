@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Button, Drawer, Dropdown, Header, Menu, useOverlayState } from '@heroui/react'
-import { LogOut, Menu as MenuIcon, Moon, Sun, UserRound } from 'lucide-react'
+import { Avatar, Button, Drawer, Dropdown, Menu, useOverlayState } from '@heroui/react'
+import { LogOut, Menu as MenuIcon, Moon, Sun } from 'lucide-react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { menu } from '../menu'
 import { useAuth } from '../session'
@@ -77,9 +77,9 @@ export default function AppLayout() {
         </div>
         <div className="border-t border-border p-3">
           <div className="flex items-center gap-2 rounded-xl bg-background px-3 py-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-default">
-              <UserRound size={15} />
-            </div>
+            <Avatar size="sm">
+              <Avatar.Fallback>{(user?.username || '?').slice(0, 1).toUpperCase()}</Avatar.Fallback>
+            </Avatar>
             <div className="min-w-0">
               <div className="truncate text-xs font-medium">{user?.username}</div>
               <div className="text-[11px] text-muted">管理员</div>
@@ -89,7 +89,7 @@ export default function AppLayout() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header className="flex h-16 shrink-0 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur sm:px-6">
+        <header className="flex h-16 shrink-0 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur sm:px-6">
           <Button
             isIconOnly
             variant="ghost"
@@ -115,7 +115,9 @@ export default function AppLayout() {
           <Dropdown>
             <Dropdown.Trigger>
               <Button variant="ghost">
-                <UserRound size={16} />
+                <Avatar size="sm">
+                  <Avatar.Fallback>{(user?.username || '?').slice(0, 1).toUpperCase()}</Avatar.Fallback>
+                </Avatar>
                 <span className="hidden sm:inline">{user?.username || '未登录'}</span>
               </Button>
             </Dropdown.Trigger>
@@ -131,7 +133,7 @@ export default function AppLayout() {
               </Dropdown.Menu>
             </Dropdown.Popover>
           </Dropdown>
-        </Header>
+        </header>
 
         <main className="min-h-0 min-w-0 flex-1 overflow-auto">
           <Outlet />

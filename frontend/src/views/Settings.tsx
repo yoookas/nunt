@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Alert, Button, Switch, Tabs } from '@heroui/react'
+import { Alert, Button, Switch, Tabs, TextArea, TextField } from '@heroui/react'
 import { api, errorText } from '../api'
 import { fmtBytes, fmtTime } from '../format'
 import { useAuth } from '../session'
@@ -1833,13 +1833,13 @@ export default function Settings() {
       >
         <div className="space-y-5">
           <Notice status="warning">请立即复制并妥善保存，关闭本窗口后将无法再次查看。</Notice>
-          <textarea
-            className="mono min-h-20 w-full resize-y rounded-md border border-border bg-default p-3 text-sm"
-            readOnly
-            rows={3}
+          <TextField
+            isReadOnly
             value={tokenResult.token || '（后端未返回令牌）'}
             aria-label="新 Token"
-          />
+          >
+            <TextArea className="mono min-h-20" rows={4} />
+          </TextField>
         </div>
       </FormModal>
 
