@@ -8,5 +8,6 @@ package dnsprov
 func registerBuiltins(r *Registry) {
 	registerAliDNS(r)
 	registerTencent(r)
+	registerCloudflare(r)
 	registerCustom(r)
 }
