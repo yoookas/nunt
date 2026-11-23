@@ -360,7 +360,7 @@ export default function AccessLogs() {
         </AlertBox>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
         <StatCard label="匹配记录" value={(stats?.total ?? 0).toLocaleString()} hint={`扫描 ${stats?.scanned ?? 0} 条`} />
         <StatCard label="失败请求" value={failure.toLocaleString()} hint={`占比 ${failureRate}%（4xx + 5xx）`} />
         <StatCard label="流量合计" value={fmtBytes(stats?.bytes ?? 0)} hint={`平均耗时 ${Math.round(stats?.avgDurationMs ?? 0)} ms`} />

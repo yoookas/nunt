@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Alert, Button, Switch } from '@heroui/react'
 import { api, errorText } from '../api'
 import { fmtTime, splitLines } from '../format'
+import { usePolling } from '../usePolling'
 import {
   ConfirmModal,
   DataTable,
@@ -378,6 +379,19 @@ export default function Ddns() {
       setStatusLoading(false)
     }
   }, [])
+
+  // Success and failure counters come from the status endpoint; poll it so the
+  // cards do not stay frozen at whatever the page saw when it opened.
+  const refreshStatus = async () => {
+    try {
+      const data = await api.get<DdnsStatus[] | { rules?: DdnsStatus[] }>('/api/v1/ddns/status')
+      setStatusList(Array.isArray(data) ? data : data?.rules || [])
+    } catch {
+      // keep the last good values
+    }
+  }
+
+  usePolling(refreshStatus, 10000)
 
   const refreshAll = useCallback(async () => {
     await Promise.all([loadProviders(), loadRules(), loadStatus()])
@@ -945,7 +959,7 @@ export default function Ddns() {
           </div>
         ) : null}
 
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
           <StatCard label="DDNS 规则" value={rules.length} hint={`启用 ${summary.enabled} 条`} />
           <StatCard label="已启用" value={summary.enabled} hint="当前参与调度的规则" />
           <StatCard label="累计成功" value={summary.success} hint="来自 /api/v1/ddns/status" />

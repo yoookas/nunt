@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Alert, Button, Switch } from '@heroui/react'
 import { api, errorText } from '../api'
 import { fmtBytes, fmtTime, splitLines } from '../format'
+import { usePolling } from '../usePolling'
 import { useProvinces } from '../useProvinces'
 import {
   ConfirmModal,
@@ -306,6 +307,22 @@ export default function Forward() {
     void loadRules()
     void loadLogs()
   }, [loadRules, loadLogs])
+
+  // Connection and traffic counters live on the rules, so re-reading the list
+  // is enough to keep the stat cards live. No loading flag: the table must not
+  // blink every five seconds.
+  const refreshCounters = async () => {
+    try {
+      const data = await api.get<ForwardRule[] | { rules?: ForwardRule[]; items?: ForwardRule[] }>(
+        '/api/v1/forward/rules',
+      )
+      setRules(Array.isArray(data) ? data : data?.rules || data?.items || [])
+    } catch {
+      // keep the last good counters
+    }
+  }
+
+  usePolling(refreshCounters, 5000)
 
   useEffect(() => {
     if (!logsOpen || !autoRefresh) return
@@ -673,7 +690,7 @@ export default function Forward() {
       />
 
       <div className="space-y-6">
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
           <StatCard
             label="转发规则"
             value={rules.length}

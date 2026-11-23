@@ -120,14 +120,23 @@ export function StatCard({
   hint?: ReactNode
   icon?: ReactNode
 }) {
+  // One compact tile: the label is a caption, the value and its hint share the
+  // line below. The old three-line card with a large icon block wasted roughly
+  // three times this height for the same information.
   return (
     <Card>
-      <Card.Content className="flex items-start gap-2.5 p-3 sm:p-4">
-        {icon ? <div className="rounded-lg bg-default p-1.5 text-foreground sm:p-2">{icon}</div> : null}
-        <div className="min-w-0">
-          <div className="text-[11px] text-muted sm:text-xs">{label}</div>
-          <div className="mt-0.5 truncate text-lg font-semibold sm:text-xl">{value}</div>
-          {hint ? <div className="mt-0.5 truncate text-[11px] text-muted sm:text-xs">{hint}</div> : null}
+      <Card.Content className="flex items-center gap-2.5 px-3 py-2">
+        {icon ? <div className="shrink-0 rounded-md bg-default p-1.5 text-foreground">{icon}</div> : null}
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[11px] leading-4 text-muted">{label}</div>
+          <div className="flex items-baseline gap-2">
+            <span className="truncate text-base font-semibold leading-5">{value}</span>
+            {hint ? (
+              <span className="truncate text-[11px] leading-4 text-muted" title={typeof hint === 'string' ? hint : undefined}>
+                {hint}
+              </span>
+            ) : null}
+          </div>
         </div>
       </Card.Content>
     </Card>

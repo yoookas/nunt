@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { usePolling } from '../usePolling'
 import { Button, Typography } from '@heroui/react'
 import { Activity, Boxes, Cpu, Globe, HardDrive, Server } from 'lucide-react'
 import { api, errorText } from '../api'
@@ -86,6 +87,31 @@ export default function Dashboard() {
     void load()
   }, [])
 
+  // The overview shows live numbers (memory, goroutines, connections, recent
+  // logs), so refresh them in place. The 24 hour series is left alone: it is
+  // hourly data and re-reading a day of logs every few seconds is wasteful.
+  const refreshLive = async () => {
+    try {
+      const [infoData, statsData, moduleData, logData, healthData] = await Promise.all([
+        api.get('/api/v1/system/info'),
+        api.get('/api/v1/system/stats'),
+        api.get('/api/v1/modules'),
+        api.get('/api/v1/system/logs', { limit: 30 }),
+        api.get('/api/v1/system/health').catch(() => null),
+      ])
+      if (infoData) setInfo(infoData)
+      if (statsData) setStats(statsData)
+      if (Array.isArray(moduleData)) setModules(moduleData)
+      if (Array.isArray(logData?.entries)) setLogs(logData.entries)
+      if (healthData) setHealth(healthData)
+    } catch {
+      // A poll failure keeps the last good values; the manual refresh button
+      // still surfaces errors.
+    }
+  }
+
+  usePolling(refreshLive, 5000)
+
   const seriesMax = series.reduce((max, point) => Math.max(max, point.total), 0)
 
   const moduleColumns: Column<ModuleStatus>[] = [
@@ -160,7 +186,7 @@ export default function Dashboard() {
             </div>
           ) : null}
 
-          <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
             <StatCard
               icon={<Server size={16} />}
               label="版本"
