@@ -162,6 +162,26 @@ func (s *Store) Subscribe(fn func(*model.Config)) {
 	s.mu.Unlock()
 }
 
+// SingleEnabledUser returns the only enabled account, when exactly one
+// exists. A single administrator deployment uses it to offer a password only
+// sign in.
+func (s *Store) SingleEnabledUser() (*model.User, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var found *model.User
+	for i := range s.cfg.Users {
+		if !s.cfg.Users[i].Enabled {
+			continue
+		}
+		if found != nil {
+			return nil, false
+		}
+		u := s.cfg.Users[i]
+		found = &u
+	}
+	return found, found != nil
+}
+
 // FindUser returns the enabled user with the given name.
 func (s *Store) FindUser(name string) (*model.User, bool) {
 	s.mu.RLock()

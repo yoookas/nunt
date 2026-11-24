@@ -41,7 +41,7 @@ const (
 func registerTencent(r *Registry) {
 	r.Register(Meta{
 		ID:    "tencent",
-		Title: "腾讯云 DNS（DNSPod）",
+		Title: "腾讯云",
 		Fields: []Field{
 			{
 				Key:         "secretid",

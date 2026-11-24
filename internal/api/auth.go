@@ -12,6 +12,7 @@ import (
 
 func (s *Server) registerAuth() {
 	g := s.mux.Group("/api/v1/auth")
+	g.Public().Get("/login-mode", s.handleLoginMode)
 	g.Public().Post("/login", s.handleLogin)
 	g.Public().Post("/login/totp", s.handleLoginTOTP)
 	g.Post("/logout", s.handleLogout)
@@ -32,6 +33,13 @@ func (s *Server) registerAuth() {
 	g.Delete("/sessions/{id}", s.handleDeleteSession)
 }
 
+// handleLoginMode tells the sign in page whether a username is needed. It is
+// public and returns a single boolean, never the account name.
+func (s *Server) handleLoginMode(w http.ResponseWriter, r *http.Request) {
+	_, single := s.opts.Cfg.SingleEnabledUser()
+	rest.OK(w, map[string]any{"singleUser": single})
+}
+
 type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -43,6 +51,16 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Username = strings.TrimSpace(req.Username)
+	if req.Username == "" {
+		// With exactly one enabled account there is nothing to choose, so the
+		// sign in form only asks for the password.
+		if user, ok := s.opts.Cfg.SingleEnabledUser(); ok {
+			req.Username = user.Username
+		} else {
+			rest.FailCode(w, http.StatusBadRequest, "username_required", "请填写用户名")
+			return
+		}
+	}
 	ip := s.clientIP(r).String()
 	limitKey := strings.ToLower(req.Username) + "|" + ip
 	if ok, wait := s.loginLimiter.Allow(limitKey); !ok {

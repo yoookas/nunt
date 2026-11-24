@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from 'react'
 import { Alert, Button, Tabs } from '@heroui/react'
-import { Pause, Play, RefreshCw, Trash2 } from 'lucide-react'
+import { Copy, Pause, Play, RefreshCw, Trash2 } from 'lucide-react'
 import { fmtTime } from '../format'
 import AccessLogs from './AccessLogs'
 import {
+  FormModal,
   Page,
   PageHeader,
   Panel,
@@ -90,6 +91,42 @@ function attrsText(attrs: Record<string, unknown> | null): string {
   return parts.length ? `  ${parts.join('  ')}` : ''
 }
 
+// attrEntries flattens the attributes into displayable lines, skipping the
+// component (it has its own field) and stringifying structured values.
+function attrEntries(attrs: Record<string, unknown> | null): [string, string][] {
+  if (!attrs) return []
+  const out: [string, string][] = []
+  for (const [key, value] of Object.entries(attrs)) {
+    if (key === 'component') continue
+    let text: string
+    if (value === null || value === undefined) text = ''
+    else if (typeof value === 'object') {
+      try {
+        text = JSON.stringify(value)
+      } catch {
+        text = String(value)
+      }
+    } else text = String(value)
+    out.push([key, text])
+  }
+  return out.sort((a, b) => a[0].localeCompare(b[0]))
+}
+
+async function copyLogJSON(item: LogEntry | null): Promise<void> {
+  if (!item) return
+  const text = JSON.stringify(
+    { time: item.time, level: item.level, msg: item.msg, attrs: item.attrs ?? {} },
+    null,
+    2,
+  )
+  try {
+    await navigator.clipboard.writeText(text)
+    toast.success('已复制 JSON')
+  } catch {
+    toast.danger('复制失败，请手动选择文本')
+  }
+}
+
 function signature(item: RawLog): string {
   return `${item.time || ''}|${item.level}|${item.msg}`
 }
@@ -154,6 +191,7 @@ function Notice({
 function RunLogs() {
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [level, setLevel] = useState('')
+  const [detail, setDetail] = useState<LogEntry | null>(null)
   const [keyword, setKeyword] = useState('')
   const [paused, setPaused] = useState(false)
   const [autoScroll, setAutoScroll] = useState(true)
@@ -446,7 +484,17 @@ function RunLogs() {
                 return (
                   <div
                     key={item.seq}
-                    className="grid grid-cols-[150px_70px_120px_minmax(0,1fr)] gap-3 border-b border-border px-4 py-1.5 text-xs hover:bg-default/50"
+                    role="button"
+                    tabIndex={0}
+                    title="点击查看结构化详情"
+                    onClick={() => setDetail(item)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        setDetail(item)
+                      }
+                    }}
+                    className="grid cursor-pointer grid-cols-[150px_70px_120px_minmax(0,1fr)] gap-3 border-b border-border px-4 py-1.5 text-xs hover:bg-default/50 focus:bg-default/50 focus:outline-none"
                   >
                     <span className="text-muted">{fmtTime(item.time)}</span>
                     <span className={`mono font-semibold ${levelColor(item.level)}`}>
@@ -481,6 +529,60 @@ function RunLogs() {
           </div>
         </Panel>
       </div>
+
+      <FormModal
+        open={detail !== null}
+        onClose={() => setDetail(null)}
+        title="日志详情"
+        size="lg"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onPress={() => void copyLogJSON(detail)}>
+              <Copy size={14} />
+              复制 JSON
+            </Button>
+            <Button variant="tertiary" onPress={() => setDetail(null)}>
+              关闭
+            </Button>
+          </div>
+        }
+      >
+        {detail ? (
+          <div className="space-y-4">
+            <dl className="grid grid-cols-[5rem_1fr] gap-x-3 gap-y-1.5 text-sm">
+              <dt className="text-muted">时间</dt>
+              <dd className="mono">{fmtTime(detail.time)}</dd>
+              <dt className="text-muted">级别</dt>
+              <dd className={`mono font-semibold ${levelColor(detail.level)}`}>
+                {String(detail.level || 'info').toUpperCase()}
+              </dd>
+              <dt className="text-muted">组件</dt>
+              <dd className="mono">{String(detail.attrs?.component ?? '-')}</dd>
+              <dt className="text-muted">内容</dt>
+              <dd className="whitespace-pre-wrap break-words">{detail.msg}</dd>
+            </dl>
+            {attrEntries(detail.attrs).length ? (
+              <div className="overflow-hidden rounded-lg border border-border">
+                <div className="grid grid-cols-[10rem_1fr] gap-2 border-b border-border bg-surface px-3 py-1.5 text-xs font-medium text-muted">
+                  <span>字段</span>
+                  <span>值</span>
+                </div>
+                {attrEntries(detail.attrs).map(([key, value]) => (
+                  <div
+                    key={key}
+                    className="grid grid-cols-[10rem_1fr] gap-2 border-b border-border px-3 py-1.5 text-xs last:border-b-0"
+                  >
+                    <span className="mono break-all text-muted">{key}</span>
+                    <span className="mono whitespace-pre-wrap break-all">{value}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-muted">这条日志没有额外字段。</div>
+            )}
+          </div>
+        ) : null}
+      </FormModal>
     </div>
   )
 }

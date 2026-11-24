@@ -347,16 +347,27 @@ func (a *ACME) runJob(ctx context.Context, job model.CertJob, automatic bool) {
 	}
 	defer a.releaseIssue()
 	req := newRequest(cfg, job)
+	started := time.Now()
 	_, err := a.issue(ctx, req)
 	if err != nil {
 		a.recordFailure(job.ID, err)
-		a.log.Error("证书签发失败", "job", job.Name, "error", err)
+		a.log.Error("证书签发失败",
+			"job", job.Name,
+			"domains", job.Domains,
+			"challenge", job.Challenge,
+			"provider", job.DNSProvider,
+			"duration", time.Since(started).Round(time.Millisecond).String(),
+			"error", err)
 		a.refreshStats(cfg)
 		return
 	}
 	a.recordSuccess(job.ID)
 	a.SetError(nil)
-	a.log.Info("证书签发成功", "job", job.Name, "domains", job.Domains)
+	a.log.Info("证书签发成功",
+		"job", job.Name,
+		"domains", job.Domains,
+		"challenge", job.Challenge,
+		"duration", time.Since(started).Round(time.Millisecond).String())
 	a.refreshStats(cfg)
 }
 

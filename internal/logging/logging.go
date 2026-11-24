@@ -295,6 +295,29 @@ type handler struct {
 	attrs map[string]any
 }
 
+// attrValue turns an attribute value into something that survives JSON and
+// reads well in the UI. An error (or any struct without exported fields)
+// otherwise marshals to "{}", which is how failed operations ended up as
+// "error={}" in the log page.
+func attrValue(value any) any {
+	switch v := value.(type) {
+	case nil:
+		return nil
+	case error:
+		return v.Error()
+	case time.Time:
+		return v.UTC().Format(time.RFC3339Nano)
+	case time.Duration:
+		return v.String()
+	case []byte:
+		return string(v)
+	case fmt.Stringer:
+		return v.String()
+	default:
+		return value
+	}
+}
+
 func (hh *handler) Enabled(_ context.Context, lvl slog.Level) bool {
 	return lvl >= hh.hub.level.Level()
 }
@@ -315,7 +338,7 @@ func (hh *handler) Handle(_ context.Context, r slog.Record) error {
 		if e.Attrs == nil {
 			e.Attrs = map[string]any{}
 		}
-		e.Attrs[a.Key] = a.Value.Any()
+		e.Attrs[a.Key] = attrValue(a.Value.Any())
 		return true
 	})
 	if e.Time.IsZero() {
@@ -334,7 +357,7 @@ func (hh *handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		next.attrs[k] = v
 	}
 	for _, a := range attrs {
-		next.attrs[a.Key] = a.Value.Any()
+		next.attrs[a.Key] = attrValue(a.Value.Any())
 	}
 	return next
 }
