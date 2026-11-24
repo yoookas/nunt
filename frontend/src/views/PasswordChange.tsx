@@ -39,9 +39,19 @@ export default function PasswordChange() {
 
   return (
     <Page>
-      <PageHeader title="修改密码" sub="修改成功后当前会话仍然有效，其他旧会话会立即失效" />
-      <Panel title="修改密码" className="max-w-xl">
-        <form onSubmit={submit} className="space-y-4 p-4">
+      {/* A single task deserves a centred column: on the forced first sign in
+          a full width form stranded on the left looked like a broken page. */}
+      <div className="mx-auto w-full max-w-md space-y-5">
+        <PageHeader
+          title="修改密码"
+          sub={
+            user.mustChangePassword
+              ? '首次登录需要先设置一个新密码；保存后其他旧会话会立即失效'
+              : '修改成功后当前会话仍然有效，其他旧会话会立即失效'
+          }
+        />
+        <Panel>
+          <form onSubmit={submit} className="space-y-4">
           <TextInput label="当前密码" type="password" value={current} onChange={setCurrent} />
           <TextInput label="新密码" type="password" value={next} onChange={setNext} hint="至少 8 位" />
           <TextInput label="确认新密码" type="password" value={confirm} onChange={setConfirm} />
@@ -53,8 +63,9 @@ export default function PasswordChange() {
               返回
             </Button>
           </div>
-        </form>
-      </Panel>
+          </form>
+        </Panel>
+      </div>
     </Page>
   )
 }
