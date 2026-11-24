@@ -188,8 +188,10 @@ for (const [route, title] of routes) {
   if (!heading.includes(title)) failures.push(`${route}: heading is "${heading}", want "${title}"`)
   // Let the page's own loads settle before asserting on their output.
   await sleep(300)
-  if (route === '/web' && window.document.body.textContent.includes('全部监听器')) {
-    failures.push('/web: the all-listeners filter is shown with no listeners')
+  if (route === '/web' && !window.document.body.textContent.includes('还没有监听器')) {
+    // With no listeners the panel shows its empty state; "全部监听器" is the
+    // default value of the filter select and is expected there.
+    failures.push('/web: the empty listener state is missing')
   }
   if (route === '/acme' && !window.document.body.textContent.includes('证书任务失败')) {
     failures.push('/acme: the last issuance failure is not reported')

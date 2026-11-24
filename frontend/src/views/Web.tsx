@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Button, ListBox, Select, Switch } from '@heroui/react'
-import { Pencil, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Button, Switch } from '@heroui/react'
+import { FileText, Pencil, Trash2 } from 'lucide-react'
 import { api, errorText } from '../api'
 import {
   ConfirmModal,
@@ -166,27 +166,6 @@ export default function Web() {
     return '暂无数据'
   })()
 
-  const selectListener = (listener: WebListenerView) => {
-    setSelectedListenerId(listener.id)
-  }
-
-  const rowCell = (listener: WebListenerView, content: ReactNode) => (
-    <div
-      role="button"
-      tabIndex={0}
-      className="cursor-pointer rounded focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
-      onClick={() => selectListener(listener)}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          selectListener(listener)
-        }
-      }}
-    >
-      {content}
-    </div>
-  )
-
   const toggleListener = async (listener: WebListenerView, enabled: boolean) => {
     if (busyListenerId || enabled === !listener.disabled) return
     setBusyListenerId(listener.id)
@@ -279,52 +258,7 @@ export default function Web() {
   }
 
 
-  const routeColumns: Column<WebRule>[] = []
-  if (selectedListenerId === 'all') {
-    routeColumns.push({
-      key: 'listener',
-      title: '监听器',
-      render: (row) => (
-        <span className="rounded-full bg-default px-2 py-0.5 text-xs text-default-foreground">
-          {listenerName(listeners, row.listenerId)}
-        </span>
-      ),
-    })
-  }
-  routeColumns.push(
-    {
-      key: 'domains',
-      title: '域名',
-      render: (row) => {
-        const domains = Array.isArray(row.domains) ? row.domains : []
-        return (
-          <div className="flex flex-wrap items-center gap-1">
-            {domains.slice(0, 2).map((domain) => (
-              <span
-                key={domain}
-                className="rounded-full bg-default px-2 py-0.5 text-xs text-default-foreground"
-              >
-                {domain}
-              </span>
-            ))}
-            {domains.length > 2 ? (
-              <span className="text-xs text-muted">+{domains.length - 2}</span>
-            ) : null}
-            {!domains.length ? <span className="text-muted">全部</span> : null}
-          </div>
-        )
-      },
-    },
-    {
-      key: 'path',
-      title: '路径',
-      render: (row) => (
-        <div>
-          <div className="mono">{row.path || '/'}</div>
-          <div className="text-xs text-muted">{row.name || row.id}</div>
-        </div>
-      ),
-    },
+  const routeColumns: Column<WebRule>[] = [
     {
       key: 'status',
       title: '状态',
@@ -342,64 +276,92 @@ export default function Web() {
               </Switch.Control>
             </Switch.Content>
           </Switch>
-          <span className="text-xs text-muted">{row.enable ? '已启用' : '已停用'}</span>
-          {row.active ? <StatusChip color="success">运行中</StatusChip> : null}
+          {!row.enable ? (
+            <span className="text-xs text-muted">已停用</span>
+          ) : row.active ? (
+            <StatusChip color="success">运行中</StatusChip>
+          ) : (
+            <StatusChip color="warning">未生效</StatusChip>
+          )}
         </div>
       ),
+    },
+  ]
+  routeColumns.push(
+    {
+      key: 'site',
+      title: '站点',
+      render: (row) => {
+        const domains = Array.isArray(row.domains) ? row.domains : []
+        return (
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+              {domains.slice(0, 2).map((domain) => (
+                <span key={domain} className="truncate text-sm">
+                  {domain}
+                </span>
+              ))}
+              {domains.length > 2 ? <span className="text-xs text-muted">+{domains.length - 2}</span> : null}
+              {!domains.length ? <span className="text-sm text-muted">全部域名</span> : null}
+            </div>
+            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted">
+              <span className="mono shrink-0">{row.path || '/'}</span>
+              <span className="truncate">{row.name || row.id}</span>
+              {selectedListenerId === 'all' ? (
+                <span className="truncate text-[11px]">· {listenerName(listeners, row.listenerId)}</span>
+              ) : null}
+            </div>
+          </div>
+        )
+      },
     },
     {
       key: 'type',
       title: '类型',
-      render: (row) => (
-        <StatusChip color={ruleTypeColor(row.type)}>{ruleTypeLabel(row.type)}</StatusChip>
-      ),
+      render: (row) => <StatusChip color={ruleTypeColor(row.type)}>{ruleTypeLabel(row.type)}</StatusChip>,
     },
     {
       key: 'target',
-      title: '目标摘要',
+      title: '上游',
       render: (row) => (
-        <span className="mono block max-w-64 truncate text-xs text-muted" title={targetText(row)}>
+        <span className="mono block max-w-56 truncate text-xs text-muted" title={targetText(row)}>
           {targetText(row)}
         </span>
       ),
     },
     {
-      key: 'tls',
-      title: 'TLS',
+      key: 'security',
+      title: '安全',
       render: (row) => {
         const mode = tlsModeOf(listenerOf(row.listenerId))
-        return <StatusChip color={tlsColor(mode)}>{TLS_LABEL[mode] || '关闭'}</StatusChip>
+        return (
+          <div className="flex flex-wrap items-center gap-1">
+            <StatusChip color={tlsColor(mode)}>{TLS_LABEL[mode] || '关闭'}</StatusChip>
+            <StatusChip color={row.waf ? 'success' : 'default'}>WAF {row.waf ? '开' : '关'}</StatusChip>
+          </div>
+        )
       },
     },
     {
-      key: 'waf',
-      title: 'WAF',
-      render: (row) => (
-        <StatusChip color={row.waf ? 'success' : 'default'}>
-          {row.waf ? '已开启' : '关闭'}
-        </StatusChip>
-      ),
-    },
-    {
       key: 'requests',
-      title: '请求数',
+      title: '请求',
       render: (row) => (
-        <span className="text-muted">{Number(row.requests || 0).toLocaleString()}</span>
+        <span className="text-xs text-muted">{Number(row.requests || 0).toLocaleString()}</span>
       ),
     },
     {
       key: 'actions',
       title: '操作',
       render: (row) => (
-        <div className="flex flex-wrap gap-1">
-          <Button size="sm" variant="ghost" onPress={() => openEditRule(row)}>
-            编辑
+        <div className="flex items-center gap-0.5 whitespace-nowrap">
+          <Button isIconOnly size="sm" variant="ghost" aria-label={`查看路由日志 ${row.name || row.id}`} onPress={() => setLogsRule(row)}>
+            <FileText size={14} />
           </Button>
-          <Button size="sm" variant="secondary" onPress={() => setLogsRule(row)}>
-            日志
+          <Button isIconOnly size="sm" variant="ghost" aria-label={`编辑路由 ${row.name || row.id}`} onPress={() => openEditRule(row)}>
+            <Pencil size={14} />
           </Button>
-          <Button size="sm" variant="danger-soft" onPress={() => setDeleteRule(row)}>
-            删除
+          <Button isIconOnly size="sm" variant="ghost" aria-label={`删除路由 ${row.name || row.id}`} onPress={() => setDeleteRule(row)}>
+            <Trash2 size={14} />
           </Button>
         </div>
       ),
@@ -452,54 +414,26 @@ export default function Web() {
               dividers do the separating, so each row is one click target plus
               two icon actions. */}
           <div className="divide-y divide-border">
-            {listeners.length > 0 ? (
-              <button
-                type="button"
-                aria-pressed={selectedListenerId === 'all'}
-                onClick={() => setSelectedListenerId('all')}
-                className={`flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm transition-colors ${
-                  selectedListenerId === 'all'
-                    ? 'bg-accent-soft text-accent-soft-foreground'
-                    : 'hover:bg-default/60'
-                }`}
-              >
-                <span className="flex-1 font-medium">全部监听器</span>
-                <StatusChip color={selectedListenerId === 'all' ? 'primary' : 'default'}>
-                  {listeners.length}
-                </StatusChip>
-              </button>
-            ) : null}
             {listeners.map((listener) => {
               const mode = tlsModeOf(listener)
-              const active = selectedListenerId === listener.id
               return (
-                <div
-                  key={listener.id}
-                  className={`flex items-center gap-1 pr-2 transition-colors ${
-                    active ? 'bg-accent-soft/50' : 'hover:bg-default/50'
-                  }`}
-                >
-                  <button
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => selectListener(listener)}
-                    className="min-w-0 flex-1 px-4 py-2 text-left"
-                  >
-                    <div className="flex items-center gap-2">
+                <div key={listener.id} className="flex items-center gap-1 px-3 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
                       <span className="truncate text-sm font-medium">{listener.name || listener.id}</span>
                       <StatusChip color={tlsColor(mode)}>{TLS_LABEL[mode] || '关闭'}</StatusChip>
                       {listener.disabled ? <StatusChip color="warning">已停用</StatusChip> : null}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
                       {(Array.isArray(listener.listen) ? listener.listen : []).map((item) => (
-                        <span key={item} className="mono rounded bg-default px-1.5 py-0.5">
+                        <span key={item} className="mono">
                           {item}
                         </span>
                       ))}
                       <span>{listenerRouteCount(listener)} 条路由</span>
                       {listener.tls?.clientAuth && listener.tls.clientAuth !== 'off' ? <span>mTLS</span> : null}
                     </div>
-                  </button>
+                  </div>
                   <Switch
                     isSelected={!listener.disabled}
                     isDisabled={busyListenerId === listener.id}
@@ -545,6 +479,16 @@ export default function Web() {
           flush
           extra={
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+              <ToolbarSelect
+                label="监听器筛选"
+                value={selectedListenerId}
+                onChange={setSelectedListenerId}
+                options={[
+                  { value: 'all', label: '全部监听器' },
+                  ...listeners.map((listener) => ({ value: listener.id, label: listener.name || listener.id })),
+                ]}
+                className="w-full sm:w-40"
+              />
               <ToolbarSelect
                 label="类型筛选"
                 value={typeFilter}
