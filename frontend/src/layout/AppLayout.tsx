@@ -71,7 +71,7 @@ export default function AppLayout() {
 
   const onAction = async (key: string) => {
     if (key === 'password') {
-      navigate('/password')
+      navigate('/account/password')
       return
     }
     if (key === 'logout') {

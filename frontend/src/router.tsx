@@ -41,7 +41,7 @@ const router = createHashRouter([
     children: [
       // The forced password change is a screen of its own: no sidebar, no
       // navigation, nothing else to click before the account is usable.
-      { path: 'password', element: <PasswordChange /> },
+      { path: 'password', element: <PasswordChange standalone /> },
       {
         element: <AppLayout />,
         children: [
@@ -54,6 +54,7 @@ const router = createHashRouter([
           { path: 'logs', element: <Logs /> },
           { path: 'ipdb', element: <IpDatabase /> },
           { path: 'settings', element: <Settings /> },
+          { path: 'account/password', element: <PasswordChange /> },
         ],
       },
     ],

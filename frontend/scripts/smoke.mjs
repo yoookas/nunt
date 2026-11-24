@@ -169,6 +169,7 @@ const routes = [
   ['/ipdb', 'IP 地址库'],
   ['/settings', '设置'],
   ['/password', '修改密码'],
+  ['/account/password', '修改密码'],
 ]
 const failures = []
 const emptyStateChecks = []
