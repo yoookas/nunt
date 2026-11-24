@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/nunt/nunt/internal/model"
@@ -38,5 +39,43 @@ func TestOnlyOneAdministratorSurvivesNormalization(t *testing.T) {
 	}
 	if got := len(env.store.Snapshot().Users); got != 1 {
 		t.Fatalf("users = %d, want the extra account dropped", got)
+	}
+}
+
+// Until the temporary password is replaced the session can only read itself,
+// change the password or log out; anything else would run with a credential
+// the operator has not chosen.
+func TestForcedPasswordChangeBlocksOtherEndpoints(t *testing.T) {
+	env := newTestEnv(t)
+	if err := env.store.Update(func(c *model.Config) error {
+		c.Users[0].MustChangePassword = true
+		return nil
+	}); err != nil {
+		t.Fatalf("flag the password: %v", err)
+	}
+
+	cookies, csrf := login(t, env)
+
+	rec := env.do(t, http.MethodGet, "/api/v1/system/info", nil, cookies, nil)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "password_change_required") {
+		t.Fatalf("other endpoints must be blocked, got %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = env.do(t, http.MethodGet, "/api/v1/auth/session", nil, cookies, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("the session endpoint must stay reachable, got %d", rec.Code)
+	}
+
+	rec = env.do(t, http.MethodPost, "/api/v1/auth/password",
+		map[string]string{"current": testPassword, "new": "a-new-password"}, cookies,
+		map[string]string{"X-CSRF-Token": csrf})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("changing the password = %d: %s", rec.Code, rec.Body.String())
+	}
+	if env.store.Admin().MustChangePassword {
+		t.Fatal("the flag must be cleared after the change")
+	}
+	rec = env.do(t, http.MethodGet, "/api/v1/system/info", nil, cookies, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("the console must open after the change, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

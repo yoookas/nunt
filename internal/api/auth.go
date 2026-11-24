@@ -208,8 +208,10 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		rest.Fail(w, http.StatusInternalServerError, "无法保存新密码：%s", err)
 		return
 	}
-	// Invalidate other sessions of this user.
-	s.opts.Sessions.DeleteUser(id.UserID)
+	// Invalidate the other sessions of this account; the one that changed the
+	// password stays usable, otherwise the console would bounce straight back
+	// to the sign in screen (and the forced first change would loop).
+	s.revokeOtherSessions(id.Session)
 	s.audit(r, "password.change")
 	rest.NoContent(w)
 }

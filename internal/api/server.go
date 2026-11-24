@@ -222,6 +222,14 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			rest.FailCode(w, http.StatusUnauthorized, "session_mismatch", "会话与当前客户端不匹配，请重新登录")
 			return
 		}
+		// A session that still has to change its password may only reach the
+		// endpoints of that screen: nothing else should run with a generated
+		// credential the operator has not chosen yet.
+		if admin := s.opts.Cfg.Admin(); admin != nil && admin.ID == sess.UserID &&
+			admin.MustChangePassword && !passwordScreenPath(r.URL.Path) {
+			rest.FailCode(w, http.StatusForbidden, "password_change_required", "首次登录需要先修改密码")
+			return
+		}
 		// Cookie authenticated state changing requests must carry the CSRF token.
 		switch r.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
@@ -249,6 +257,16 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+// passwordScreenPath lists the endpoints a session may still call while it is
+// required to change its password.
+func passwordScreenPath(path string) bool {
+	switch path {
+	case "/api/v1/auth/session", "/api/v1/auth/logout", "/api/v1/auth/password":
+		return true
+	}
+	return false
 }
 
 // sessionMatches checks that a session is used by the client it was issued to.
