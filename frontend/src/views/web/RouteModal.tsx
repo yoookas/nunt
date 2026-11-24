@@ -526,32 +526,6 @@ export default function RouteModal({
             />
           </div>
 
-          <div className="md:col-span-2 mt-1">
-            <SwitchInput
-              label="高级选项"
-              value={advanced}
-              onChange={setAdvanced}
-              hint="优先级、备注、超时、限速、请求体上限、路径重写、自定义请求/响应头、CORS；不展开也能正常保存"
-            />
-          </div>
-
-          {advanced ? (
-            <>
-              <NumberInput
-                label="优先级"
-                value={form.priority}
-                onChange={(value) => patch({ priority: Number.isFinite(value) ? value : 0 })}
-                min={0}
-                hint="数字越小越优先，默认 0"
-              />
-              <TextInput
-                label="备注"
-                value={form.remark}
-                onChange={(value) => patch({ remark: value })}
-                placeholder="可选"
-              />
-            </>
-          ) : null}
 
           {form.type === 'proxy' ? (
             <>
@@ -579,129 +553,6 @@ export default function RouteModal({
                 onChange={(value) => patch({ proxyHostHeader: value })}
                 placeholder="留空透传客户端 Host"
               />
-              {advanced ? (
-                <>
-              <NumberInput
-                label="超时（秒）"
-                value={form.proxyTimeout}
-                onChange={(value) => patch({ proxyTimeout: Number.isFinite(value) ? value : 0 })}
-                min={0}
-                hint="0 表示使用默认值"
-              />
-              <NumberInput
-                label="限速（请求/秒）"
-                value={form.proxyRateLimit}
-                onChange={(value) =>
-                  patch({ proxyRateLimit: Number.isFinite(value) ? value : 0 })
-                }
-                min={0}
-                hint="按客户端地址限速，0 表示不限制"
-              />
-              <NumberInput
-                label="请求体上限（字节）"
-                value={form.proxyMaxBody}
-                onChange={(value) => patch({ proxyMaxBody: Number.isFinite(value) ? value : 0 })}
-                min={0}
-                hint="0 表示不限制，1048576 = 1 MiB"
-              />
-              <SwitchInput
-                label="跳过上游证书校验"
-                value={form.proxyInsecure}
-                onChange={(value) => patch({ proxyInsecure: value })}
-              />
-              <SwitchInput
-                label="禁用压缩"
-                value={form.proxyNoCompress}
-                onChange={(value) => patch({ proxyNoCompress: value })}
-              />
-              <SwitchInput
-                label="h2c 上游"
-                value={form.proxyH2C}
-                onChange={(value) => patch({ proxyH2C: value })}
-                hint="明文 HTTP/2 上游，原生 gRPC 常用"
-              />
-              <TextInput
-                label="路径重写前缀"
-                value={form.proxyPathPrefix}
-                onChange={(value) => patch({ proxyPathPrefix: value })}
-                placeholder="例如 /api"
-              />
-              <TextInput
-                label="路径替换为"
-                value={form.proxyPathReplace}
-                onChange={(value) => patch({ proxyPathReplace: value })}
-                placeholder="例如 /"
-              />
-              <div className="md:col-span-2">
-                <TextAreaInput
-                  label="请求头"
-                  value={form.proxyHeaders}
-                  onChange={(value) => patch({ proxyHeaders: value })}
-                  rows={2}
-                  placeholder="每行一条，例如 X-Real-IP: $remote_addr"
-                />
-              </div>
-              <div className="md:col-span-2">
-                <TextAreaInput
-                  label="响应头"
-                  value={form.proxyRespHeaders}
-                  onChange={(value) => patch({ proxyRespHeaders: value })}
-                  rows={2}
-                  placeholder="每行一条，例如 X-Frame-Options: DENY"
-                />
-              </div>
-              <div className="md:col-span-2 mt-1 border-t border-border pt-3">
-                <SwitchInput
-                  label="启用 CORS"
-                  value={form.corsEnable}
-                  onChange={(value) => patch({ corsEnable: value })}
-                  hint="由代理直接回应对跨域预检（OPTIONS）并补 Access-Control-* 头；关闭时完全交给上游"
-                />
-              </div>
-              {form.corsEnable ? (
-                <>
-                  <div className="md:col-span-2">
-                    <TextAreaInput
-                      label="允许的来源"
-                      value={form.corsOrigins}
-                      onChange={(value) => patch({ corsOrigins: value })}
-                      rows={2}
-                      required
-                      placeholder="每行一个，例如 https://app.example.com"
-                      hint="精确匹配（忽略大小写与末尾斜杠）；填 * 表示允许任何来源"
-                    />
-                  </div>
-                  <TextInput
-                    label="允许的方法"
-                    value={form.corsMethods}
-                    onChange={(value) => patch({ corsMethods: value })}
-                    placeholder="GET, POST"
-                    hint="逗号或空格分隔；留空表示常用方法（GET/HEAD/POST/PUT/PATCH/DELETE/OPTIONS）"
-                  />
-                  <TextInput
-                    label="允许的请求头"
-                    value={form.corsHeaders}
-                    onChange={(value) => patch({ corsHeaders: value })}
-                    placeholder="Content-Type, Authorization"
-                    hint="逗号分隔；留空表示回显预检请求里的头"
-                  />
-                  <SwitchInput
-                    label="允许携带凭据"
-                    value={form.corsCredentials}
-                    onChange={(value) => patch({ corsCredentials: value })}
-                    hint="开启后浏览器不接受 * 作为来源，会回显具体 Origin"
-                  />
-                  <NumberInput
-                    label="预检缓存（秒）"
-                    value={form.corsMaxAge}
-                    onChange={(value) => patch({ corsMaxAge: Number.isFinite(value) ? value : 0 })}
-                    min={0}
-                    hint="Access-Control-Max-Age；0 表示不设置"
-                  />
-                </>
-              ) : null}
-                </>
-              ) : null}
             </>
           ) : null}
 
@@ -898,6 +749,155 @@ export default function RouteModal({
             onChange={(value) => patch({ waf: value })}
             hint="关闭后该路由完全不经过 WAF"
           />
+          <Section title="高级选项" />
+          <div className="md:col-span-2">
+            <SwitchInput
+              label="展开高级选项"
+              value={advanced}
+              onChange={setAdvanced}
+              hint="优先级、备注；反向代理还包括超时、限速、请求体上限、路径重写、自定义头与 CORS"
+            />
+          </div>
+          {advanced ? (
+            <>
+              <NumberInput
+                label="优先级"
+                value={form.priority}
+                onChange={(value) => patch({ priority: Number.isFinite(value) ? value : 0 })}
+                min={0}
+                hint="数字越小越优先，默认 0"
+              />
+              <TextInput
+                label="备注"
+                value={form.remark}
+                onChange={(value) => patch({ remark: value })}
+                placeholder="可选"
+              />
+              {form.type === 'proxy' ? (
+                <>
+              <NumberInput
+                label="超时（秒）"
+                value={form.proxyTimeout}
+                onChange={(value) => patch({ proxyTimeout: Number.isFinite(value) ? value : 0 })}
+                min={0}
+                hint="0 表示使用默认值"
+              />
+              <NumberInput
+                label="限速（请求/秒）"
+                value={form.proxyRateLimit}
+                onChange={(value) =>
+                  patch({ proxyRateLimit: Number.isFinite(value) ? value : 0 })
+                }
+                min={0}
+                hint="按客户端地址限速，0 表示不限制"
+              />
+              <NumberInput
+                label="请求体上限（字节）"
+                value={form.proxyMaxBody}
+                onChange={(value) => patch({ proxyMaxBody: Number.isFinite(value) ? value : 0 })}
+                min={0}
+                hint="0 表示不限制，1048576 = 1 MiB"
+              />
+              <SwitchInput
+                label="跳过上游证书校验"
+                value={form.proxyInsecure}
+                onChange={(value) => patch({ proxyInsecure: value })}
+              />
+              <SwitchInput
+                label="禁用压缩"
+                value={form.proxyNoCompress}
+                onChange={(value) => patch({ proxyNoCompress: value })}
+              />
+              <SwitchInput
+                label="h2c 上游"
+                value={form.proxyH2C}
+                onChange={(value) => patch({ proxyH2C: value })}
+                hint="明文 HTTP/2 上游，原生 gRPC 常用"
+              />
+              <TextInput
+                label="路径重写前缀"
+                value={form.proxyPathPrefix}
+                onChange={(value) => patch({ proxyPathPrefix: value })}
+                placeholder="例如 /api"
+              />
+              <TextInput
+                label="路径替换为"
+                value={form.proxyPathReplace}
+                onChange={(value) => patch({ proxyPathReplace: value })}
+                placeholder="例如 /"
+              />
+              <div className="md:col-span-2">
+                <TextAreaInput
+                  label="请求头"
+                  value={form.proxyHeaders}
+                  onChange={(value) => patch({ proxyHeaders: value })}
+                  rows={2}
+                  placeholder="每行一条，例如 X-Real-IP: $remote_addr"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <TextAreaInput
+                  label="响应头"
+                  value={form.proxyRespHeaders}
+                  onChange={(value) => patch({ proxyRespHeaders: value })}
+                  rows={2}
+                  placeholder="每行一条，例如 X-Frame-Options: DENY"
+                />
+              </div>
+              <div className="md:col-span-2 mt-1 border-t border-border pt-3">
+                <SwitchInput
+                  label="启用 CORS"
+                  value={form.corsEnable}
+                  onChange={(value) => patch({ corsEnable: value })}
+                  hint="由代理直接回应对跨域预检（OPTIONS）并补 Access-Control-* 头；关闭时完全交给上游"
+                />
+              </div>
+              {form.corsEnable ? (
+                <>
+                  <div className="md:col-span-2">
+                    <TextAreaInput
+                      label="允许的来源"
+                      value={form.corsOrigins}
+                      onChange={(value) => patch({ corsOrigins: value })}
+                      rows={2}
+                      required
+                      placeholder="每行一个，例如 https://app.example.com"
+                      hint="精确匹配（忽略大小写与末尾斜杠）；填 * 表示允许任何来源"
+                    />
+                  </div>
+                  <TextInput
+                    label="允许的方法"
+                    value={form.corsMethods}
+                    onChange={(value) => patch({ corsMethods: value })}
+                    placeholder="GET, POST"
+                    hint="逗号或空格分隔；留空表示常用方法（GET/HEAD/POST/PUT/PATCH/DELETE/OPTIONS）"
+                  />
+                  <TextInput
+                    label="允许的请求头"
+                    value={form.corsHeaders}
+                    onChange={(value) => patch({ corsHeaders: value })}
+                    placeholder="Content-Type, Authorization"
+                    hint="逗号分隔；留空表示回显预检请求里的头"
+                  />
+                  <SwitchInput
+                    label="允许携带凭据"
+                    value={form.corsCredentials}
+                    onChange={(value) => patch({ corsCredentials: value })}
+                    hint="开启后浏览器不接受 * 作为来源，会回显具体 Origin"
+                  />
+                  <NumberInput
+                    label="预检缓存（秒）"
+                    value={form.corsMaxAge}
+                    onChange={(value) => patch({ corsMaxAge: Number.isFinite(value) ? value : 0 })}
+                    min={0}
+                    hint="Access-Control-Max-Age；0 表示不设置"
+                  />
+                </>
+              ) : null}
+                </>
+              ) : null}
+            </>
+          ) : null}
         </div>
     </FormModal>
   )
