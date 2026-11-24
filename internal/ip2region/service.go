@@ -265,6 +265,12 @@ func collectProvinces(content []byte, header *xdb.Header, version *xdb.Version) 
 		if name == "" || name == "0" {
 			continue
 		}
+		// Only offer provinces the configuration accepts: the picker is built
+		// from this list, and validation refuses anything outside the known
+		// set, so a database-only name would be unselectable in practice.
+		if !provinceSet[name] {
+			continue
+		}
 		seen[name] = struct{}{}
 	}
 	out := make([]string, 0, len(seen))
