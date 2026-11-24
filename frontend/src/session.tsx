@@ -70,8 +70,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null)
       setCSRF('')
     }
+    // The API refuses everything but the password screen while the first
+    // password is still untouched; mirror that flag so the router redirects.
+    const onPasswordRequired = () => {
+      setUser((prev) => (prev && !prev.mustChangePassword ? { ...prev, mustChangePassword: true } : prev))
+    }
     window.addEventListener('nunt:unauthorized', onUnauthorized)
-    return () => window.removeEventListener('nunt:unauthorized', onUnauthorized)
+    window.addEventListener('nunt:password-required', onPasswordRequired)
+    return () => {
+      window.removeEventListener('nunt:unauthorized', onUnauthorized)
+      window.removeEventListener('nunt:password-required', onPasswordRequired)
+    }
   }, [])
 
   const login = useCallback(async (password: string) => {

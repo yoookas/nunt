@@ -225,8 +225,8 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		// A session that still has to change its password may only reach the
 		// endpoints of that screen: nothing else should run with a generated
 		// credential the operator has not chosen yet.
-		if admin := s.opts.Cfg.Admin(); admin != nil && admin.ID == sess.UserID &&
-			admin.MustChangePassword && !passwordScreenPath(r.URL.Path) {
+		if admin := s.opts.Cfg.Admin(); admin != nil && admin.MustChangePassword &&
+			!passwordScreenPath(r.URL.Path) {
 			rest.FailCode(w, http.StatusForbidden, "password_change_required", "首次登录需要先修改密码")
 			return
 		}

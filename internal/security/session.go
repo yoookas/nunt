@@ -99,15 +99,12 @@ func (s *SessionStore) DeleteByID(id string) {
 	s.mu.Unlock()
 }
 
-// DeleteUser invalidates every session of a user (used after a password
-// change or when an account is disabled).
-func (s *SessionStore) DeleteUser(userID string) {
+// Clear invalidates every session. Importing a configuration can replace the
+// administrator account, so nobody may keep a session that was issued under
+// the previous credentials.
+func (s *SessionStore) Clear() {
 	s.mu.Lock()
-	for id, sess := range s.sessions {
-		if sess.UserID == userID {
-			delete(s.sessions, id)
-		}
-	}
+	s.sessions = map[string]*Session{}
 	s.mu.Unlock()
 }
 

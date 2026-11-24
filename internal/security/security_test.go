@@ -54,9 +54,9 @@ func TestSessionStore(t *testing.T) {
 	if !ok || got.UserID != "user-1" || got.CSRF != sess.CSRF {
 		t.Fatal("the created session must be retrievable")
 	}
-	store.DeleteUser("user-1")
+	store.Clear()
 	if _, ok := store.Get(token); ok {
-		t.Fatal("sessions must be invalidated when the user is deleted")
+		t.Fatal("Clear must invalidate every session")
 	}
 }
 

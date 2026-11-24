@@ -179,12 +179,9 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		rest.Fail(w, http.StatusBadRequest, "新密码长度至少 8 位")
 		return
 	}
-	var currentHash string
-	cfg := s.opts.Cfg.Snapshot()
-	for _, u := range cfg.Users {
-		if u.ID == id.UserID {
-			currentHash = u.PasswordHash
-		}
+	currentHash := ""
+	if admin := s.opts.Cfg.Admin(); admin != nil && admin.ID == id.UserID {
+		currentHash = admin.PasswordHash
 	}
 	if !security.VerifyPassword(currentHash, req.Current) {
 		s.loginLimiter.Fail("pw:" + s.clientIP(r).String())

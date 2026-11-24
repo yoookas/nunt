@@ -72,7 +72,13 @@ async function request<T = any>(
   if (!response.ok) {
     const message = data?.error?.message || response.statusText || `HTTP ${response.status}`
     const error = new ApiError(message, data?.error?.code || '', response.status)
-    if (response.status === 401) window.dispatchEvent(new CustomEvent('nunt:unauthorized'))
+    if (response.status === 401) {
+      window.dispatchEvent(new CustomEvent('nunt:unauthorized'))
+    } else if (data?.error?.code === 'password_change_required') {
+      // The server only lets this session change its password; the router
+      // reacts to the flag and moves to that screen.
+      window.dispatchEvent(new CustomEvent('nunt:password-required'))
+    }
     throw error
   }
   return data as T

@@ -356,6 +356,7 @@ func (s *Server) handleImportConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	before := s.opts.Cfg.Admin()
 	if err := s.opts.Cfg.Update(func(c *model.Config) error {
 		// Tokens and users are managed through their own endpoints; only the
 		// imported users are kept when they carry a password hash.
@@ -386,6 +387,12 @@ func (s *Server) handleImportConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r, "system.config.import", "adminListen", wanted, "moved", moved)
+	// An import may carry a different administrator (or a different password
+	// hash); sessions issued under the old one must not survive it.
+	if after := s.opts.Cfg.Admin(); before == nil || after == nil ||
+		before.ID != after.ID || before.PasswordHash != after.PasswordHash {
+		s.opts.Sessions.Clear()
+	}
 	if s.opts.Reload != nil {
 		s.opts.Reload()
 	}
