@@ -123,6 +123,16 @@ func (a *ACME) issue(ctx context.Context, req request) (Result, error) {
 		return result, fmt.Errorf("create order for %s: %w", strings.Join(req.domains, ", "), err)
 	}
 
+	// Present every answer first, then let the CA validate, like acmez does.
+	// One name can hold several TXT values (an apex and its wildcard share the
+	// challenge name), so all of them must be in place before validation
+	// starts. The cleanup functions run at the end of the whole issuance.
+	type pendingAuthz struct {
+		domain string
+		chal   *acme.Challenge
+		uri    string
+	}
+	var pending []pendingAuthz
 	for _, authzURL := range order.AuthzURLs {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
@@ -134,20 +144,31 @@ func (a *ACME) issue(ctx context.Context, req request) (Result, error) {
 		if authz.Status == acme.StatusValid {
 			continue
 		}
-		// The challenge answer must stay in place until the CA has validated
-		// it, which only happens while WaitAuthorization polls, so the cleanup
-		// runs at the end of the whole issuance.
-		cleanup, err := a.provisionChallenge(ctx, client, req, authz)
+		chal, cleanup, err := a.provisionChallenge(ctx, client, req, authz)
 		if err != nil {
 			return result, err
 		}
 		if cleanup != nil {
 			defer cleanup()
 		}
-		if _, err := client.WaitAuthorization(ctx, authz.URI); err != nil {
-			return result, fmt.Errorf("authorization for %s failed: %w", authz.Identifier.Value, err)
+		if chal == nil {
+			continue
 		}
-		a.log.Info("挑战验证通过", "domain", authz.Identifier.Value, "challenge", req.challenge)
+		pending = append(pending, pendingAuthz{domain: authz.Identifier.Value, chal: chal, uri: authz.URI})
+	}
+
+	// Tell the server to validate every challenge ...
+	for _, item := range pending {
+		if _, err := client.Accept(ctx, item.chal); err != nil {
+			return result, fmt.Errorf("accept the %s challenge for %s: %w", req.challenge, item.domain, err)
+		}
+	}
+	// ... and wait for each authorization to settle.
+	for _, item := range pending {
+		if _, err := client.WaitAuthorization(ctx, item.uri); err != nil {
+			return result, fmt.Errorf("authorization for %s failed: %w", item.domain, err)
+		}
+		a.log.Info("挑战验证通过", "domain", item.domain, "challenge", req.challenge)
 	}
 
 	ready, err := client.WaitOrder(ctx, order.URI)
@@ -197,14 +218,14 @@ func (a *ACME) issue(ctx context.Context, req request) (Result, error) {
 	return result, nil
 }
 
-// provisionChallenge publishes the answer of one authorization, tells the CA
-// to validate it and returns the function that undoes the temporary changes.
-// The caller runs it only after WaitAuthorization, because the answer must be
-// reachable while the CA checks it.
-func (a *ACME) provisionChallenge(ctx context.Context, client *acme.Client, req request, authz *acme.Authorization) (func(), error) {
+// provisionChallenge publishes the answer of one authorization and returns the
+// challenge plus the function that undoes the temporary changes. Accepting the
+// challenge is left to the caller, which presents every answer first so the CA
+// never starts validating before all of them are in place.
+func (a *ACME) provisionChallenge(ctx context.Context, client *acme.Client, req request, authz *acme.Authorization) (*acme.Challenge, func(), error) {
 	wireType, err := wireChallenge(req.challenge)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var chal *acme.Challenge
 	for _, c := range authz.Challenges {
@@ -214,10 +235,10 @@ func (a *ACME) provisionChallenge(ctx context.Context, client *acme.Client, req 
 		}
 	}
 	if chal == nil {
-		return nil, fmt.Errorf("the ca offers no %s challenge for %s", wireType, authz.Identifier.Value)
+		return nil, nil, fmt.Errorf("the ca offers no %s challenge for %s", wireType, authz.Identifier.Value)
 	}
 	if chal.Status == acme.StatusValid {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	domain := authz.Identifier.Value
@@ -233,16 +254,9 @@ func (a *ACME) provisionChallenge(ctx context.Context, client *acme.Client, req 
 		err = fmt.Errorf("unsupported challenge %q", req.challenge)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-
-	if _, err := client.Accept(ctx, chal); err != nil {
-		if cleanup != nil {
-			cleanup()
-		}
-		return nil, fmt.Errorf("accept the %s challenge for %s: %w", wireType, domain, err)
-	}
-	return cleanup, nil
+	return chal, cleanup, nil
 }
 
 // persistKeyType records the key type used for a certificate so a later change

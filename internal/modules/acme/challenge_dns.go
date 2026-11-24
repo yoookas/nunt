@@ -43,9 +43,19 @@ func (a *ACME) startDNS01(ctx context.Context, client *acme.Client, chal *acme.C
 		return nil, fmt.Errorf("create dns provider %s: %w", req.dnsProvider, err)
 	}
 
-	zone, sub, err := splitZone(ctx, resolverFor(req), recName)
+	resolver := resolverFor(req)
+	// _acme-challenge may be a CNAME into another zone (a common way to let a
+	// dedicated account hold the challenge records). The CA follows the CNAME,
+	// so the TXT record belongs at the end of the chain.
+	writeName := recName
+	if canonical, cerr := resolver.LookupCNAME(ctx, recName); cerr == nil {
+		if name := strings.TrimSuffix(strings.TrimSpace(canonical), "."); name != "" && !strings.EqualFold(name, recName) {
+			writeName = name
+		}
+	}
+	zone, sub, err := splitZone(ctx, resolver, writeName)
 	if err != nil {
-		return nil, fmt.Errorf("find the dns zone of %s: %w", recName, err)
+		return nil, fmt.Errorf("find the dns zone of %s: %w", writeName, err)
 	}
 	record := dnsprov.Record{
 		Domain:    zone,
@@ -61,31 +71,31 @@ func (a *ACME) startDNS01(ctx context.Context, client *acme.Client, chal *acme.C
 	ownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), issueTimeout)
 	if err := provider.Set(ownCtx, record); err != nil {
 		cancel()
-		return nil, fmt.Errorf("create TXT record %s at %s: %w", recName, req.dnsProvider, err)
+		return nil, fmt.Errorf("create TXT record %s at %s: %w", writeName, req.dnsProvider, err)
 	}
 
 	resolvers := req.dnsResolvers
 	if len(resolvers) == 0 {
 		resolvers = defaultDNSResolvers
 	}
-	waitErr := waitForTXT(ownCtx, resolvers, recName, value)
+	waitErr := waitForTXT(ownCtx, resolver, zone, resolvers, writeName, value)
 	if waitErr != nil {
 		removeCtx, removeCancel := context.WithTimeout(context.Background(), time.Minute)
 		if derr := provider.Delete(removeCtx, record); derr != nil {
-			a.log.Warn("验证失败后无法删除 TXT 记录", "record", recName, "error", derr)
+			a.log.Warn("验证失败后无法删除 TXT 记录", "record", writeName, "error", derr)
 		}
 		removeCancel()
 		cancel()
 		return nil, fmt.Errorf("dns-01 challenge for %s: %w", domain, waitErr)
 	}
-	a.log.Info("dns-01 的 TXT 记录已在所有解析器可见", "record", recName, "zone", zone)
+	a.log.Info("dns-01 的 TXT 记录已传播", "record", writeName, "zone", zone)
 
 	cleanup := func() {
 		defer cancel()
 		removeCtx, removeCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer removeCancel()
 		if err := provider.Delete(removeCtx, record); err != nil {
-			a.log.Warn("无法删除 TXT 记录", "record", recName, "error", err)
+			a.log.Warn("无法删除 TXT 记录", "record", writeName, "error", err)
 		}
 	}
 	return cleanup, nil
@@ -177,8 +187,10 @@ func splitZone(ctx context.Context, resolver *net.Resolver, name string) (string
 }
 
 // waitForTXT polls every resolver until the expected TXT value is visible, the
-// window elapses or ctx is done.
-func waitForTXT(ctx context.Context, resolvers []string, name, want string) error {
+// window elapses or ctx is done. Public resolvers are only the first half: the
+// CA queries the zone's own nameservers, which can lag behind, so the value
+// must also show up on at least one of them before the challenge is accepted.
+func waitForTXT(ctx context.Context, zoneResolver *net.Resolver, zone string, resolvers []string, name, want string) error {
 	servers := normalizeResolvers(resolvers)
 	if len(servers) == 0 {
 		servers = normalizeResolvers(defaultDNSResolvers)
@@ -188,17 +200,17 @@ func waitForTXT(ctx context.Context, resolvers []string, name, want string) erro
 		deadline = d
 	}
 
-	var last map[string]string
+	var last map[string][]string
 	for {
 		last = queryTXT(ctx, servers, name)
 		missing := 0
 		for _, server := range servers {
-			if last[server] != want {
+			if !hasTXT(last[server], want) {
 				missing++
 			}
 		}
 		if missing == 0 {
-			return nil
+			break
 		}
 		if time.Now().After(deadline) || ctx.Err() != nil {
 			return fmt.Errorf("the TXT record %s did not propagate within %s (last answers: %s)",
@@ -210,15 +222,84 @@ func waitForTXT(ctx context.Context, resolvers []string, name, want string) erro
 		case <-time.After(dnsPollInterval):
 		}
 	}
+	return waitForAuthoritative(ctx, zoneResolver, zone, name, want, deadline)
 }
 
-// queryTXT asks every resolver for the TXT record and returns one answer per
-// resolver: the matching value, the first value seen or the error.
-func queryTXT(ctx context.Context, servers []string, name string) map[string]string {
-	out := make(map[string]string, len(servers))
+// waitForAuthoritative waits until the zone's own nameservers serve the value.
+// The list of nameservers is best effort: when it cannot be resolved the
+// public check above stands on its own.
+func waitForAuthoritative(ctx context.Context, resolver *net.Resolver, zone, name, want string, deadline time.Time) error {
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, dnsQueryTimeout)
+	servers, err := authoritativeServers(lookupCtx, resolver, zone)
+	cancel()
+	if err != nil || len(servers) == 0 {
+		return nil
+	}
+	var last map[string][]string
+	for {
+		last = queryTXT(ctx, servers, name)
+		for _, server := range servers {
+			if hasTXT(last[server], want) {
+				return nil
+			}
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return fmt.Errorf("the TXT record %s is not served by the zone's nameservers yet (last answers: %s)",
+				name, describeAnswers(last))
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(dnsPollInterval):
+		}
+	}
+}
+
+// authoritativeServers returns the addresses of the zone's nameservers.
+func authoritativeServers(ctx context.Context, resolver *net.Resolver, zone string) ([]string, error) {
+	names, err := resolver.LookupNS(ctx, zone)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(names))
+	for _, ns := range names {
+		host := strings.TrimSuffix(strings.TrimSpace(ns.Host), ".")
+		if host == "" {
+			continue
+		}
+		ips, err := resolver.LookupHost(ctx, host)
+		if err != nil {
+			continue
+		}
+		for _, ip := range ips {
+			out = append(out, net.JoinHostPort(ip, "53"))
+		}
+	}
+	return out, nil
+}
+
+// hasTXT reports whether the expected value is one of the answers. A name can
+// hold several TXT records (the apex and its wildcard share one), so the whole
+// set matters, not just the first value.
+func hasTXT(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+// queryTXT asks every resolver for the TXT record and returns the values each
+// one answered, or a single diagnostic entry when the query failed.
+func queryTXT(ctx context.Context, servers []string, name string) map[string][]string {
+	out := make(map[string][]string, len(servers))
 	type result struct {
 		server string
-		value  string
+		value  []string
 	}
 	results := make(chan result, len(servers))
 	for _, server := range servers {
@@ -230,11 +311,11 @@ func queryTXT(ctx context.Context, servers []string, name string) map[string]str
 			values, err := resolver.LookupTXT(queryCtx, name)
 			switch {
 			case err != nil:
-				res.value = "error: " + err.Error()
+				res.value = []string{"error: " + err.Error()}
 			case len(values) == 0:
-				res.value = "no TXT record"
+				res.value = []string{"no TXT record"}
 			default:
-				res.value = strings.Join(values, ",")
+				res.value = values
 			}
 			results <- res
 		}(server)
@@ -247,7 +328,7 @@ func queryTXT(ctx context.Context, servers []string, name string) map[string]str
 }
 
 // describeAnswers renders the per resolver answers for an error message.
-func describeAnswers(answers map[string]string) string {
+func describeAnswers(answers map[string][]string) string {
 	if len(answers) == 0 {
 		return "none"
 	}
@@ -258,7 +339,7 @@ func describeAnswers(answers map[string]string) string {
 	sort.Strings(keys)
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
-		parts = append(parts, fmt.Sprintf("%s=%s", k, answers[k]))
+		parts = append(parts, fmt.Sprintf("%s=%s", k, strings.Join(answers[k], ",")))
 	}
 	return strings.Join(parts, "; ")
 }

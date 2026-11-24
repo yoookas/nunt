@@ -73,7 +73,7 @@ func TestDescribeAnswers(t *testing.T) {
 	if got := describeAnswers(nil); got != "none" {
 		t.Fatalf("describeAnswers(nil) = %q, want %q", got, "none")
 	}
-	got := describeAnswers(map[string]string{"1.1.1.1:53": "abc", "8.8.8.8:53": "error: timeout"})
+	got := describeAnswers(map[string][]string{"1.1.1.1:53": {"abc"}, "8.8.8.8:53": {"error: timeout"}})
 	want := "1.1.1.1:53=abc; 8.8.8.8:53=error: timeout"
 	if got != want {
 		t.Fatalf("describeAnswers = %q, want %q", got, want)
