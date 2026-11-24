@@ -278,142 +278,6 @@ export default function Web() {
     }
   }
 
-  const listenerColumns: Column<WebListenerView>[] = [
-    {
-      key: 'name',
-      title: '名称',
-      render: (row) =>
-        rowCell(
-          row,
-          <div>
-            <div className="flex flex-wrap items-center gap-2 font-medium">
-              <span>{row.name || row.id}</span>
-              {selectedListenerId === row.id ? (
-                <StatusChip color="primary">当前</StatusChip>
-              ) : null}
-            </div>
-            <div className="mono mt-0.5 text-xs text-muted">{row.id}</div>
-          </div>,
-        ),
-    },
-    {
-      key: 'status',
-      title: '状态',
-      render: (row) => (
-        <div className="flex items-center gap-2 whitespace-nowrap">
-          <Switch
-            isSelected={!row.disabled}
-            isDisabled={busyListenerId === row.id}
-            onChange={(enabled) => void toggleListener(row, enabled)}
-            aria-label={`启停监听器 ${row.name || row.id}`}
-          >
-            <Switch.Content>
-              <Switch.Control>
-                <Switch.Thumb />
-              </Switch.Control>
-            </Switch.Content>
-          </Switch>
-          <span className="text-xs text-muted">{row.disabled ? '已停用' : '已启用'}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'listen',
-      title: '监听地址',
-      render: (row) =>
-        rowCell(
-          row,
-          <div className="flex flex-wrap items-center gap-1">
-            {(Array.isArray(row.listen) ? row.listen : []).map((item) => (
-              <span
-                key={item}
-                className="rounded-full bg-default px-2 py-0.5 text-xs text-default-foreground"
-              >
-                {item}
-              </span>
-            ))}
-            {!(Array.isArray(row.listen) && row.listen.length) ? (
-              <span className="text-muted">-</span>
-            ) : null}
-          </div>,
-        ),
-    },
-    {
-      key: 'tls',
-      title: 'TLS',
-      render: (row) => {
-        const mode = tlsModeOf(row)
-        return rowCell(
-          row,
-          <div className="flex min-w-0 flex-col items-start gap-1">
-            <StatusChip color={tlsColor(mode)}>{TLS_LABEL[mode] || '关闭'}</StatusChip>
-            {mode === 'custom' ? (
-              <span
-                className="max-w-48 truncate text-xs text-muted"
-                title={certTooltip(row.tls?.certId, certificates)}
-              >
-                {certDomainsText(row.tls?.certId, certificates)}
-              </span>
-            ) : null}
-            {row.tls?.clientAuth && row.tls.clientAuth !== 'off' ? (
-              <span className="text-xs text-muted">
-                mTLS：{row.tls.clientAuth === 'require' ? '必须' : '可选'}
-              </span>
-            ) : null}
-          </div>,
-        )
-      },
-    },
-    {
-      key: 'hsts',
-      title: 'HSTS',
-      render: (row) => {
-        const mode = tlsModeOf(row)
-        if (mode === 'off') {
-          return rowCell(row, <span className="text-muted">—</span>)
-        }
-        return rowCell(
-          row,
-          <StatusChip color={row.tls?.hsts ? 'success' : 'default'}>
-            {row.tls?.hsts ? '开启' : '关闭'}
-          </StatusChip>,
-        )
-      },
-    },
-    {
-      key: 'routeCount',
-      title: '路由数',
-      render: (row) => rowCell(row, <span className="text-muted">{listenerRouteCount(row)}</span>),
-    },
-    {
-      key: 'remark',
-      title: '备注',
-      render: (row) =>
-        rowCell(
-          row,
-          <span className="block max-w-60 truncate" title={row.remark}>
-            {row.remark || <span className="text-muted">-</span>}
-          </span>,
-        ),
-    },
-    {
-      key: 'actions',
-      title: '操作',
-      render: (row) => (
-        <div className="flex flex-wrap gap-1">
-          <Button size="sm" variant="secondary" onPress={() => selectListener(row)}>
-            查看路由
-          </Button>
-          <Button size="sm" variant="ghost" onPress={() => openEditListener(row)}>
-            编辑
-          </Button>
-          <Button size="sm" variant="danger-soft" onPress={() => setDeleteListener(row)}>
-            删除
-          </Button>
-        </div>
-      ),
-    },
-  ]
 
   const routeColumns: Column<WebRule>[] = []
   if (selectedListenerId === 'all') {
@@ -462,6 +326,28 @@ export default function Web() {
       ),
     },
     {
+      key: 'status',
+      title: '状态',
+      render: (row) => (
+        <div className="flex items-center gap-2 whitespace-nowrap">
+          <Switch
+            isSelected={row.enable}
+            isDisabled={busyRuleId === row.id}
+            onChange={(selected) => void toggleRule(row, selected)}
+            aria-label={`启停路由 ${row.name || row.id}`}
+          >
+            <Switch.Content>
+              <Switch.Control>
+                <Switch.Thumb />
+              </Switch.Control>
+            </Switch.Content>
+          </Switch>
+          <span className="text-xs text-muted">{row.enable ? '已启用' : '已停用'}</span>
+          {row.active ? <StatusChip color="success">运行中</StatusChip> : null}
+        </div>
+      ),
+    },
+    {
       key: 'type',
       title: '类型',
       render: (row) => (
@@ -492,28 +378,6 @@ export default function Web() {
         <StatusChip color={row.waf ? 'success' : 'default'}>
           {row.waf ? '已开启' : '关闭'}
         </StatusChip>
-      ),
-    },
-    {
-      key: 'status',
-      title: '状态',
-      render: (row) => (
-        <div className="flex items-center gap-2 whitespace-nowrap">
-          <Switch
-            isSelected={row.enable}
-            isDisabled={busyRuleId === row.id}
-            onChange={(selected) => void toggleRule(row, selected)}
-            aria-label={`启停路由 ${row.name || row.id}`}
-          >
-            <Switch.Content>
-              <Switch.Control>
-                <Switch.Thumb />
-              </Switch.Control>
-            </Switch.Content>
-          </Switch>
-          <span className="text-xs text-muted">{row.enable ? '已启用' : '已停用'}</span>
-          {row.active ? <StatusChip color="success">运行中</StatusChip> : null}
-        </div>
       ),
     },
     {
@@ -636,6 +500,18 @@ export default function Web() {
                       {listener.tls?.clientAuth && listener.tls.clientAuth !== 'off' ? <span>mTLS</span> : null}
                     </div>
                   </button>
+                  <Switch
+                    isSelected={!listener.disabled}
+                    isDisabled={busyListenerId === listener.id}
+                    onChange={(enabled) => void toggleListener(listener, enabled)}
+                    aria-label={`启停监听器 ${listener.name || listener.id}`}
+                  >
+                    <Switch.Content>
+                      <Switch.Control>
+                        <Switch.Thumb />
+                      </Switch.Control>
+                    </Switch.Content>
+                  </Switch>
                   <Button
                     isIconOnly
                     size="sm"
