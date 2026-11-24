@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Button, ListBox, Select, Switch } from '@heroui/react'
+import { Pencil, Trash2 } from 'lucide-react'
 import { api, errorText } from '../api'
 import {
   ConfirmModal,
@@ -568,11 +569,12 @@ export default function Web() {
         }
       />
 
-      <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
+      <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
         <Panel
           title="监听器"
           extra={<span className="text-xs text-muted">{listeners.length} 个</span>}
           className="self-start"
+          flush
         >
           {listenerError ? (
             <div className="flex items-center gap-2 border-b border-border px-4 py-2 text-sm text-danger">
@@ -582,21 +584,22 @@ export default function Web() {
               </Button>
             </div>
           ) : null}
-          <div className="space-y-2 p-2">
-            {/* "All listeners" is a filter: with no listeners at all it says
-                nothing the empty state below does not already say. */}
+          {/* A flat list instead of cards inside a card: the panel border and
+              dividers do the separating, so each row is one click target plus
+              two icon actions. */}
+          <div className="divide-y divide-border">
             {listeners.length > 0 ? (
               <button
                 type="button"
                 aria-pressed={selectedListenerId === 'all'}
                 onClick={() => setSelectedListenerId('all')}
-                className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                className={`flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm transition-colors ${
                   selectedListenerId === 'all'
-                    ? 'border-accent bg-accent-soft text-accent-soft-foreground'
-                    : 'border-border hover:bg-default'
+                    ? 'bg-accent-soft text-accent-soft-foreground'
+                    : 'hover:bg-default/60'
                 }`}
               >
-                <span className="text-sm font-medium">全部监听器</span>
+                <span className="flex-1 font-medium">全部监听器</span>
                 <StatusChip color={selectedListenerId === 'all' ? 'primary' : 'default'}>
                   {listeners.length}
                 </StatusChip>
@@ -608,55 +611,54 @@ export default function Web() {
               return (
                 <div
                   key={listener.id}
-                  className={`rounded-xl border p-3 transition-colors ${
-                    active ? 'border-accent bg-accent-soft/40' : 'border-border hover:bg-default/60'
+                  className={`flex items-center gap-1 pr-2 transition-colors ${
+                    active ? 'bg-accent-soft/50' : 'hover:bg-default/50'
                   }`}
                 >
                   <button
                     type="button"
-                    className="w-full text-left"
                     aria-pressed={active}
                     onClick={() => selectListener(listener)}
+                    className="min-w-0 flex-1 px-4 py-2 text-left"
                   >
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
                       <span className="truncate text-sm font-medium">{listener.name || listener.id}</span>
                       <StatusChip color={tlsColor(mode)}>{TLS_LABEL[mode] || '关闭'}</StatusChip>
+                      {listener.disabled ? <StatusChip color="warning">已停用</StatusChip> : null}
                     </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-1">
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
                       {(Array.isArray(listener.listen) ? listener.listen : []).map((item) => (
-                        <span key={item} className="mono rounded-full bg-default px-2 py-0.5 text-[11px]">
+                        <span key={item} className="mono rounded bg-default px-1.5 py-0.5">
                           {item}
                         </span>
                       ))}
-                      {listener.tls?.clientAuth && listener.tls.clientAuth !== 'off' ? (
-                        <StatusChip color={listener.tls.clientAuth === 'require' ? 'success' : 'warning'}>
-                          mTLS
-                        </StatusChip>
-                      ) : null}
-                    </div>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-muted">
                       <span>{listenerRouteCount(listener)} 条路由</span>
-                      {mode !== 'off' && listener.tls?.hsts ? <span>HSTS</span> : null}
-                      {mode === 'custom' ? (
-                        <span className="truncate" title={certTooltip(listener.tls?.certId, certificates)}>
-                          {certDomainsText(listener.tls?.certId, certificates)}
-                        </span>
-                      ) : null}
+                      {listener.tls?.clientAuth && listener.tls.clientAuth !== 'off' ? <span>mTLS</span> : null}
                     </div>
                   </button>
-                  <div className="mt-2 flex justify-end gap-1 border-t border-border pt-2">
-                    <Button size="sm" variant="ghost" onPress={() => openEditListener(listener)}>
-                      编辑
-                    </Button>
-                    <Button size="sm" variant="ghost" className="text-danger" onPress={() => setDeleteListener(listener)}>
-                      删除
-                    </Button>
-                  </div>
+                  <Button
+                    isIconOnly
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`编辑监听器 ${listener.name || listener.id}`}
+                    onPress={() => openEditListener(listener)}
+                  >
+                    <Pencil size={14} />
+                  </Button>
+                  <Button
+                    isIconOnly
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`删除监听器 ${listener.name || listener.id}`}
+                    onPress={() => setDeleteListener(listener)}
+                  >
+                    <Trash2 size={14} />
+                  </Button>
                 </div>
               )
             })}
             {!listeners.length && !listenerLoading ? (
-              <div className="px-2 py-8 text-center text-sm text-muted">还没有监听器</div>
+              <div className="px-4 py-8 text-center text-sm text-muted">还没有监听器</div>
             ) : null}
           </div>
         </Panel>
@@ -664,6 +666,7 @@ export default function Web() {
         <Panel
           title="路由"
           className="min-w-0"
+          flush
           extra={
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
               <ToolbarSelect

@@ -187,6 +187,7 @@ export function DataTable<T>({
   empty = '暂无数据',
   ariaLabel = '数据表',
   loading,
+  variant = 'secondary',
 }: {
   items: T[]
   columns: Column<T>[]
@@ -194,6 +195,8 @@ export function DataTable<T>({
   empty?: ReactNode
   ariaLabel?: string
   loading?: boolean
+  /** "secondary" is flat and belongs inside a panel; "primary" is a card. */
+  variant?: 'primary' | 'secondary'
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [overflow, setOverflow] = useState(false)
@@ -251,7 +254,7 @@ export function DataTable<T>({
         aria-label={`${ariaLabel}（可横向滚动）`}
       >
         <div className="min-w-[600px] md:min-w-0">
-          <Table>
+          <Table variant={variant}>
             <Table.Content aria-label={ariaLabel}>
               <Table.Header>
                 {columns.map((column, index) => (
