@@ -189,8 +189,8 @@ for (const [route, title] of routes) {
   if (route === '/web' && window.document.body.textContent.includes('全部监听器')) {
     failures.push('/web: the all-listeners filter is shown with no listeners')
   }
-  if (route === '/acme' && !window.document.body.textContent.includes('上次证书任务失败')) {
-    failures.push('/acme: the last issuance failure is not shown on the page')
+  if (route === '/acme' && !window.document.body.textContent.includes('证书任务失败')) {
+    failures.push('/acme: the last issuance failure is not reported')
   }
   if (route === '/' && !window.document.querySelector('[aria-label$="个需要处理的问题"]')) {
     failures.push('header: the problem indicator is missing')

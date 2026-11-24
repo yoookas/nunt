@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Tabs } from '@heroui/react'
 import { api, errorText } from '../api'
 import { fmtTime, splitLines, splitList } from '../format'
+import { usePolling } from '../usePolling'
 import {
   AlertBox,
   ConfirmModal,
@@ -207,7 +208,6 @@ export default function Acme() {
   const [providers, setProviders] = useState<Provider[]>([])
   const [config, setConfig] = useState<AcmeConfig>({ email: '', keyType: 'ec256' })
   const [loading, setLoading] = useState(true)
-  const [lastError, setLastError] = useState('')
 
   const [jobOpen, setJobOpen] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -323,16 +323,27 @@ export default function Acme() {
     }
   }
 
-  // The ACME module keeps the last failure; without this it only showed up on
-  // the overview, which meant a failed issuance could go unnoticed.
+  // The ACME module keeps the last failure. Report it as a toast, once per
+  // distinct message: a banner on every visit was noise, and the persistent
+  // hint lives in the header indicator.
+  const notifiedError = useRef('')
   const loadHealth = async () => {
     try {
       const data = await api.get<{ acme?: { lastError?: string | null } }>('/api/v1/system/health')
-      setLastError(String(data?.acme?.lastError || ''))
+      const message = String(data?.acme?.lastError || '')
+      if (!message) {
+        notifiedError.current = ''
+        return
+      }
+      if (message === notifiedError.current) return
+      notifiedError.current = message
+      toast.danger(`证书任务失败：${message}`, { timeout: 12000 })
     } catch {
-      setLastError('')
+      // Health is best effort; the header indicator reports what it can.
     }
   }
+
+  usePolling(loadHealth, 30000)
 
   const loadAll = async () => {
     setLoading(true)
@@ -763,15 +774,6 @@ export default function Acme() {
           </>
         }
       />
-
-      {lastError ? (
-        <AlertBox status="danger" title="上次证书任务失败">
-          <span className="mono break-words">{lastError}</span>
-          <span className="mt-1 block text-xs">
-            常见原因：DNS 凭据权限不足、域名解析未指向本机（http-01）、CA 限流，或目标端口不可达。完整过程见「日志 → 运行日志」。
-          </span>
-        </AlertBox>
-      ) : null}
 
       <Tabs defaultSelectedKey="jobs" className="w-full">
         <Tabs.List aria-label="证书分类">
