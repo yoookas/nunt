@@ -21,6 +21,8 @@ export interface WebTLS {
 export interface WebListener {
   id: string
   name: string
+  /** Stopped, for example because its port is taken. */
+  disabled?: boolean
   listen: string[]
   tls: WebTLS
   remark?: string

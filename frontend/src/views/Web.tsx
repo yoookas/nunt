@@ -49,6 +49,7 @@ export default function Web() {
   const [listenerError, setListenerError] = useState('')
   const [routeError, setRouteError] = useState('')
   const [busyRuleId, setBusyRuleId] = useState('')
+  const [busyListenerId, setBusyListenerId] = useState('')
 
   const [listenerModal, setListenerModal] = useState<{
     open: boolean
@@ -185,6 +186,20 @@ export default function Web() {
     </div>
   )
 
+  const toggleListener = async (listener: WebListenerView) => {
+    if (busyListenerId) return
+    setBusyListenerId(listener.id)
+    try {
+      await api.post(`/api/v1/web/listeners/${encodeURIComponent(listener.id)}/toggle`)
+      toast.success(listener.disabled ? '监听器已启用' : '监听器已停用')
+    } catch (err) {
+      toast.danger(errorText(err))
+    } finally {
+      setBusyListenerId('')
+      await Promise.all([loadListeners(), loadRules()])
+    }
+  }
+
   const toggleRule = async (rule: WebRule, enabled: boolean) => {
     if (busyRuleId) return
     const previous = rule.enable
@@ -272,6 +287,7 @@ export default function Web() {
           <div>
             <div className="flex flex-wrap items-center gap-2 font-medium">
               <span>{row.name || row.id}</span>
+              {row.disabled ? <StatusChip color="warning">已停用</StatusChip> : null}
               {selectedListenerId === row.id ? (
                 <StatusChip color="primary">当前</StatusChip>
               ) : null}
@@ -366,6 +382,14 @@ export default function Web() {
         <div className="flex flex-wrap gap-1">
           <Button size="sm" variant="secondary" onPress={() => selectListener(row)}>
             查看路由
+          </Button>
+          <Button
+            size="sm"
+            variant={row.disabled ? 'secondary' : 'ghost'}
+            isDisabled={busyListenerId === row.id}
+            onPress={() => void toggleListener(row)}
+          >
+            {row.disabled ? '启用' : '停用'}
           </Button>
           <Button size="sm" variant="ghost" onPress={() => openEditListener(row)}>
             编辑

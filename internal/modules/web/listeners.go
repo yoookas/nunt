@@ -83,6 +83,10 @@ type listenerPlan struct {
 	addr  string
 	tls   listenerTLS
 	rules []*rule
+	// listeners are the configured listeners that claim this address; a bind
+	// failure takes them out of service (disabled) until the operator enables
+	// them again.
+	listeners []string
 }
 
 // newListener prepares the server of one address.

@@ -114,12 +114,17 @@ export default function ListenerModal({
 
     setSaving(true)
     try {
+      let saved: { disabled?: boolean } | null = null
       if (listener) {
-        await api.put(`/api/v1/web/listeners/${encodeURIComponent(listener.id)}`, payload)
+        saved = await api.put(`/api/v1/web/listeners/${encodeURIComponent(listener.id)}`, payload)
       } else {
-        await api.post('/api/v1/web/listeners', payload)
+        saved = await api.post('/api/v1/web/listeners', payload)
       }
-      toast.success('保存成功')
+      if (saved?.disabled) {
+        toast.warning('端口被占用，监听器已自动停用；释放端口后请在列表中手动启用')
+      } else {
+        toast.success('保存成功')
+      }
       onClose()
       onSaved()
     } catch (err) {
@@ -166,7 +171,7 @@ export default function ListenerModal({
             value={form.listen}
             onChange={(value) => patch({ listen: value })}
             placeholder="输入后回车，例如 :443、[::]:443"
-            hint="每行/每个标签一个地址，支持 :443、0.0.0.0:8080、[::]:443；同一地址不能属于两个监听器。"
+            hint="每行/每个标签一个地址，支持 :443、0.0.0.0:8080、[::]:443；同一地址不能属于两个监听器。端口被占用时监听器会自动停用，可稍后手动启用。"
           />
         </div>
         <SelectInput

@@ -153,8 +153,11 @@ type WebConfig struct {
 // WebListener is one set of sockets and its TLS configuration. Every route
 // below it shares the same listen addresses and TLS mode.
 type WebListener struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Disabled marks a listener that was stopped, for example because its
+	// port is already taken. It is skipped until the operator enables it.
+	Disabled  bool      `json:"disabled,omitempty"`
 	Listen    []string  `json:"listen"`
 	TLS       WebTLS    `json:"tls"`
 	Remark    string    `json:"remark,omitempty"`

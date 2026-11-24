@@ -55,7 +55,6 @@ type Web struct {
 	rules     []*rule
 	bindings  map[string]*listener
 	tlsAddrs  map[string]bool
-	fallback  *listener
 	siteCache map[string]cachedSite
 
 	cfgMu sync.RWMutex
@@ -226,13 +225,9 @@ func (w *Web) Stop(ctx context.Context) error {
 	for _, l := range w.bindings {
 		listeners = append(listeners, l)
 	}
-	if w.fallback != nil {
-		listeners = append(listeners, w.fallback)
-	}
 	sites := w.collectSitesLocked()
 	w.bindings = map[string]*listener{}
 	w.tlsAddrs = map[string]bool{}
-	w.fallback = nil
 	w.rules = nil
 	w.siteCache = map[string]cachedSite{}
 	w.mu.Unlock()
@@ -384,11 +379,6 @@ func (w *Web) apply(ctx context.Context, cfg *model.Config) error {
 		delete(w.bindings, addr)
 		delete(w.tlsAddrs, addr)
 	}
-	// Fallback socket used by rules that could not bind their address.
-	if w.fallback != nil {
-		retired = append(retired, w.fallback)
-		w.fallback = nil
-	}
 	previous := w.rules
 	w.rules = compiled
 	newCounters := map[string]int64{}
@@ -424,6 +414,7 @@ func (w *Web) apply(ctx context.Context, cfg *model.Config) error {
 	}
 	sort.Strings(addrs)
 	var firstErr error
+	disabled := 0
 	for _, addr := range addrs {
 		plan := wanted[addr]
 		tlsOn := plan.tls.mode != model.TLSModeOff
@@ -472,13 +463,13 @@ func (w *Web) apply(ctx context.Context, cfg *model.Config) error {
 		if l == nil {
 			nl := w.newListener(ctx, addr)
 			if err := nl.start(plan); err != nil {
-				w.logger().Error("web：监听器启动失败", "addr", addr, "error", err)
-				if firstErr == nil {
-					firstErr = err
-				}
-				w.mu.Lock()
-				w.fallback = w.ensureFallbackLocked(ctx)
-				w.mu.Unlock()
+				// The port is taken (or cannot be bound). Take the listener out
+				// of service instead of retrying on every reload: the operator
+				// has to enable it again by hand.
+				w.logger().Error("web：监听器启动失败，已自动停用",
+					"addr", addr, "listeners", plan.listeners, "error", err)
+				w.disableListeners(plan.listeners)
+				disabled++
 				continue
 			}
 			w.mu.Lock()
@@ -497,7 +488,21 @@ func (w *Web) apply(ctx context.Context, cfg *model.Config) error {
 	w.mu.Lock()
 	total := len(w.bindings)
 	w.mu.Unlock()
-	w.SetDetail(fmt.Sprintf("%d listener(s), %d rule(s)", total, len(compiled)))
+	detail := fmt.Sprintf("%d listener(s), %d rule(s)", total, len(compiled))
+	if disabled > 0 {
+		detail += fmt.Sprintf(", %d disabled", disabled)
+	}
+	w.SetDetail(detail)
+	if disabled > 0 {
+		// The disabled flags were written to the store while this pass was
+		// already running; keep the module's view of the configuration in
+		// sync so the API reports them immediately.
+		if snap := w.deps.Cfg.Snapshot(); snap != nil {
+			w.cfgMu.Lock()
+			w.cfg = snap
+			w.cfgMu.Unlock()
+		}
+	}
 
 	// The most useful error wins: an unusable rule explains a missing site
 	// better than a listener that could not bind.
@@ -511,27 +516,30 @@ func (w *Web) apply(ctx context.Context, cfg *model.Config) error {
 	}
 }
 
-// ensureFallbackLocked returns the socket that answers requests which no rule
-// serves. The caller holds the web mutex.
-func (w *Web) ensureFallbackLocked(ctx context.Context) *listener {
-	if w.fallback != nil {
-		return w.fallback
+// disableListeners marks the listeners that claim an address as disabled and
+// persists that, so a taken port is not retried on every reload or restart.
+func (w *Web) disableListeners(ids []string) {
+	if len(ids) == 0 || w.deps == nil || w.deps.Cfg == nil {
+		return
 	}
-	l := w.newListener(ctx, ":0")
-	m := newMatcher("", nil, listenerTLS{})
-	l.router.setMatcher(m)
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		w.logger().Error("web：无法打开兜底监听", "error", err)
+	now := time.Now()
+	err := w.deps.Cfg.Update(func(c *model.Config) error {
+		for i := range c.Web.Listeners {
+			for _, id := range ids {
+				if c.Web.Listeners[i].ID != id {
+					continue
+				}
+				c.Web.Listeners[i].Disabled = true
+				c.Web.Listeners[i].UpdatedAt = now
+			}
+		}
 		return nil
+	})
+	if err != nil {
+		w.logger().Error("web：无法停用监听器", "listeners", ids, "error", err)
+		return
 	}
-	l.addr = ln.Addr().String()
-	l.mu.Lock()
-	l.plain = ln
-	l.mu.Unlock()
-	go l.serve(ln, "http")
-	w.logger().Info("web：兜底监听已就绪", "addr", l.addr)
-	return l
+	w.logger().Warn("web：监听器已自动停用，请处理端口占用后手动启用", "listeners", ids)
 }
 
 // compileWeb turns listeners and routes into one plan per listen address.
@@ -539,6 +547,9 @@ func (w *Web) compileWeb(cfg *model.Config) ([]*rule, map[string]*listenerPlan, 
 	plans := map[string]*listenerPlan{}
 	byListener := map[string][]*listenerPlan{}
 	for _, l := range cfg.Web.Listeners {
+		if l.Disabled {
+			continue
+		}
 		tls := listenerTLS{
 			mode:   normalizeTLSMode(l.TLS.Mode),
 			certID: strings.TrimSpace(l.TLS.CertID),
@@ -564,7 +575,7 @@ func (w *Web) compileWeb(cfg *model.Config) ([]*rule, map[string]*listenerPlan, 
 				continue
 			}
 			seen[norm] = true
-			p := &listenerPlan{addr: norm, tls: tls}
+			p := &listenerPlan{addr: norm, tls: tls, listeners: []string{l.ID}}
 			plans[norm] = p
 			byListener[l.ID] = append(byListener[l.ID], p)
 		}

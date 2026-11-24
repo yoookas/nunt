@@ -31,6 +31,7 @@ func (w *Web) registerAPI(mux *rest.Mux) {
 	g.Post("/listeners", w.handleCreateListener)
 	g.Put("/listeners/{id}", w.handleUpdateListener)
 	g.Delete("/listeners/{id}", w.handleDeleteListener)
+	g.Post("/listeners/{id}/toggle", w.handleToggleListener)
 
 	g.Get("/rules", w.handleListRules)
 	g.Post("/rules", w.handleCreateRule)
@@ -73,6 +74,62 @@ func (w *Web) handleListListeners(rw http.ResponseWriter, req *http.Request) {
 		}
 	}
 	rest.OK(rw, map[string]any{"items": items})
+}
+
+// handleToggleListener stops or starts one listener. Enabling a listener
+// whose port is still taken leaves it disabled again; the response tells the
+// caller which state it ended up in.
+func (w *Web) handleToggleListener(rw http.ResponseWriter, req *http.Request) {
+	if !requireAdmin(rw, req) {
+		return
+	}
+	id := strings.TrimSpace(req.PathValue("id"))
+	if id == "" {
+		rest.Fail(rw, http.StatusBadRequest, "listener id is required")
+		return
+	}
+	enabling := false
+	found := false
+	if err := w.saveConfig(func(c *model.Config) error {
+		for i := range c.Web.Listeners {
+			if c.Web.Listeners[i].ID != id {
+				continue
+			}
+			found = true
+			enabling = c.Web.Listeners[i].Disabled
+			c.Web.Listeners[i].Disabled = !c.Web.Listeners[i].Disabled
+			c.Web.Listeners[i].UpdatedAt = time.Now()
+			return nil
+		}
+		return errListenerNotFound
+	}); err != nil {
+		if !found {
+			rest.Fail(rw, http.StatusNotFound, "listener not found")
+			return
+		}
+		rest.Fail(rw, http.StatusBadRequest, "cannot update the listener: %s", err)
+		return
+	}
+
+	cfg := w.snapshot()
+	if cfg == nil {
+		rest.Fail(rw, http.StatusInternalServerError, "configuration is not available")
+		return
+	}
+	for _, l := range cfg.Web.Listeners {
+		if l.ID != id {
+			continue
+		}
+		// Enabling is only successful when the address could be bound; the
+		// apply pass disables it again when the port is still taken.
+		if enabling && l.Disabled {
+			rest.Fail(rw, http.StatusConflict, "端口仍被占用，监听器保持停用；请释放端口后再试")
+			return
+		}
+		rest.OK(rw, w.listenerView(l, cfg))
+		return
+	}
+	rest.Fail(rw, http.StatusNotFound, "listener not found")
 }
 
 // prepareListener normalises a listener received from the API.
@@ -149,6 +206,10 @@ func (w *Web) handleUpdateListener(rw http.ResponseWriter, req *http.Request) {
 				continue
 			}
 			body.CreatedAt = c.Web.Listeners[i].CreatedAt
+			// The disabled state is owned by the toggle endpoint; an edit must
+			// not silently re-enable a listener that was stopped by a bind
+			// failure.
+			body.Disabled = c.Web.Listeners[i].Disabled
 			c.Web.Listeners[i] = body
 			found = true
 			return nil
@@ -242,16 +303,49 @@ func (w *Web) handleListRules(rw http.ResponseWriter, req *http.Request) {
 	rest.OK(rw, map[string]any{"items": rules})
 }
 
+// listenerBound reports whether at least one address of the listener is bound.
+func (w *Web) listenerBound(id string) bool {
+	cfg := w.snapshot()
+	if cfg == nil {
+		return false
+	}
+	var addresses []string
+	for _, l := range cfg.Web.Listeners {
+		if l.ID == id {
+			addresses = l.Listen
+			break
+		}
+	}
+	if len(addresses) == 0 {
+		return false
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, addr := range addresses {
+		norm, err := netutil.NormalizeListen(addr)
+		if err != nil {
+			continue
+		}
+		if _, ok := w.bindings[norm]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // view decorates a stored rule with its runtime state.
 func (w *Web) view(raw model.WebRule) ruleView {
 	out := ruleView{WebRule: raw}
+	// A compiled rule is only served while its listener is actually bound:
+	// a disabled listener or a failed bind leaves it inactive.
+	bound := w.listenerBound(raw.ListenerID)
 	w.mu.Lock()
 	upstreams := []string{}
 	for _, r := range w.rules {
 		if r.id != raw.ID {
 			continue
 		}
-		out.Active = true
+		out.Active = bound
 		if r.site != nil {
 			upstreams = append(upstreams, r.site.upstreams...)
 		}
