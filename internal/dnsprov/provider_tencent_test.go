@@ -32,6 +32,31 @@ func (f *tencentFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	raw, _ := io.ReadAll(r.Body)
 	var payload map[string]any
 	_ = json.Unmarshal(raw, &payload)
+	// The real API rejects an unknown parameter by name instead of ignoring it.
+	// That is how "Subdomain" on CreateRecord surfaced, so the fake checks the
+	// parameter names too (note: CreateRecord wants SubDomain, while
+	// DescribeRecordList wants Subdomain).
+	allowed := map[string]map[string]bool{
+		"DescribeRecordList": {"Domain": true, "Subdomain": true, "RecordType": true, "Limit": true},
+		"CreateRecord":       {"Domain": true, "SubDomain": true, "RecordType": true, "RecordLine": true, "Value": true, "TTL": true},
+		"ModifyRecord":       {"Domain": true, "SubDomain": true, "RecordType": true, "RecordLine": true, "Value": true, "TTL": true, "RecordId": true},
+		"DeleteRecord":       {"Domain": true, "RecordId": true},
+	}
+	if set, ok := allowed[r.Header.Get("X-TC-Action")]; ok {
+		for key := range payload {
+			if !set[key] {
+				_ = json.NewEncoder(w).Encode(map[string]any{"Response": map[string]any{
+					"RequestId": "test-request",
+					"Error": map[string]any{
+						"Code":    "UnknownParameter",
+						"Message": "The parameter `" + key + "` is not recognized.",
+					},
+				}})
+				return
+			}
+		}
+	}
+
 	// Behave like the API: a signature that does not cover exactly the
 	// headers it claims to cover is rejected, which is what a missing or
 	// mismatched signed header looks like in production.
@@ -60,7 +85,7 @@ func (f *tencentFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.nextID++
 		f.records = append(f.records, tencentRecord{
 			RecordID: f.nextID,
-			Name:     str(payload["Subdomain"]),
+			Name:     str(payload["SubDomain"]),
 			Type:     str(payload["RecordType"]),
 			Value:    str(payload["Value"]),
 			Line:     str(payload["RecordLine"]),
@@ -223,7 +248,7 @@ func TestTencentSetCreatesUpdatesAndSkipsUnchanged(t *testing.T) {
 		t.Fatalf("create calls = %v", got)
 	}
 	created := fake.last()
-	if created.Payload["Domain"] != "example.com" || created.Payload["Subdomain"] != "www" ||
+	if created.Payload["Domain"] != "example.com" || created.Payload["SubDomain"] != "www" ||
 		created.Payload["RecordType"] != "A" || created.Payload["Value"] != "1.2.3.4" ||
 		created.Payload["RecordLine"] != "默认" || created.Payload["TTL"] != float64(600) {
 		t.Fatalf("create payload = %v", created.Payload)

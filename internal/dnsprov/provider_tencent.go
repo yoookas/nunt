@@ -195,9 +195,12 @@ func (p *tencentProvider) Set(ctx context.Context, rec Record) error {
 	if existing != nil && existing.Value == rec.Value {
 		return nil
 	}
+	// Note the capital D: CreateRecord and ModifyRecord expect "SubDomain",
+	// while DescribeRecordList above expects "Subdomain". The API rejects the
+	// wrong spelling with UnknownParameter instead of ignoring it.
 	payload := map[string]any{
 		"Domain":     domain,
-		"Subdomain":  sub,
+		"SubDomain":  sub,
 		"RecordType": typ,
 		"RecordLine": line,
 		"Value":      rec.Value,
