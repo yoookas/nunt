@@ -207,6 +207,7 @@ export default function Acme() {
   const [providers, setProviders] = useState<Provider[]>([])
   const [config, setConfig] = useState<AcmeConfig>({ email: '', keyType: 'ec256' })
   const [loading, setLoading] = useState(true)
+  const [lastError, setLastError] = useState('')
 
   const [jobOpen, setJobOpen] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -322,10 +323,21 @@ export default function Acme() {
     }
   }
 
+  // The ACME module keeps the last failure; without this it only showed up on
+  // the overview, which meant a failed issuance could go unnoticed.
+  const loadHealth = async () => {
+    try {
+      const data = await api.get<{ acme?: { lastError?: string | null } }>('/api/v1/system/health')
+      setLastError(String(data?.acme?.lastError || ''))
+    } catch {
+      setLastError('')
+    }
+  }
+
   const loadAll = async () => {
     setLoading(true)
     try {
-      await Promise.all([loadProviders(), loadJobs(), loadCerts(), loadConfig()])
+      await Promise.all([loadProviders(), loadJobs(), loadCerts(), loadConfig(), loadHealth()])
     } finally {
       setLoading(false)
     }
@@ -751,6 +763,15 @@ export default function Acme() {
           </>
         }
       />
+
+      {lastError ? (
+        <AlertBox status="danger" title="上次证书任务失败">
+          <span className="mono break-words">{lastError}</span>
+          <span className="mt-1 block text-xs">
+            常见原因：DNS 凭据权限不足、域名解析未指向本机（http-01）、CA 限流，或目标端口不可达。完整过程见「日志 → 运行日志」。
+          </span>
+        </AlertBox>
+      ) : null}
 
       <Tabs defaultSelectedKey="jobs" className="w-full">
         <Tabs.List aria-label="证书分类">

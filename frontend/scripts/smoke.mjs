@@ -98,6 +98,13 @@ function fixture(path) {
     }
   }
   if (path === '/api/v1/system/settings') return {}
+  if (path === '/api/v1/system/health') {
+    return {
+      certs: { total: 1, expired: 0, expiring7: 1, expiring30: 1, soon: [] },
+      acme: { lastError: '签发失败：DNS 凭据无效（smoke fixture）' },
+      problems: [{ level: 'warning', title: '证书即将过期', detail: 'example.com 还有 3 天到期' }],
+    }
+  }
   if (path === '/api/v1/system/logs' || path === '/api/v1/web/logs' || path === '/api/v1/forward/logs') return { entries: [] }
   if (path === '/api/v1/ddns/providers') return []
   if (path === '/api/v1/modules') return []
@@ -177,8 +184,16 @@ for (const [route, title] of routes) {
     if (heading.includes(title)) break
   }
   if (!heading.includes(title)) failures.push(`${route}: heading is "${heading}", want "${title}"`)
+  // Let the page's own loads settle before asserting on their output.
+  await sleep(300)
   if (route === '/web' && window.document.body.textContent.includes('全部监听器')) {
     failures.push('/web: the all-listeners filter is shown with no listeners')
+  }
+  if (route === '/acme' && !window.document.body.textContent.includes('上次证书任务失败')) {
+    failures.push('/acme: the last issuance failure is not shown on the page')
+  }
+  if (route === '/' && !window.document.querySelector('[aria-label$="个需要处理的问题"]')) {
+    failures.push('header: the problem indicator is missing')
   }
   const fresh = errors.splice(before)
   if (fresh.length) failures.push(`${route}: ${fresh.join(' | ')}`)
@@ -237,3 +252,6 @@ if (failures.length) {
   process.exit(1)
 }
 console.log(`frontend smoke ok: ${routes.length} routes mounted without a crash`)
+// The shell polls the health endpoint, so a live interval would keep the
+// process alive after the checks are done.
+process.exit(0)

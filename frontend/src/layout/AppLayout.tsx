@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Avatar, Button, Drawer, Dropdown, Menu, useOverlayState } from '@heroui/react'
-import { LogOut, Menu as MenuIcon, Monitor, Moon, Sun } from 'lucide-react'
+import { LogOut, Menu as MenuIcon, Monitor, Moon, Sun, TriangleAlert } from 'lucide-react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { api } from '../api'
 import { menu } from '../menu'
 import { useAuth } from '../session'
 import { useTheme, type ThemeMode } from '../theme'
+import { usePolling } from '../usePolling'
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   const location = useLocation()
@@ -38,15 +40,35 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
+interface HealthProblem {
+  level: 'danger' | 'warning' | string
+  title: string
+  detail: string
+}
+
 export default function AppLayout() {
   const { user, logout } = useAuth()
   const { theme, setTheme } = useTheme()
   const navigate = useNavigate()
   const location = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [problems, setProblems] = useState<HealthProblem[]>([])
   const current = menu.find((item) => (item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path)))
 
   const drawer = useOverlayState()
+
+  // Surface certificate, module and renewal failures on every page: they used
+  // to appear only on the overview, so a failed issuance stayed invisible
+  // until somebody happened to open it.
+  const refreshHealth = async () => {
+    const data = await api.get<{ problems?: HealthProblem[] }>('/api/v1/system/health')
+    setProblems(Array.isArray(data?.problems) ? data.problems : [])
+  }
+
+  useEffect(() => {
+    void refreshHealth().catch(() => undefined)
+  }, [])
+  usePolling(refreshHealth, 30000)
 
   const onAction = async (key: string) => {
     if (key === 'password') {
@@ -104,6 +126,40 @@ export default function AppLayout() {
             <div className="truncate text-[11px] text-muted">nunt 管理后台</div>
           </div>
           <div className="flex-1" />
+          {problems.length > 0 ? (
+            <Dropdown>
+              <Dropdown.Trigger>
+                <Button
+                  isIconOnly
+                  variant="danger-soft"
+                  aria-label={`${problems.length} 个需要处理的问题`}
+                >
+                  <TriangleAlert size={18} />
+                </Button>
+              </Dropdown.Trigger>
+              <Dropdown.Popover>
+                <Dropdown.Menu onAction={() => navigate('/')}>
+                  {problems.slice(0, 8).map((problem, index) => (
+                    <Dropdown.Item
+                      key={`${problem.title}-${index}`}
+                      id={`problem-${index}`}
+                      textValue={problem.title}
+                    >
+                      <div className="flex max-w-72 flex-col gap-0.5">
+                        <span className={problem.level === 'danger' ? 'text-danger' : 'text-warning'}>
+                          {problem.title}
+                        </span>
+                        <span className="whitespace-normal text-[11px] text-muted">{problem.detail}</span>
+                      </div>
+                    </Dropdown.Item>
+                  ))}
+                  <Dropdown.Item id="overview" textValue="查看概览">
+                    查看概览
+                  </Dropdown.Item>
+                </Dropdown.Menu>
+              </Dropdown.Popover>
+            </Dropdown>
+          ) : null}
           <Dropdown>
             <Dropdown.Trigger>
               <Button isIconOnly variant="ghost" aria-label="颜色模式">
