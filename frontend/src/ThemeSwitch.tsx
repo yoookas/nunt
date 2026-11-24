@@ -7,13 +7,13 @@ import { useTheme, type ThemeMode } from './theme'
  * It is shared by the console header and the login page so both offer the same
  * choice with the same behaviour.
  */
-export default function ThemeSwitch({ className = '' }: { className?: string }) {
+export default function ThemeSwitch() {
   const { theme, setTheme } = useTheme()
 
   return (
     <Dropdown>
       <Dropdown.Trigger>
-        <Button isIconOnly variant="ghost" aria-label="颜色模式" className={className}>
+        <Button isIconOnly variant="ghost" aria-label="颜色模式">
           {theme === 'system' ? (
             <Monitor size={18} />
           ) : theme === 'light' ? (

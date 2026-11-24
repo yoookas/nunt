@@ -95,13 +95,14 @@ export default function Login() {
   const secondStep = challenge !== ''
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-background p-4">
-      {/* The positioning lives on a plain wrapper: a class on the trigger's
-          button is resolved against the trigger box, not the page. */}
-      <div className="absolute right-3 top-3">
+    <div className="flex min-h-screen flex-col bg-background">
+      {/* A toolbar row keeps the switch in normal flow: nothing overlaps the
+          card on short viewports, and the position matches the console. */}
+      <div className="flex justify-end p-3">
         <ThemeSwitch />
       </div>
-      <Card className="w-full max-w-sm">
+      <div className="flex flex-1 items-center justify-center p-4">
+        <Card className="w-full max-w-sm">
         <Card.Content className="p-6 sm:p-8">
           <div className="mb-6 flex items-center gap-2.5">
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent text-base font-bold text-accent-foreground">
@@ -168,8 +169,9 @@ export default function Login() {
               </Button>
             </form>
           )}
-        </Card.Content>
-      </Card>
+          </Card.Content>
+        </Card>
+      </div>
     </div>
   )
 }
