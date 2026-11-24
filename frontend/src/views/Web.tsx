@@ -262,6 +262,7 @@ export default function Web() {
     {
       key: 'status',
       title: '状态',
+      className: 'w-32',
       render: (row) => (
         <div className="flex items-center gap-2 whitespace-nowrap">
           <Switch
@@ -297,18 +298,22 @@ export default function Web() {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
               {domains.slice(0, 2).map((domain) => (
-                <span key={domain} className="truncate text-sm">
+                <span key={domain} className="truncate text-sm font-medium">
                   {domain}
                 </span>
               ))}
-              {domains.length > 2 ? <span className="text-xs text-muted">+{domains.length - 2}</span> : null}
+              {domains.length > 2 ? (
+                <span className="text-xs text-muted">+{domains.length - 2} 个域名</span>
+              ) : null}
               {!domains.length ? <span className="text-sm text-muted">全部域名</span> : null}
             </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted">
               <span className="mono shrink-0">{row.path || '/'}</span>
               <span className="truncate">{row.name || row.id}</span>
               {selectedListenerId === 'all' ? (
-                <span className="truncate text-[11px]">· {listenerName(listeners, row.listenerId)}</span>
+                <span className="truncate rounded-full bg-default px-1.5 py-px text-[10px]">
+                  {listenerName(listeners, row.listenerId)}
+                </span>
               ) : null}
             </div>
           </div>
@@ -318,11 +323,13 @@ export default function Web() {
     {
       key: 'type',
       title: '类型',
+      className: 'w-24',
       render: (row) => <StatusChip color={ruleTypeColor(row.type)}>{ruleTypeLabel(row.type)}</StatusChip>,
     },
     {
       key: 'target',
       title: '上游',
+      className: 'w-56',
       render: (row) => (
         <span className="mono block max-w-56 truncate text-xs text-muted" title={targetText(row)}>
           {targetText(row)}
@@ -332,11 +339,12 @@ export default function Web() {
     {
       key: 'security',
       title: '安全',
+      className: 'w-32',
       render: (row) => {
         const mode = tlsModeOf(listenerOf(row.listenerId))
         return (
           <div className="flex flex-wrap items-center gap-1">
-            <StatusChip color={tlsColor(mode)}>{TLS_LABEL[mode] || '关闭'}</StatusChip>
+            <StatusChip color={tlsColor(mode)}>TLS {mode === 'off' ? '关' : '开'}</StatusChip>
             <StatusChip color={row.waf ? 'success' : 'default'}>WAF {row.waf ? '开' : '关'}</StatusChip>
           </div>
         )
@@ -345,13 +353,17 @@ export default function Web() {
     {
       key: 'requests',
       title: '请求',
+      className: 'w-16 text-right',
       render: (row) => (
-        <span className="text-xs text-muted">{Number(row.requests || 0).toLocaleString()}</span>
+        <span className="block text-xs tabular-nums text-muted">
+          {Number(row.requests || 0).toLocaleString()}
+        </span>
       ),
     },
     {
       key: 'actions',
       title: '操作',
+      className: 'w-28',
       render: (row) => (
         <div className="flex items-center gap-0.5 whitespace-nowrap">
           <Button isIconOnly size="sm" variant="ghost" aria-label={`查看路由日志 ${row.name || row.id}`} onPress={() => setLogsRule(row)}>
