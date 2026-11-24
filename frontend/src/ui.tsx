@@ -21,7 +21,6 @@ import {
   Spinner,
   Switch,
   Table,
-  Tag,
   TextArea,
   TextField,
   Typography,
@@ -728,13 +727,17 @@ export function TagInput({
   return (
     <TagFieldShell label={label} hint={hint}>
       {value.map((item) => (
-        <Tag key={item} className="gap-1">
-          {item}
-          <Tag.RemoveButton
+        <Chip key={item} size="sm" variant="soft" className="max-w-64 gap-1 pr-0.5 text-xs">
+          <span className="truncate">{item}</span>
+          <button
+            type="button"
             aria-label={`移除 ${item}`}
-            onPress={() => onChange(value.filter((entry) => entry !== item))}
-          />
-        </Tag>
+            className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-default hover:text-foreground"
+            onClick={() => onChange(value.filter((entry) => entry !== item))}
+          >
+            <X size={11} />
+          </button>
+        </Chip>
       ))}
       <input
         className="min-w-24 flex-1 bg-transparent px-1 py-0.5 text-sm outline-none"
@@ -781,7 +784,11 @@ export function MultiSelectInput({
           {value.length === 0 ? (
             <span className="text-muted">{placeholder}</span>
           ) : (
-            value.map((item) => <Tag key={item}>{item}</Tag>)
+            value.map((item) => (
+              <Chip key={item} size="sm" variant="soft" className="text-xs">
+                {item}
+              </Chip>
+            ))
           )}
           <ChevronDown size={14} className="ml-auto text-muted" />
         </Dropdown.Trigger>

@@ -238,6 +238,23 @@ if (!newListener) {
   if (container && container.getAttribute('data-placement') !== 'center') {
     failures.push(`/web: modal placement is "${container.getAttribute('data-placement')}", want "center"`)
   }
+  // Typing an address and pressing Enter renders a tag. A tag component that
+  // is bound to a collection throws "cannot be rendered outside a collection"
+  // at that moment, so the interaction is part of the smoke.
+  const addressInput = window.document.querySelector('input[placeholder*="443"]')
+  if (!addressInput) {
+    failures.push('/web: the listener address input is missing')
+  } else {
+    const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    setValue.call(addressInput, ':443')
+    addressInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+    await sleep(50)
+    addressInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await sleep(200)
+    if (!window.document.body.textContent.includes(':443')) {
+      failures.push('/web: the typed listener address did not become a tag')
+    }
+  }
   const fresh = errors.splice(before)
   if (fresh.length) failures.push(`/web drawer: ${fresh.join(' | ')}`)
   window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
