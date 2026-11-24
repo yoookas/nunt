@@ -96,7 +96,11 @@ export default function Login() {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-background p-4">
-      <ThemeSwitch className="absolute right-3 top-3" />
+      {/* The positioning lives on a plain wrapper: a class on the trigger's
+          button is resolved against the trigger box, not the page. */}
+      <div className="absolute right-3 top-3">
+        <ThemeSwitch />
+      </div>
       <Card className="w-full max-w-sm">
         <Card.Content className="p-6 sm:p-8">
           <div className="mb-6 flex items-center gap-2.5">
