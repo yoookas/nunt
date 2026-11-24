@@ -186,58 +186,44 @@ func splitZone(ctx context.Context, resolver *net.Resolver, name string) (string
 	return "", "", fmt.Errorf("no dns zone with an NS record found for %q", name)
 }
 
-// waitForTXT polls every resolver until the expected TXT value is visible, the
-// window elapses or ctx is done. Public resolvers are only the first half: the
-// CA queries the zone's own nameservers, which can lag behind, so the value
-// must also show up on at least one of them before the challenge is accepted.
+// waitForTXT waits until the TXT value is visible where the CA will look.
+//
+// The CA queries the zone's authoritative nameservers, so that is the source of
+// truth. Recursive resolvers are not: once a name has been answered, they keep
+// the answer for its TTL, and the minimum TTL DNSPod accepts is 600 seconds. A
+// second TXT value at the same name (an apex and its wildcard) therefore stays
+// invisible to those resolvers for up to ten minutes while the authoritative
+// servers already serve it. The authoritative servers are asked first and are
+// enough on their own; the configured resolvers are only a fallback for zones
+// whose nameservers cannot be resolved.
 func waitForTXT(ctx context.Context, zoneResolver *net.Resolver, zone string, resolvers []string, name, want string) error {
-	servers := normalizeResolvers(resolvers)
-	if len(servers) == 0 {
-		servers = normalizeResolvers(defaultDNSResolvers)
-	}
 	deadline := time.Now().Add(dnsWaitWindow)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
 
-	var last map[string][]string
-	for {
-		last = queryTXT(ctx, servers, name)
-		missing := 0
-		for _, server := range servers {
-			if !hasTXT(last[server], want) {
-				missing++
-			}
-		}
-		if missing == 0 {
-			break
-		}
-		if time.Now().After(deadline) || ctx.Err() != nil {
-			return fmt.Errorf("the TXT record %s did not propagate within %s (last answers: %s)",
-				name, dnsWaitWindow, describeAnswers(last))
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(dnsPollInterval):
-		}
-	}
-	return waitForAuthoritative(ctx, zoneResolver, zone, name, want, deadline)
-}
-
-// waitForAuthoritative waits until the zone's own nameservers serve the value.
-// The list of nameservers is best effort: when it cannot be resolved the
-// public check above stands on its own.
-func waitForAuthoritative(ctx context.Context, resolver *net.Resolver, zone, name, want string, deadline time.Time) error {
-	if resolver == nil {
-		resolver = net.DefaultResolver
+	if zoneResolver == nil {
+		zoneResolver = net.DefaultResolver
 	}
 	lookupCtx, cancel := context.WithTimeout(ctx, dnsQueryTimeout)
-	servers, err := authoritativeServers(lookupCtx, resolver, zone)
+	authoritative, err := authoritativeServers(lookupCtx, zoneResolver, zone)
 	cancel()
-	if err != nil || len(servers) == 0 {
-		return nil
+	if err == nil && len(authoritative) > 0 {
+		return waitForTXTOn(ctx, authoritative, name, want, deadline, "权威服务器")
 	}
+
+	servers := normalizeResolvers(resolvers)
+	if len(servers) == 0 {
+		servers = normalizeResolvers(defaultDNSResolvers)
+	}
+	return waitForTXTOn(ctx, servers, name, want, deadline, "解析器")
+}
+
+// waitForTXTOn polls the given servers until one of them answers the expected
+// value, the deadline passes or ctx is done. One server answering is enough:
+// that is how certmagic treats the authoritative set, and requiring every
+// server would hang on a single lagging or unreachable one.
+func waitForTXTOn(ctx context.Context, servers []string, name, want string, deadline time.Time, label string) error {
 	var last map[string][]string
 	for {
 		last = queryTXT(ctx, servers, name)
@@ -247,8 +233,8 @@ func waitForAuthoritative(ctx context.Context, resolver *net.Resolver, zone, nam
 			}
 		}
 		if time.Now().After(deadline) || ctx.Err() != nil {
-			return fmt.Errorf("the TXT record %s is not served by the zone's nameservers yet (last answers: %s)",
-				name, describeAnswers(last))
+			return fmt.Errorf("the TXT record %s did not propagate within %s; no %s served it (last answers: %s)",
+				name, dnsWaitWindow, label, describeAnswers(last))
 		}
 		select {
 		case <-ctx.Done():
