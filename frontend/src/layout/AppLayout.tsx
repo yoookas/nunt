@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Avatar, Button, Drawer, Dropdown, Menu, useOverlayState } from '@heroui/react'
-import { LogOut, Menu as MenuIcon, TriangleAlert } from 'lucide-react'
+import { Button, Drawer, Dropdown, Menu, useOverlayState } from '@heroui/react'
+import { CircleUserRound, KeyRound, LogOut, Menu as MenuIcon, TriangleAlert } from 'lucide-react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import ThemeSwitch from '../ThemeSwitch'
@@ -47,7 +47,7 @@ interface HealthProblem {
 }
 
 export default function AppLayout() {
-  const { user, logout } = useAuth()
+  const { logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -84,28 +84,8 @@ export default function AppLayout() {
     <div className="flex h-full min-h-screen bg-background text-foreground">
       {/* Desktop sidebar */}
       <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-surface md:flex">
-        <div className="flex h-16 items-center gap-2.5 px-5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-accent text-sm font-bold text-accent-foreground">
-            n
-          </span>
-          <div>
-            <div className="text-sm font-semibold leading-tight">nunt</div>
-            <div className="text-[11px] text-muted">edge console</div>
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto py-2">
+        <div className="flex-1 overflow-y-auto py-3">
           <Navigation />
-        </div>
-        <div className="border-t border-border p-3">
-          <div className="flex items-center gap-2 rounded-xl bg-background px-3 py-2">
-            <Avatar size="sm">
-              <Avatar.Fallback>{(user ? 'A' : '?')}</Avatar.Fallback>
-            </Avatar>
-            <div className="min-w-0">
-              <div className="truncate text-xs font-medium">管理员</div>
-              <div className="text-[11px] text-muted">管理员</div>
-            </div>
-          </div>
         </div>
       </aside>
 
@@ -162,16 +142,14 @@ export default function AppLayout() {
           <ThemeSwitch />
           <Dropdown>
             <Dropdown.Trigger>
-              <Button variant="ghost">
-                <Avatar size="sm">
-                  <Avatar.Fallback>{(user ? 'A' : '?')}</Avatar.Fallback>
-                </Avatar>
-                <span className="hidden sm:inline">管理员</span>
+              <Button isIconOnly variant="ghost" aria-label="账户菜单">
+                <CircleUserRound size={18} />
               </Button>
             </Dropdown.Trigger>
             <Dropdown.Popover>
               <Dropdown.Menu onAction={(key) => onAction(String(key))}>
                 <Dropdown.Item id="password" textValue="修改密码">
+                  <KeyRound size={14} className="mr-2 inline" />
                   修改密码
                 </Dropdown.Item>
                 <Dropdown.Item id="logout" textValue="退出登录">

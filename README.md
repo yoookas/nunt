@@ -38,10 +38,9 @@ docker compose up -d --build
 
 ```
 ============================================================
-  A new configuration was created.
-  管理员账号 : admin
+  已生成新的配置文件
   管理员密码 : xxxxxxxxxxxxxxxx
-  Sign in and change it immediately.
+  请立即登录并修改密码
 ============================================================
 ```
 
