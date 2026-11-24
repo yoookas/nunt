@@ -104,8 +104,8 @@ func (r *request) validate(cfg *model.Config) error {
 }
 
 // issue runs the full ACME flow: order, challenges, finalize, store.
-func (a *ACME) issue(ctx context.Context, req request) (Result, error) {
-	result := Result{JobID: req.jobID, Challenge: req.challenge}
+func (a *ACME) issue(ctx context.Context, req request) (result Result, err error) {
+	result = Result{JobID: req.jobID, Challenge: req.challenge}
 	cfg := a.deps.Cfg.Snapshot()
 	if err := req.validate(cfg); err != nil {
 		return result, err
@@ -117,6 +117,17 @@ func (a *ACME) issue(ctx context.Context, req request) (Result, error) {
 	if err != nil {
 		return result, fmt.Errorf("prepare acme account: %w", err)
 	}
+
+	// A failed issuance leaves authorizations pending on the account, and the
+	// CA counts them against the pending authorization limit until they
+	// expire. Freeing them on the way out keeps repeated retries from being
+	// refused, the same thing acmez does.
+	var authorizations []*acme.Authorization
+	defer func() {
+		if err != nil {
+			a.deactivateAuthorizations(ctx, client, authorizations)
+		}
+	}()
 
 	order, err := client.AuthorizeOrder(ctx, acme.DomainIDs(req.domains...))
 	if err != nil {
@@ -141,6 +152,7 @@ func (a *ACME) issue(ctx context.Context, req request) (Result, error) {
 		if err != nil {
 			return result, fmt.Errorf("read authorization %s: %w", authzURL, err)
 		}
+		authorizations = append(authorizations, authz)
 		if authz.Status == acme.StatusValid {
 			continue
 		}
@@ -257,6 +269,28 @@ func (a *ACME) provisionChallenge(ctx context.Context, client *acme.Client, req 
 		return nil, nil, err
 	}
 	return chal, cleanup, nil
+}
+
+// deactivateAuthorizations releases the pending authorizations of a failed
+// issuance. They would otherwise stay on the account (counting against its
+// pending authorization limit) until the CA expires them. The caller's context
+// may already be cancelled, so the calls get their own short deadline.
+func (a *ACME) deactivateAuthorizations(ctx context.Context, client *acme.Client, authzs []*acme.Authorization) {
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	for _, authz := range authzs {
+		// Only pending authorizations are released: they count against the
+		// account's pending authorization limit, while a valid one is reusable
+		// by the next order and costs no new validation.
+		if authz == nil || authz.Status != acme.StatusPending {
+			continue
+		}
+		if err := client.RevokeAuthorization(releaseCtx, authz.URI); err != nil {
+			a.log.Warn("无法撤销授权", "domain", authz.Identifier.Value, "error", err)
+			continue
+		}
+		a.log.Info("已撤销未完成的授权", "domain", authz.Identifier.Value)
+	}
 }
 
 // persistKeyType records the key type used for a certificate so a later change
