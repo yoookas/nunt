@@ -13,15 +13,15 @@ import (
 func TestLoginWithPasswordOnlyWhenSingleUser(t *testing.T) {
 	env := newTestEnv(t)
 
-	rec := env.do(t, http.MethodGet, "/api/v1/auth/login-mode", nil, nil, nil)
+	rec := env.do(t, http.MethodGet, "/api/v1/auth/mode", nil, nil, nil)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("login-mode = %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("auth mode = %d: %s", rec.Code, rec.Body.String())
 	}
 	var mode struct {
 		SingleUser bool `json:"singleUser"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &mode); err != nil {
-		t.Fatalf("decode login-mode: %v", err)
+		t.Fatalf("decode auth mode: %v", err)
 	}
 	if !mode.SingleUser {
 		t.Fatalf("a fresh install has one admin, got %+v", mode)
@@ -52,7 +52,7 @@ func TestLoginRequiresUsernameWithSeveralAccounts(t *testing.T) {
 		t.Fatalf("add user: %v", err)
 	}
 
-	rec := env.do(t, http.MethodGet, "/api/v1/auth/login-mode", nil, nil, nil)
+	rec := env.do(t, http.MethodGet, "/api/v1/auth/mode", nil, nil, nil)
 	var mode struct {
 		SingleUser bool `json:"singleUser"`
 	}

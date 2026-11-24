@@ -12,7 +12,7 @@ import (
 
 func (s *Server) registerAuth() {
 	g := s.mux.Group("/api/v1/auth")
-	g.Public().Get("/login-mode", s.handleLoginMode)
+	g.Public().Get("/mode", s.handleLoginMode)
 	g.Public().Post("/login", s.handleLogin)
 	g.Public().Post("/login/totp", s.handleLoginTOTP)
 	g.Post("/logout", s.handleLogout)

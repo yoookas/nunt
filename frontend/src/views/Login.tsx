@@ -24,7 +24,7 @@ export default function Login() {
   // One administrator means one secret: the form can leave the username out.
   useEffect(() => {
     api
-      .get<{ singleUser?: boolean }>('/api/v1/auth/login-mode')
+      .get<{ singleUser?: boolean }>('/api/v1/auth/mode')
       .then((data) => setSingleUser(!!data?.singleUser))
       .catch(() => setSingleUser(false))
   }, [])
