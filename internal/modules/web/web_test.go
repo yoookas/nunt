@@ -641,6 +641,100 @@ func TestBasicAuthHandler(t *testing.T) {
 // reverse proxy
 // ---------------------------------------------------------------------------
 
+// A client can send any X-Forwarded-* chain it likes. Unless the request came
+// through a declared trusted proxy, the headers are rebuilt from the
+// connection so the upstream never sees a made up address.
+// The least connection strategy sends the next request to the upstream with
+// the fewest requests in flight, ignoring the ones that are down.
+func TestBalancerLeastConnPrefersIdleUpstream(t *testing.T) {
+	b, err := newBalancer("least_conn", []string{"http://127.0.0.1:9001", "http://127.0.0.1:9002"})
+	if err != nil {
+		t.Fatalf("newBalancer: %v", err)
+	}
+	busy := "http://127.0.0.1:9001"
+	b.begin(busy)
+	defer b.end(busy)
+	for i := 0; i < 5; i++ {
+		if got := b.pick("192.0.2.1"); got.target != "http://127.0.0.1:9002" {
+			t.Fatalf("pick = %q, want the idle upstream", got.target)
+		}
+	}
+	if got, ok := b.pickExcept("192.0.2.1", "http://127.0.0.1:9002"); !ok || got.target != busy {
+		t.Fatalf("pickExcept = %q/%v, want the only remaining upstream", got.target, ok)
+	}
+
+	// A down upstream is not chosen even when it has no requests in flight.
+	b.report("http://127.0.0.1:9002", false)
+	b.report("http://127.0.0.1:9002", false)
+	b.report("http://127.0.0.1:9002", false)
+	if got := b.pick("192.0.2.1"); got.target != busy {
+		t.Fatalf("pick = %q after the idle upstream failed, want the busy one", got.target)
+	}
+}
+
+func TestProxyForwardedHeadersFollowTrust(t *testing.T) {
+	var xff, proto, host string
+	backend := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		xff = req.Header.Get("X-Forwarded-For")
+		proto = req.Header.Get("X-Forwarded-Proto")
+		host = req.Header.Get("X-Forwarded-Host")
+		_, _ = io.WriteString(rw, "ok")
+	}))
+	defer backend.Close()
+
+	call := func(name string, cfg *model.Config) {
+		t.Helper()
+		// A fresh rule per call: the reverse proxy cache is keyed by rule, and
+		// a cached handler would keep the previous test's configuration.
+		raw := mkRule(t, name, "example.com", "/", 0, model.WebTypeProxy)
+		raw.Proxy = &model.ProxyTarget{Targets: []string{backend.URL}}
+		compiled, err := compileRule(raw, 0)
+		if err != nil {
+			t.Fatalf("compile: %v", err)
+		}
+		w := bareWeb()
+		w.cfg = cfg
+		site, err := w.proxySite(compiled, cfg)
+		if err != nil {
+			t.Fatalf("proxySite: %v", err)
+		}
+		ctl := httptest.NewServer(site.handler)
+		defer ctl.Close()
+		req, err := http.NewRequest(http.MethodGet, ctl.URL+"/", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = "example.com"
+		req.Header.Set("X-Forwarded-For", "203.0.113.9")
+		req.Header.Set("X-Forwarded-Proto", "https")
+		req.Header.Set("X-Forwarded-Host", "made-up.example")
+		resp, err := ctl.Client().Do(req)
+		if err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		_ = resp.Body.Close()
+	}
+
+	call("forwarded-untrusted", &model.Config{})
+	if strings.Contains(xff, "203.0.113.9") {
+		t.Fatalf("an untrusted proxy must not keep the client chain: %q", xff)
+	}
+	if !strings.HasPrefix(xff, "127.0.0.1") {
+		t.Fatalf("X-Forwarded-For = %q, want the connection address", xff)
+	}
+	if proto != "http" || host != "example.com" {
+		t.Fatalf("proto/host = %q/%q, want the observed values", proto, host)
+	}
+
+	call("forwarded-trusted", &model.Config{System: model.SystemConfig{TrustProxy: true}})
+	if !strings.HasPrefix(xff, "203.0.113.9, ") {
+		t.Fatalf("a trusted proxy must keep the chain: %q", xff)
+	}
+	if proto != "https" || host != "made-up.example" {
+		t.Fatalf("a trusted proxy must keep proto/host, got %q/%q", proto, host)
+	}
+}
+
 func TestProxyRoundTrip(t *testing.T) {
 	var gotPath, gotHost, gotXFF, gotProto, gotHeader string
 	var hits int

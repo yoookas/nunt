@@ -191,12 +191,14 @@ export const ACCESS_OPTIONS: SelectOption[] = [
 
 export const BALANCE_OPTIONS: SelectOption[] = [
   { value: 'roundrobin', label: '轮询' },
+  { value: 'leastconn', label: '最少连接' },
   { value: 'random', label: '随机' },
   { value: 'iphash', label: 'IP 哈希' },
 ]
 
 const BALANCE_LABEL: Record<string, string> = {
   roundrobin: '轮询',
+  leastconn: '最少连接',
   random: '随机',
   iphash: 'IP 哈希',
   round_robin: '轮询',
@@ -207,7 +209,7 @@ const BALANCE_LABEL: Record<string, string> = {
 const BALANCE_ALIASES: Record<string, string> = {
   round_robin: 'roundrobin',
   ip_hash: 'iphash',
-  least_conn: 'roundrobin',
+  least_conn: 'leastconn',
 }
 
 export const REDIRECT_STATUS_OPTIONS: SelectOption[] = [

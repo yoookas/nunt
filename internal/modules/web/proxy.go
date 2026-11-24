@@ -28,6 +28,7 @@ const (
 	balanceRoundRobin = "roundrobin"
 	balanceRandom     = "random"
 	balanceIPHash     = "iphash"
+	balanceLeastConn  = "leastconn"
 )
 
 // hopHeaders must never be forwarded by a proxy.
@@ -70,6 +71,7 @@ type balancer struct {
 	mu        sync.Mutex
 	rnd       *rand.Rand
 	health    map[string]*upstreamHealth
+	active    map[string]int
 	now       func() time.Time
 }
 
@@ -81,6 +83,7 @@ func newBalancer(mode string, targets []string) (*balancer, error) {
 		mode:   strings.ToLower(strings.TrimSpace(mode)),
 		rnd:    rand.New(rand.NewSource(time.Now().UnixNano())),
 		health: map[string]*upstreamHealth{},
+		active: map[string]int{},
 		now:    time.Now,
 	}
 	for _, raw := range targets {
@@ -90,10 +93,12 @@ func newBalancer(mode string, targets []string) (*balancer, error) {
 		}
 		b.upstreams = append(b.upstreams, upstream{url: u, target: u.Scheme + "://" + u.Host})
 	}
-	switch b.mode {
+	switch strings.ReplaceAll(b.mode, "_", "") {
 	case "", balanceRoundRobin:
 		b.mode = balanceRoundRobin
 	case balanceRandom, balanceIPHash:
+	case balanceLeastConn:
+		b.mode = balanceLeastConn
 	default:
 		return nil, fmt.Errorf("unsupported balance strategy %q", mode)
 	}
@@ -133,6 +138,12 @@ func parseTarget(raw string) (*url.URL, error) {
 // returned anyway: a proxy that refuses to try is worse than one that tries and
 // fails, and it lets the first successful request bring the upstream back.
 func (b *balancer) pick(clientIP string) upstream {
+	if b.mode == balanceLeastConn {
+		if up, ok := b.leastActive(""); ok {
+			return up
+		}
+		return b.upstreams[b.startIndex(clientIP)%len(b.upstreams)]
+	}
 	start := b.startIndex(clientIP)
 	if up, ok := b.scan(start, ""); ok {
 		return up
@@ -145,7 +156,48 @@ func (b *balancer) pick(clientIP string) upstream {
 // pickExcept is pick with one upstream excluded (used for a retry). It only
 // returns an upstream that is currently healthy.
 func (b *balancer) pickExcept(clientIP, exclude string) (upstream, bool) {
+	if b.mode == balanceLeastConn {
+		return b.leastActive(exclude)
+	}
 	return b.scan(b.startIndex(clientIP), exclude)
+}
+
+// leastActive returns the healthy upstream with the fewest requests in flight
+// (Caddy's least_conn). Ties keep the round robin order so one upstream does
+// not receive every tie.
+func (b *balancer) leastActive(exclude string) (upstream, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	best := -1
+	for i := range b.upstreams {
+		target := b.upstreams[i].target
+		if target == exclude || !b.healthyLocked(target) {
+			continue
+		}
+		if best < 0 || b.active[target] < b.active[b.upstreams[best].target] {
+			best = i
+		}
+	}
+	if best < 0 {
+		return upstream{}, false
+	}
+	return b.upstreams[best], true
+}
+
+// begin and end bracket one request through an upstream, which is what the
+// least connection strategy counts.
+func (b *balancer) begin(target string) {
+	b.mu.Lock()
+	b.active[target]++
+	b.mu.Unlock()
+}
+
+func (b *balancer) end(target string) {
+	b.mu.Lock()
+	if b.active[target] > 0 {
+		b.active[target]--
+	}
+	b.mu.Unlock()
 }
 
 // scan walks the upstream list from start and returns the first healthy entry
@@ -185,6 +237,10 @@ func (b *balancer) startIndex(clientIP string) int {
 func (b *balancer) healthy(target string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	return b.healthyLocked(target)
+}
+
+func (b *balancer) healthyLocked(target string) bool {
 	state, ok := b.health[target]
 	if !ok || state.failures < upstreamFailThreshold {
 		return true
@@ -333,6 +389,8 @@ func (w *Web) proxySite(r *rule, cfg *model.Config) (*webSite, error) {
 			return
 		}
 		up := bal.pick(clientIPString(req, w.trustProxy(cfg)))
+		bal.begin(up.target)
+		defer bal.end(up.target)
 		ctx, attempt := withAttempt(req.Context(), up.target)
 		ctx = withBalancer(ctx, bal)
 		req = req.WithContext(ctx)
@@ -459,17 +517,40 @@ func buildProxy(w *Web, r *rule, up upstream, target *model.ProxyTarget) *httput
 	}
 
 	return &httputil.ReverseProxy{
-		Transport:     rt,
-		FlushInterval: 100 * time.Millisecond,
+		Transport: rt,
+		// No periodic flushing, like Caddy: the standard library already
+		// flushes event streams and responses of unknown length immediately.
+		FlushInterval: 0,
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(up.url)
 			// SetURL deletes the inbound Host, so restore the original one and
 			// let the rule override it when configured.
 			pr.Out.Host = outboundHost(pr, target, up)
-			// Rewrite mode clears the forwarding headers, so they have to be
-			// rebuilt explicitly. The chain of an upstream proxy is kept.
-			pr.Out.Header["X-Forwarded-For"] = pr.In.Header.Values("X-Forwarded-For")
-			pr.SetXForwarded()
+			// The X-Forwarded-* headers are security sensitive: a client can
+			// send any chain it likes. Like Caddy, incoming values are only
+			// reused when the request came from a declared trusted proxy;
+			// otherwise the chain is rebuilt from the connection, so an
+			// upstream never sees an address the caller made up.
+			trusted := w.trustProxy(w.cfg)
+			if !trusted {
+				pr.Out.Header.Del("X-Forwarded-For")
+				pr.Out.Header.Del("X-Forwarded-Proto")
+				pr.Out.Header.Del("X-Forwarded-Host")
+				pr.SetXForwarded()
+			} else {
+				priorProto := pr.In.Header.Get("X-Forwarded-Proto")
+				priorHost := pr.In.Header.Get("X-Forwarded-Host")
+				pr.Out.Header["X-Forwarded-For"] = pr.In.Header.Values("X-Forwarded-For")
+				pr.SetXForwarded()
+				// A trusted proxy already terminated TLS or rewrote the host,
+				// so its view wins over what this hop can observe.
+				if priorProto != "" {
+					pr.Out.Header.Set("X-Forwarded-Proto", priorProto)
+				}
+				if priorHost != "" {
+					pr.Out.Header.Set("X-Forwarded-Host", priorHost)
+				}
+			}
 			rewriteOutboundPath(pr.Out, target)
 			applyHeaders(pr.Out.Header, target.Headers)
 			removeHopHeaders(pr.Out.Header)
@@ -512,6 +593,8 @@ func buildProxy(w *Web, r *rule, up upstream, target *model.ProxyTarget) *httput
 					}
 					w.logger().Warn("web：换一个上游重试", "rule", r.name,
 						"failed", up.target, "next", next.target, "error", err)
+					bal.begin(next.target)
+					defer bal.end(next.target)
 					proxyFor(w, r, next, target).ServeHTTP(rw, req.WithContext(withRetried(req.Context())))
 					return
 				}
