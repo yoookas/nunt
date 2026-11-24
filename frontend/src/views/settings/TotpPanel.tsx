@@ -1,3 +1,4 @@
+import { copyText } from '../../clipboard'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@heroui/react'
 import qrcode from 'qrcode-generator'
@@ -42,10 +43,9 @@ function QRCode({ text }: { text: string }) {
 type Flow = '' | 'password' | 'scan' | 'codes' | 'disable' | 'regen'
 
 const copy = async (text: string, label: string) => {
-  try {
-    await navigator.clipboard.writeText(text)
+  if (await copyText(text)) {
     toast.success(`${label}已复制`)
-  } catch {
+  } else {
     toast.danger('复制失败，请手动选择文本')
   }
 }

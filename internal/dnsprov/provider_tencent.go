@@ -177,6 +177,20 @@ func (p *tencentProvider) find(ctx context.Context, domain, sub, typ, line strin
 	return nil, nil
 }
 
+// tencentMinTTL is the lowest TTL DNSPod accepts for a free plan domain. The
+// dns-01 solver asks for 60 seconds so a stale challenge expires quickly, and
+// the API answers that with LimitExceeded.RecordTtlLimit; 600 is valid on
+// every plan, and the record is deleted after the challenge anyway.
+const tencentMinTTL = 600
+
+func tencentTTL(rec Record) int {
+	ttl := ttlOr(rec, tencentMinTTL)
+	if ttl < tencentMinTTL {
+		ttl = tencentMinTTL
+	}
+	return ttl
+}
+
 func (p *tencentProvider) Set(ctx context.Context, rec Record) error {
 	if strings.TrimSpace(rec.Value) == "" {
 		return fmt.Errorf("tencent: record value is empty")
@@ -204,7 +218,7 @@ func (p *tencentProvider) Set(ctx context.Context, rec Record) error {
 		"RecordType": typ,
 		"RecordLine": line,
 		"Value":      rec.Value,
-		"TTL":        ttlOr(rec, 600),
+		"TTL":        tencentTTL(rec),
 	}
 	if existing == nil {
 		_, err = p.call(ctx, "CreateRecord", payload)

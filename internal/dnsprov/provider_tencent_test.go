@@ -89,6 +89,7 @@ func (f *tencentFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Type:     str(payload["RecordType"]),
 			Value:    str(payload["Value"]),
 			Line:     str(payload["RecordLine"]),
+			TTL:      int(num(payload["TTL"])),
 		})
 	case "ModifyRecord":
 		for i := range f.records {
@@ -281,6 +282,24 @@ func TestTencentSetCreatesUpdatesAndSkipsUnchanged(t *testing.T) {
 	}
 	if fake.records[0].Value != "9.9.9.9" {
 		t.Fatalf("stored value = %q", fake.records[0].Value)
+	}
+}
+
+// The dns-01 solver asks for a 60 second TTL, which a free DNSPod plan rejects
+// with LimitExceeded.RecordTtlLimit; the provider has to raise it to the
+// minimum the API accepts.
+func TestTencentRaisesTheTTLToThePlanMinimum(t *testing.T) {
+	fake := &tencentFake{}
+	p := newTencentProvider(t, fake, 1700000000)
+	rec := Record{Domain: "cykk.site", SubDomain: "_acme-challenge", Type: "TXT", Value: "challenge-token", TTL: 60}
+	if err := p.Set(context.Background(), rec); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if got, _ := fake.last().Payload["TTL"].(float64); got != 600 {
+		t.Fatalf("create TTL = %v, want the 600 minimum", fake.last().Payload["TTL"])
+	}
+	if len(fake.records) != 1 || fake.records[0].TTL != 600 {
+		t.Fatalf("stored record = %+v", fake.records)
 	}
 }
 

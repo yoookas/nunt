@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from 'react'
 import { Alert, Button, Tabs } from '@heroui/react'
 import { Copy, Pause, Play, RefreshCw, Trash2 } from 'lucide-react'
+import { copyText } from '../clipboard'
 import { fmtTime } from '../format'
 import AccessLogs from './AccessLogs'
 import {
@@ -119,10 +120,9 @@ async function copyLogJSON(item: LogEntry | null): Promise<void> {
     null,
     2,
   )
-  try {
-    await navigator.clipboard.writeText(text)
+  if (await copyText(text)) {
     toast.success('已复制 JSON')
-  } catch {
+  } else {
     toast.danger('复制失败，请手动选择文本')
   }
 }
