@@ -201,14 +201,18 @@ func Normalize(c *model.Config) {
 	}
 	c.Backup.Dir = strings.TrimSpace(c.Backup.Dir)
 
+	// There is exactly one administrator. A configuration written by an older
+	// build may still carry several accounts (they had names); keep the first
+	// and drop the rest, since there is no way to tell them apart any more.
+	if len(c.Users) > 1 {
+		c.Users = c.Users[:1]
+	}
 	// A factor that is enabled without a usable seed can never be verified.
 	// Disable it instead of locking the only administrator out; the error is
 	// visible because the login simply stops asking for a code. Validate still
 	// rejects writing such a state, so this only repairs a corrupted file.
-	for i := range c.Users {
-		if c.Users[i].TOTP.Enabled && strings.TrimSpace(c.Users[i].TOTP.Secret) == "" {
-			c.Users[i].TOTP = model.TOTP{}
-		}
+	if len(c.Users) == 1 && c.Users[0].TOTP.Enabled && strings.TrimSpace(c.Users[0].TOTP.Secret) == "" {
+		c.Users[0].TOTP = model.TOTP{}
 	}
 }
 
@@ -271,15 +275,13 @@ func normalizeLogs(l *model.LogConfig) {
 
 // Validate rejects configurations that would break the service.
 func Validate(c *model.Config) error {
-	if len(c.Users) == 0 {
-		return fmt.Errorf("at least one administrator account is required")
+	if len(c.Users) != 1 {
+		return fmt.Errorf("exactly one administrator account is required, got %d", len(c.Users))
 	}
-	for _, u := range c.Users {
-		// A factor that is on but has no seed can never be verified: refuse to
-		// persist it instead of locking the only administrator out later.
-		if u.TOTP.Enabled && strings.TrimSpace(u.TOTP.Secret) == "" {
-			return fmt.Errorf("user %q: TOTP is enabled without a secret", displayName(u.Username, u.ID))
-		}
+	// A factor that is on but has no seed can never be verified: refuse to
+	// persist it instead of locking the administrator out later.
+	if u := c.Users[0]; u.TOTP.Enabled && strings.TrimSpace(u.TOTP.Secret) == "" {
+		return fmt.Errorf("TOTP is enabled without a secret")
 	}
 	listeners, err := validateWebListeners(c.Web.Listeners)
 	if err != nil {

@@ -9,7 +9,7 @@ import (
 
 func geoConfig(rules ...model.WebRule) *model.Config {
 	cfg := Default()
-	cfg.Users = []model.User{{ID: "u1", Username: "admin", Role: "admin", Enabled: true}}
+	cfg.Users = []model.User{{ID: "u1"}}
 	cfg.Web.Listeners = []model.WebListener{{ID: "l1", Name: "http", Listen: []string{":8080"}}}
 	cfg.Web.Rules = rules
 	return cfg

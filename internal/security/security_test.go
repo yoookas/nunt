@@ -46,7 +46,7 @@ func TestRandomHelpers(t *testing.T) {
 func TestSessionStore(t *testing.T) {
 	store := NewSessionStore()
 	defer store.Close()
-	sess, token, err := store.Create("user-1", "admin", "127.0.0.1", "test", time.Minute)
+	sess, token, err := store.Create("user-1", "127.0.0.1", "test", time.Minute)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

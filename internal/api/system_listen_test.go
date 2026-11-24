@@ -44,7 +44,6 @@ func addrOf(port int) string { return fmt.Sprintf("127.0.0.1:%d", port) }
 func login(t *testing.T, env *testEnv) ([]*http.Cookie, string) {
 	t.Helper()
 	rec := env.do(t, http.MethodPost, "/api/v1/auth/login", map[string]string{
-		"username": "admin",
 		"password": testPassword,
 	}, nil, nil)
 	if rec.Code != http.StatusOK {

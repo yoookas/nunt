@@ -14,7 +14,7 @@ import (
 // and returns the session cookie.
 func loginAs(t *testing.T, env *testEnv, ua, remoteAddr string) []*http.Cookie {
 	t.Helper()
-	body, _ := json.Marshal(map[string]string{"username": "admin", "password": testPassword})
+	body, _ := json.Marshal(map[string]string{"password": testPassword})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", ua)

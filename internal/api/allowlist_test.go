@@ -21,7 +21,7 @@ const (
 )
 
 func loginBody() string {
-	return fmt.Sprintf("{\"username\":\"admin\",\"password\":%q}", testPassword)
+	return fmt.Sprintf("{\"password\":%q}", testPassword)
 }
 
 // setAdminAccess writes the admin IP allow list through the configuration

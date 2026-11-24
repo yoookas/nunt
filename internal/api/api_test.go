@@ -129,7 +129,6 @@ func TestLoginSessionAndCsrf(t *testing.T) {
 	env := newTestEnv(t)
 
 	rec := env.do(t, http.MethodPost, "/api/v1/auth/login", map[string]string{
-		"username": "admin",
 		"password": "wrong-password",
 	}, nil, nil)
 	if rec.Code != http.StatusUnauthorized {
@@ -137,7 +136,6 @@ func TestLoginSessionAndCsrf(t *testing.T) {
 	}
 
 	rec = env.do(t, http.MethodPost, "/api/v1/auth/login", map[string]string{
-		"username": "admin",
 		"password": testPassword,
 	}, nil, nil)
 	if rec.Code != http.StatusOK {
@@ -201,7 +199,7 @@ func TestLoginLockout(t *testing.T) {
 	}
 	env.server.loginLimiter = security.NewLimiter(2, time.Minute, time.Minute)
 
-	body := map[string]string{"username": "admin", "password": "nope"}
+	body := map[string]string{"password": "nope"}
 	env.do(t, http.MethodPost, "/api/v1/auth/login", body, nil, nil)
 	rec := env.do(t, http.MethodPost, "/api/v1/auth/login", body, nil, nil)
 	if rec.Code != http.StatusTooManyRequests {
@@ -212,7 +210,7 @@ func TestLoginLockout(t *testing.T) {
 func TestConfigExportMasksSecrets(t *testing.T) {
 	env := newTestEnv(t)
 	rec := env.do(t, http.MethodPost, "/api/v1/auth/login", map[string]string{
-		"username": "admin", "password": testPassword,
+		"password": testPassword,
 	}, nil, nil)
 	var login struct {
 		CSRF string `json:"csrf"`

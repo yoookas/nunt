@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button, Card, Typography } from '@heroui/react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
-import { api, errorText } from '../api'
+import { errorText } from '../api'
 import { isTOTPChallenge, useAuth, type AuthUser } from '../session'
 import ThemeSwitch from '../ThemeSwitch'
 import { TextInput, toast } from '../ui'
@@ -10,8 +10,6 @@ export default function Login() {
   const { user, ready, login, loginTOTP } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const [username, setUsername] = useState('')
-  const [singleUser, setSingleUser] = useState(false)
   const [password, setPassword] = useState('')
   const [challenge, setChallenge] = useState('')
   const [code, setCode] = useState('')
@@ -20,14 +18,6 @@ export default function Login() {
   const [busy, setBusy] = useState(false)
 
   const from = String((location.state as any)?.from || '/')
-
-  // One administrator means one secret: the form can leave the username out.
-  useEffect(() => {
-    api
-      .get<{ singleUser?: boolean }>('/api/v1/auth/mode')
-      .then((data) => setSingleUser(!!data?.singleUser))
-      .catch(() => setSingleUser(false))
-  }, [])
 
   useEffect(() => {
     if (ready && user && !user.mustChangePassword) {
@@ -54,14 +44,10 @@ export default function Login() {
       setError('请输入密码')
       return
     }
-    if (!singleUser && !username.trim()) {
-      setError('请输入用户名')
-      return
-    }
     setBusy(true)
     setError('')
     try {
-      const result = await login(singleUser ? '' : username.trim(), password)
+      const result = await login(password)
       if (isTOTPChallenge(result)) {
         // The password was right but a second factor is required: keep the
         // challenge and ask for the code instead of navigating away.
@@ -73,7 +59,6 @@ export default function Login() {
       afterLogin(result)
     } catch (err) {
       const message = errorText(err)
-      if (singleUser && message.includes('用户名')) setSingleUser(false)
       setError(message)
       toast.danger(message)
     } finally {
@@ -165,15 +150,12 @@ export default function Login() {
             </form>
           ) : (
             <form onSubmit={submitPassword} className="space-y-5">
-              {singleUser ? null : (
-                <TextInput label="用户名" value={username} onChange={setUsername} placeholder="admin" required />
-              )}
               <TextInput
                 label="密码"
                 type="password"
                 value={password}
                 onChange={setPassword}
-                placeholder={singleUser ? '登录密码' : '密码'}
+                placeholder="登录密码"
                 required
               />
               {error ? <div className="text-sm text-danger">{error}</div> : null}

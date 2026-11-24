@@ -173,11 +173,10 @@ const (
 
 // Identity is the authenticated caller.
 type Identity struct {
-	Kind     IdentityKind `json:"kind"`
-	UserID   string       `json:"userId,omitempty"`
-	Username string       `json:"username"`
-	CSRF     string       `json:"-"`
-	Session  *security.Session
+	Kind    IdentityKind `json:"kind"`
+	UserID  string       `json:"userId,omitempty"`
+	CSRF    string       `json:"-"`
+	Session *security.Session
 }
 
 type identityKey struct{}
@@ -232,7 +231,7 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 				return
 			}
 		}
-		id := &Identity{Kind: IdentitySession, UserID: sess.UserID, Username: sess.Username, CSRF: sess.CSRF, Session: sess}
+		id := &Identity{Kind: IdentitySession, UserID: sess.UserID, CSRF: sess.CSRF, Session: sess}
 		next.ServeHTTP(w, r.WithContext(WithIdentity(r.Context(), id)))
 	})
 }
@@ -307,13 +306,7 @@ func idParam(r *http.Request, name string) string { return r.PathValue(name) }
 
 // audit logs a configuration change with the caller identity.
 func (s *Server) audit(r *http.Request, action string, fields ...any) {
-	id, _ := IdentityFrom(r.Context())
-	user := "unknown"
-	if id != nil {
-		user = id.Username
-	}
 	args := append([]any{
-		"user", user,
 		"ip", s.clientIP(r).String(),
 		"action", action,
 		"method", r.Method,

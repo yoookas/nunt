@@ -11,7 +11,6 @@ import (
 type Session struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"userId"`
-	Username  string    `json:"username"`
 	IP        string    `json:"ip"`
 	UserAgent string    `json:"userAgent"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -40,7 +39,7 @@ func hashToken(token string) string {
 }
 
 // Create registers a new session and returns the opaque token.
-func (s *SessionStore) Create(userID, username, ip, ua string, ttl time.Duration) (*Session, string, error) {
+func (s *SessionStore) Create(userID, ip, ua string, ttl time.Duration) (*Session, string, error) {
 	token, err := RandomToken(32)
 	if err != nil {
 		return nil, "", err
@@ -53,7 +52,6 @@ func (s *SessionStore) Create(userID, username, ip, ua string, ttl time.Duration
 	sess := &Session{
 		ID:        hashToken(token),
 		UserID:    userID,
-		Username:  username,
 		IP:        ip,
 		UserAgent: ua,
 		CreatedAt: now,

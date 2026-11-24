@@ -8,7 +8,6 @@ package config
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -61,10 +60,7 @@ func Load(path string) (*Store, string, error) {
 		}
 		cfg.Users = []model.User{{
 			ID:                 model.NewID(),
-			Username:           "admin",
 			PasswordHash:       hash,
-			Role:               "admin",
-			Enabled:            true,
 			MustChangePassword: true,
 			CreatedAt:          time.Now(),
 		}}
@@ -162,37 +158,17 @@ func (s *Store) Subscribe(fn func(*model.Config)) {
 	s.mu.Unlock()
 }
 
-// SingleEnabledUser returns the only enabled account, when exactly one
-// exists. A single administrator deployment uses it to offer a password only
-// sign in.
-func (s *Store) SingleEnabledUser() (*model.User, bool) {
+// Admin returns a copy of the administrator account. A configuration without
+// an account returns nil; the loader creates the initial one and validation
+// refuses to persist an empty list.
+func (s *Store) Admin() *model.User {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var found *model.User
-	for i := range s.cfg.Users {
-		if !s.cfg.Users[i].Enabled {
-			continue
-		}
-		if found != nil {
-			return nil, false
-		}
-		u := s.cfg.Users[i]
-		found = &u
+	if len(s.cfg.Users) == 0 {
+		return nil
 	}
-	return found, found != nil
-}
-
-// FindUser returns the enabled user with the given name.
-func (s *Store) FindUser(name string) (*model.User, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for i := range s.cfg.Users {
-		if strings.EqualFold(s.cfg.Users[i].Username, name) {
-			u := s.cfg.Users[i]
-			return &u, true
-		}
-	}
-	return nil, false
+	u := s.cfg.Users[0]
+	return &u
 }
 
 // Default returns a configuration with sane defaults.

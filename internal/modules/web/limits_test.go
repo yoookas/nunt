@@ -293,7 +293,7 @@ func TestToggleReportsValidationFailure(t *testing.T) {
 	// can exist on disk (written by an older version or edited by hand).
 	seed := model.Config{
 		Version: config.CurrentVersion,
-		Users:   []model.User{{ID: "u1", Username: "admin", Role: "admin", Enabled: true}},
+		Users:   []model.User{{ID: "u1"}},
 		Web: model.WebConfig{
 			Listeners: []model.WebListener{{ID: "l1", Name: "http", Listen: []string{":8080"}}},
 			Rules: []model.WebRule{{
@@ -321,7 +321,7 @@ func TestToggleReportsValidationFailure(t *testing.T) {
 	toggle := func(id string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/web/rules/"+id+"/toggle", nil)
 		req.SetPathValue("id", id)
-		req = req.WithContext(api.WithIdentity(req.Context(), &api.Identity{Kind: api.IdentitySession, Username: "admin"}))
+		req = req.WithContext(api.WithIdentity(req.Context(), &api.Identity{Kind: api.IdentitySession}))
 		rec := httptest.NewRecorder()
 		w.handleToggleRule(rec, req)
 		return rec

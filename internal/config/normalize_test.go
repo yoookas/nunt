@@ -93,7 +93,7 @@ func TestSubscribersGetIndependentSnapshots(t *testing.T) {
 // is allowed to stay incomplete.
 func TestValidateRejectsUnknownDNSProviders(t *testing.T) {
 	cfg := Default()
-	cfg.Users = []model.User{{ID: "u1", Username: "admin", Role: "admin", Enabled: true}}
+	cfg.Users = []model.User{{ID: "u1"}}
 	// Deliberately not a real provider: using a shipped one here broke this
 	// test the day Cloudflare was added.
 	cfg.DDNS.Rules = []model.DDNSRule{{

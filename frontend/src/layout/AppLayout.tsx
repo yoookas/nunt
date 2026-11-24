@@ -99,10 +99,10 @@ export default function AppLayout() {
         <div className="border-t border-border p-3">
           <div className="flex items-center gap-2 rounded-xl bg-background px-3 py-2">
             <Avatar size="sm">
-              <Avatar.Fallback>{(user?.username || '?').slice(0, 1).toUpperCase()}</Avatar.Fallback>
+              <Avatar.Fallback>{(user ? 'A' : '?')}</Avatar.Fallback>
             </Avatar>
             <div className="min-w-0">
-              <div className="truncate text-xs font-medium">{user?.username}</div>
+              <div className="truncate text-xs font-medium">管理员</div>
               <div className="text-[11px] text-muted">管理员</div>
             </div>
           </div>
@@ -164,9 +164,9 @@ export default function AppLayout() {
             <Dropdown.Trigger>
               <Button variant="ghost">
                 <Avatar size="sm">
-                  <Avatar.Fallback>{(user?.username || '?').slice(0, 1).toUpperCase()}</Avatar.Fallback>
+                  <Avatar.Fallback>{(user ? 'A' : '?')}</Avatar.Fallback>
                 </Avatar>
-                <span className="hidden sm:inline">{user?.username || '未登录'}</span>
+                <span className="hidden sm:inline">管理员</span>
               </Button>
             </Dropdown.Trigger>
             <Dropdown.Popover>

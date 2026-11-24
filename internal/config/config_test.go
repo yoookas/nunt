@@ -27,8 +27,8 @@ func TestLoadCreatesSecureDefaults(t *testing.T) {
 	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("the configuration must be 0600, got %v", info.Mode().Perm())
 	}
-	user, ok := store.FindUser("admin")
-	if !ok {
+	user := store.Admin()
+	if user == nil {
 		t.Fatal("the default administrator must exist")
 	}
 	if !user.MustChangePassword {
@@ -36,9 +36,6 @@ func TestLoadCreatesSecureDefaults(t *testing.T) {
 	}
 	if !security.VerifyPassword(user.PasswordHash, password) {
 		t.Fatal("the reported password must match the stored hash")
-	}
-	if _, ok := store.FindUser("nobody"); ok {
-		t.Fatal("unknown users must not be found")
 	}
 }
 
@@ -121,7 +118,7 @@ func TestUpdateRejectsInvalidConfiguration(t *testing.T) {
 
 func TestValidate(t *testing.T) {
 	cfg := Default()
-	cfg.Users = []model.User{{ID: "u1", Username: "admin", Enabled: true}}
+	cfg.Users = []model.User{{ID: "u1"}}
 	if err := Validate(cfg); err != nil {
 		t.Fatalf("the default configuration must be valid: %v", err)
 	}
@@ -133,8 +130,7 @@ func TestValidate(t *testing.T) {
 
 func TestNormalizeDisablesSeedlessTOTP(t *testing.T) {
 	cfg := Default()
-	cfg.Users = []model.User{{ID: "u1", Username: "admin", Role: "admin", Enabled: true,
-		TOTP: model.TOTP{Enabled: true}}}
+	cfg.Users = []model.User{{ID: "u1", TOTP: model.TOTP{Enabled: true}}}
 	Normalize(cfg)
 	if cfg.Users[0].TOTP.Enabled {
 		t.Fatal("a TOTP factor without a secret must be disabled")

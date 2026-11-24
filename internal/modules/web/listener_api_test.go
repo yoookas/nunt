@@ -18,7 +18,7 @@ func jsonRequest(t *testing.T, method, target, body string, pathValues map[strin
 	for k, v := range pathValues {
 		req.SetPathValue(k, v)
 	}
-	return req.WithContext(api.WithIdentity(req.Context(), &api.Identity{Kind: api.IdentitySession, Username: "admin"}))
+	return req.WithContext(api.WithIdentity(req.Context(), &api.Identity{Kind: api.IdentitySession}))
 }
 
 func newListenerTestWeb(t *testing.T) *Web {

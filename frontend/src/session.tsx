@@ -2,7 +2,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { api, setCSRF } from './api'
 
 export interface AuthUser {
-  username: string
   csrf: string
   mustChangePassword: boolean
   totpEnabled?: boolean
@@ -25,7 +24,7 @@ export function isTOTPChallenge(result: LoginResult): result is TOTPChallenge {
 interface AuthContextValue {
   user: AuthUser | null
   ready: boolean
-  login: (username: string, password: string) => Promise<LoginResult>
+  login: (password: string) => Promise<LoginResult>
   loginTOTP: (challenge: string, code: string) => Promise<AuthUser>
   logout: () => Promise<void>
   changePassword: (current: string, next: string) => Promise<void>
@@ -35,7 +34,6 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 
 function applySession(data: any): AuthUser {
   const user: AuthUser = {
-    username: data?.username || '',
     csrf: data?.csrf || '',
     mustChangePassword: !!data?.mustChangePassword,
     totpEnabled: !!data?.totpEnabled,
@@ -76,8 +74,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('nunt:unauthorized', onUnauthorized)
   }, [])
 
-  const login = useCallback(async (username: string, password: string) => {
-    const data = await api.post('/api/v1/auth/login', { username, password })
+  const login = useCallback(async (password: string) => {
+    const data = await api.post('/api/v1/auth/login', { password })
     if (data?.totpRequired) {
       // No session yet: the caller has to collect the second factor.
       return { totpRequired: true as const, challenge: String(data.challenge || '') }

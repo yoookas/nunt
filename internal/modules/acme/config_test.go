@@ -26,7 +26,7 @@ func newConfigModule(t *testing.T) *ACME {
 		t.Fatalf("load config: %v", err)
 	}
 	if err := store.Update(func(c *model.Config) error {
-		c.Users = []model.User{{ID: "u1", Username: "admin", Role: "admin", Enabled: true}}
+		c.Users = []model.User{{ID: "u1"}}
 		return nil
 	}); err != nil {
 		t.Fatalf("seed users: %v", err)

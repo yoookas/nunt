@@ -88,10 +88,7 @@ func TestEndToEnd(t *testing.T) {
 		},
 		Users: []model.User{{
 			ID:           "u1",
-			Username:     "admin",
 			PasswordHash: hash,
-			Role:         "admin",
-			Enabled:      true,
 			CreatedAt:    time.Now(),
 		}},
 		Web: model.WebConfig{
@@ -154,7 +151,7 @@ func TestEndToEnd(t *testing.T) {
 	waitFor(t, base+"/healthz")
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	loginBody := strings.NewReader(fmt.Sprintf("{\"username\":\"admin\",\"password\":%q}", adminPassword))
+	loginBody := strings.NewReader(fmt.Sprintf("{\"password\":%q}", adminPassword))
 	resp, err := client.Post(base+"/api/v1/auth/login", "application/json", loginBody)
 	if err != nil {
 		t.Fatalf("login: %v", err)
@@ -296,10 +293,7 @@ func TestAdminListenRebindKeepsSession(t *testing.T) {
 		},
 		Users: []model.User{{
 			ID:           "u1",
-			Username:     "admin",
 			PasswordHash: hash,
-			Role:         "admin",
-			Enabled:      true,
 			CreatedAt:    time.Now(),
 		}},
 		WAF: model.WAFConfig{Mode: model.WAFModeDetect, BodyLimitKB: 64},
@@ -332,7 +326,7 @@ func TestAdminListenRebindKeepsSession(t *testing.T) {
 	}
 	client := &http.Client{Timeout: 10 * time.Second, Jar: jar}
 	resp, err := client.Post("http://"+addrA+"/api/v1/auth/login", "application/json",
-		strings.NewReader(fmt.Sprintf("{\"username\":\"admin\",\"password\":%q}", adminPassword)))
+		strings.NewReader(fmt.Sprintf("{\"password\":%q}", adminPassword)))
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}

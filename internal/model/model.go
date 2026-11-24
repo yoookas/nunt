@@ -111,13 +111,11 @@ type SystemConfig struct {
 	IP2RegionDB string `json:"ip2regionDb,omitempty"`
 }
 
-// User is an administrator account.
+// User is the single administrator account. There is no user name: the
+// deployment has exactly one password (plus an optional second factor).
 type User struct {
 	ID                 string     `json:"id"`
-	Username           string     `json:"username"`
 	PasswordHash       string     `json:"passwordHash,omitempty"`
-	Role               string     `json:"role"`
-	Enabled            bool       `json:"enabled"`
 	MustChangePassword bool       `json:"mustChangePassword"`
 	CreatedAt          time.Time  `json:"createdAt"`
 	LastLogin          *time.Time `json:"lastLogin,omitempty"`

@@ -74,20 +74,9 @@ interface SystemSettingsResponse extends Partial<SystemForm> {
   adminListenNotice?: string
 }
 
-interface UserRow {
-  id: string
-  username: string
-  role?: string
-  enabled: boolean
-  mustChangePassword?: boolean
-  createdAt?: string
-  lastLogin?: string
-}
-
 interface SessionRow {
   __key: string
   id?: string
-  username: string
   ip?: string
   userAgent?: string
   createdAt?: string
@@ -100,10 +89,6 @@ interface ListState<T> {
   loading: boolean
   loaded: boolean
   error: string
-}
-
-interface UserListState extends ListState<UserRow> {
-  busyId: string
 }
 
 type NoticeStatus = 'accent' | 'danger' | 'default' | 'success' | 'warning'
@@ -285,9 +270,7 @@ function Separator() {
  * ---------------------------------------------------------------------- */
 
 export default function Settings() {
-  const { user } = useAuth()
   const { setTheme } = useTheme()
-  const currentUsername = user?.username || ''
 
   const [tab, setTab] = useState('system')
 
@@ -306,23 +289,6 @@ export default function Settings() {
   const [logLoading, setLogLoading] = useState(false)
   const [logSaving, setLogSaving] = useState(false)
   const [logFiles, setLogFiles] = useState<LogFileRow[]>([])
-
-  /* ---- users ---- */
-  const [users, setUsers] = useState<UserListState>({ ...emptyList<UserRow>(), busyId: '' })
-  const [userDialog, setUserDialog] = useState<{
-    open: boolean
-    editingId: string
-    saving: boolean
-    form: { username: string; password: string; enabled: boolean }
-  }>({ open: false, editingId: '', saving: false, form: { username: '', password: '', enabled: true } })
-  const [passwordDialog, setPasswordDialog] = useState<{
-    open: boolean
-    saving: boolean
-    user: UserRow | null
-    password: string
-  }>({ open: false, saving: false, user: null, password: '' })
-  const [deleteUser, setDeleteUser] = useState<UserRow | null>(null)
-  const [disableUser, setDisableUser] = useState<UserRow | null>(null)
 
   /* ---- sessions ---- */
   const [sessions, setSessions] = useState<ListState<SessionRow>>(emptyList<SessionRow>())
@@ -581,151 +547,6 @@ export default function Settings() {
     }
   }
 
-  /* ---- users ---- */
-
-  const loadUsers = async (force = false) => {
-    if (users.loading) return
-    if (users.loaded && !force) return
-    setUsers((prev) => ({ ...prev, loading: true, error: '' }))
-    try {
-      const data = await api.get('/api/v1/auth/users')
-      setUsers({ items: asArray<UserRow>(data), loading: false, loaded: true, error: '', busyId: '' })
-    } catch (err) {
-      setUsers((prev) => ({ ...prev, loading: false, loaded: true, error: errorText(err) }))
-    }
-  }
-
-  const openCreateUser = () => {
-    setUserDialog({ open: true, editingId: '', saving: false, form: { username: '', password: '', enabled: true } })
-  }
-
-  const openEditUser = (row: UserRow) => {
-    setUserDialog({
-      open: true,
-      editingId: row.id,
-      saving: false,
-      form: { username: row.username || '', password: '', enabled: !!row.enabled },
-    })
-  }
-
-  const saveUser = async () => {
-    const username = userDialog.form.username.trim()
-    const password = userDialog.form.password
-    if (!username) {
-      toast.warning('请填写用户名')
-      return
-    }
-    if (!userDialog.editingId && password.length < 8) {
-      toast.warning('密码长度至少 8 位')
-      return
-    }
-    setUserDialog((prev) => ({ ...prev, saving: true }))
-    try {
-      if (userDialog.editingId) {
-        await api.put(`/api/v1/auth/users/${encodeURIComponent(userDialog.editingId)}`, {
-          username,
-          enabled: !!userDialog.form.enabled,
-        })
-        toast.success('用户已更新')
-      } else {
-        await api.post('/api/v1/auth/users', {
-          username,
-          password,
-          enabled: !!userDialog.form.enabled,
-        })
-        toast.success('用户已创建')
-      }
-      setUserDialog((prev) => ({ ...prev, open: false }))
-      await loadUsers(true)
-    } catch (err) {
-      toast.danger(errorText(err))
-    } finally {
-      setUserDialog((prev) => ({ ...prev, saving: false }))
-    }
-  }
-
-  const openResetPassword = (row: UserRow) => {
-    setPasswordDialog({ open: true, saving: false, user: row, password: '' })
-  }
-
-  const savePassword = async () => {
-    const password = passwordDialog.password
-    if (password.length < 8) {
-      toast.warning('新密码长度至少 8 位')
-      return
-    }
-    if (!passwordDialog.user?.id) {
-      toast.danger('用户信息不完整，无法重置密码')
-      return
-    }
-    setPasswordDialog((prev) => ({ ...prev, saving: true }))
-    try {
-      await api.put(`/api/v1/auth/users/${encodeURIComponent(passwordDialog.user.id)}`, { password })
-      toast.success('密码已重置，该用户的会话已失效')
-      setPasswordDialog((prev) => ({ ...prev, open: false }))
-    } catch (err) {
-      toast.danger(errorText(err))
-    } finally {
-      setPasswordDialog((prev) => ({ ...prev, saving: false }))
-    }
-  }
-
-  const applyToggleUser = async (row: UserRow, enabled: boolean) => {
-    setUsers((prev) => ({ ...prev, busyId: row.id }))
-    try {
-      await api.put(`/api/v1/auth/users/${encodeURIComponent(row.id)}`, { enabled })
-      setUsers((prev) => ({
-        ...prev,
-        items: prev.items.map((item) => (item.id === row.id ? { ...item, enabled } : item)),
-      }))
-      toast.success(enabled ? '用户已启用' : '用户已停用')
-    } catch (err) {
-      toast.danger(errorText(err))
-    } finally {
-      setUsers((prev) => ({ ...prev, busyId: '' }))
-    }
-  }
-
-  const requestToggleUser = (row: UserRow, enabled: boolean) => {
-    if (row.username === currentUsername) {
-      toast.warning('不能停用当前登录的账号')
-      return
-    }
-    if (!enabled) {
-      setDisableUser(row)
-      return
-    }
-    void applyToggleUser(row, true)
-  }
-
-  const confirmDisableUser = async () => {
-    const target = disableUser
-    if (!target) return
-    setDisableUser(null)
-    await applyToggleUser(target, false)
-  }
-
-  const requestDeleteUser = (row: UserRow) => {
-    if (row.username === currentUsername) {
-      toast.warning('不能删除当前登录的账号')
-      return
-    }
-    setDeleteUser(row)
-  }
-
-  const confirmDeleteUser = async () => {
-    const target = deleteUser
-    if (!target) return
-    setDeleteUser(null)
-    try {
-      await api.del(`/api/v1/auth/users/${encodeURIComponent(target.id)}`)
-      toast.success('用户已删除')
-      await loadUsers(true)
-    } catch (err) {
-      toast.danger(errorText(err))
-    }
-  }
-
   /* ---- sessions ---- */
 
   const loadSessions = async (force = false) => {
@@ -736,37 +557,12 @@ export default function Settings() {
       const data = await api.get('/api/v1/auth/sessions')
       const items = asArray<Omit<SessionRow, '__key'>>(data).map((row, index) => ({
         ...row,
-        __key: row.id || `${row.username}|${row.ip}|${row.createdAt}|${index}`,
+        __key: row.id || `${row.ip}|${row.createdAt}|${index}`,
       }))
       setSessions({ items, loading: false, loaded: true, error: '' })
     } catch (err) {
       setSessions((prev) => ({ ...prev, loading: false, loaded: true, error: errorText(err) }))
     }
-  }
-
-  const findUserForSession = async (row: SessionRow): Promise<UserRow | null> => {
-    let list = users.items
-    let found = list.find((item) => item.username === row.username) || null
-    if (found) return found
-    try {
-      const data = await api.get('/api/v1/auth/users')
-      list = asArray<UserRow>(data)
-      setUsers({ items: list, loading: false, loaded: true, error: '', busyId: '' })
-    } catch (err) {
-      toast.danger(`读取用户列表失败：${errorText(err)}`)
-      return null
-    }
-    found = list.find((item) => item.username === row.username) || null
-    return found
-  }
-
-  const resetPasswordForSession = async (row: SessionRow) => {
-    const target = await findUserForSession(row)
-    if (!target) {
-      toast.warning('在用户列表中找不到该账号，可能已被删除')
-      return
-    }
-    openResetPassword(target)
   }
 
   const requestKickSession = (row: SessionRow) => {
@@ -782,7 +578,7 @@ export default function Settings() {
     if (!target) return
     setKickTarget(null)
     if (!target.id) {
-      await resetPasswordForSession(target)
+      toast.warning('会话已失效，请让对方重新登录')
       return
     }
     try {
@@ -877,7 +673,7 @@ export default function Settings() {
         setSwitched({ addr: effective, url: adminListenURL(effective) })
       } else {
         await loadSystem()
-        await Promise.all([loadUsers(true), loadSessions(true)])
+        await loadSessions(true)
       }
     } catch (err) {
       toast.danger(errorText(err))
@@ -907,7 +703,6 @@ export default function Settings() {
 
   useEffect(() => {
     if (tab === 'logs') void loadLogs()
-    else if (tab === 'users') void loadUsers()
     else if (tab === 'sessions') void loadSessions()
     else if (tab === 'backup') void loadBackup()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -915,84 +710,7 @@ export default function Settings() {
 
   /* ---- columns ---- */
 
-  const userColumns: Column<UserRow>[] = [
-    {
-      key: 'username',
-      title: '用户名',
-      render: (row) => (
-        <div className="flex items-center gap-2">
-          <span>{row.username}</span>
-          {row.username === currentUsername ? <StatusChip color="primary">当前</StatusChip> : null}
-        </div>
-      ),
-    },
-    { key: 'role', title: '角色', render: (row) => <span className="text-sm">{row.role || 'admin'}</span> },
-    {
-      key: 'status',
-      title: '状态',
-      render: (row) => {
-        const self = row.username === currentUsername
-        const busy = users.busyId === row.id
-        return (
-          <div className="flex items-center gap-2">
-            <Switch
-              size="sm"
-              isSelected={!!row.enabled}
-              isDisabled={self || busy}
-              aria-label={`${row.username} 启用状态`}
-              onChange={(enabled: boolean) => requestToggleUser(row, enabled)}
-            >
-              <Switch.Content>
-                <Switch.Control>
-                  <Switch.Thumb />
-                </Switch.Control>
-              </Switch.Content>
-            </Switch>
-            <span className={row.enabled ? 'text-sm text-success' : 'text-sm text-muted'}>
-              {row.enabled ? '已启用' : '已停用'}
-            </span>
-            {row.mustChangePassword ? <StatusChip color="warning">待改密</StatusChip> : null}
-          </div>
-        )
-      },
-    },
-    { key: 'lastLogin', title: '最近登录', render: (row) => <span className="text-sm text-muted">{fmtTime(row.lastLogin)}</span> },
-    { key: 'createdAt', title: '创建时间', render: (row) => <span className="text-sm text-muted">{fmtTime(row.createdAt)}</span> },
-    {
-      key: 'actions',
-      title: '操作',
-      render: (row) => (
-        <div className="flex flex-wrap gap-1.5">
-          <Button size="sm" variant="secondary" onPress={() => openEditUser(row)}>
-            编辑
-          </Button>
-          <Button size="sm" variant="tertiary" onPress={() => openResetPassword(row)}>
-            重置密码
-          </Button>
-          <Button
-            size="sm"
-            variant="danger-soft"
-            isDisabled={row.username === currentUsername}
-            onPress={() => requestDeleteUser(row)}
-          >
-            删除
-          </Button>
-        </div>
-      ),
-    },
-  ]
-
   const sessionColumns: Column<SessionRow>[] = [
-    {
-      key: 'username',
-      title: '用户',
-      render: (row) => (
-        <div className="flex items-center gap-2">
-          <span>{row.username}</span>
-          {row.current ? <StatusChip color="success">当前会话</StatusChip> : null}
-        </div>
-      ),
-    },
     {
       key: 'ip',
       title: '来源 IP',
@@ -1022,9 +740,6 @@ export default function Settings() {
           >
             踢出
           </Button>
-          <Button size="sm" variant="tertiary" onPress={() => void resetPasswordForSession(row)}>
-            重置密码
-          </Button>
         </div>
       ),
     },
@@ -1036,7 +751,7 @@ export default function Settings() {
     <Page>
       <PageHeader
         title="系统设置"
-        sub="系统参数、用户、在线会话与配置备份"
+        sub="系统参数、在线会话、日志与配置备份"
         actions={
           <Button variant="secondary" isDisabled={systemLoading} onPress={() => void loadSystem()}>
             刷新
@@ -1050,7 +765,6 @@ export default function Settings() {
             <Tabs.Tab id="system">系统</Tabs.Tab>
             <Tabs.Tab id="logs">日志</Tabs.Tab>
             <Tabs.Tab id="security">安全</Tabs.Tab>
-            <Tabs.Tab id="users">用户</Tabs.Tab>
             <Tabs.Tab id="sessions">会话</Tabs.Tab>
             <Tabs.Tab id="backup">备份</Tabs.Tab>
           </Tabs.List>
@@ -1322,43 +1036,6 @@ export default function Settings() {
         </Tabs.Panel>
 
         {/* ------------------------------------------------------------------ */}
-        <Tabs.Panel id="users">
-          <div className="space-y-5 pt-4">
-            <Panel
-              title="用户管理"
-              extra={
-                <div className="flex items-center gap-2">
-                  <Button size="sm" variant="secondary" isDisabled={users.loading} onPress={() => void loadUsers(true)}>
-                    刷新
-                  </Button>
-                  <Button size="sm" variant="primary" onPress={openCreateUser}>
-                    新建用户
-                  </Button>
-                </div>
-              }
-            >
-              <div className="p-4">
-                {users.error ? (
-                  <div className="mb-3">
-                    <Notice status="danger">{users.error}</Notice>
-                  </div>
-                ) : null}
-                <div className={users.loading ? 'opacity-60' : ''}>
-                  <DataTable
-                    items={users.items}
-                    columns={userColumns}
-                    rowKey={(row) => row.id || `${row.username}-${row.createdAt || ''}`}
-                    ariaLabel="用户列表"
-                    empty="暂无用户，点右上角「新建用户」创建第一个账号"
-                  />
-                </div>
-              </div>
-            </Panel>
-            <Panel>
-              <Note>后端当前创建的账号均为管理员角色；重置密码后该用户的所有会话会立即失效。</Note>
-            </Panel>
-          </div>
-        </Tabs.Panel>
 
         {/* ------------------------------------------------------------------ */}
         <Tabs.Panel id="sessions">
@@ -1380,7 +1057,7 @@ export default function Settings() {
                 {sessionMissingId ? (
                   <div className="mb-3">
                     <Notice status="accent">
-                      当前后端返回的会话列表不含会话 ID，无法定向踢出；可在对应行使用「重置密码」让该用户全部会话立即失效。
+                      当前后端返回的会话列表不含会话 ID，无法定向踢出；可以结束全部会话，或等待它自然过期。
                     </Notice>
                   </div>
                 ) : null}
@@ -1495,7 +1172,7 @@ export default function Settings() {
                 <Separator />
 
                 <div className="mb-3 text-sm leading-6 text-muted">
-                  导入会替换配置（用户仅在带有密码哈希时被替换），随后自动重载各模块。
+                  导入会替换配置（管理员密码哈希会保留），随后自动重载各模块。
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button variant="secondary" isDisabled={configBusy === 'import'} onPress={pickImportFile}>
@@ -1529,93 +1206,6 @@ export default function Settings() {
       {/* ------------------------------------------------------------------ */}
 
       <FormModal
-        open={userDialog.open}
-        onClose={() => {
-          if (!userDialog.saving) setUserDialog((prev) => ({ ...prev, open: false }))
-        }}
-        title={userDialog.editingId ? '编辑用户' : '新建用户'}
-        footer={
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="tertiary"
-              isDisabled={userDialog.saving}
-              onPress={() => setUserDialog((prev) => ({ ...prev, open: false }))}
-            >
-              取消
-            </Button>
-            <Button variant="primary" isDisabled={userDialog.saving} onPress={() => void saveUser()}>
-              {userDialog.saving ? '保存中…' : '保存'}
-            </Button>
-          </div>
-        }
-      >
-        <div className="space-y-5">
-          <TextInput
-            label="用户名"
-            value={userDialog.form.username}
-            onChange={(value) =>
-              setUserDialog((prev) => ({ ...prev, form: { ...prev.form, username: value } }))
-            }
-            placeholder="登录用户名"
-            required
-          />
-          {!userDialog.editingId ? (
-            <TextInput
-              label="密码"
-              type="password"
-              value={userDialog.form.password}
-              onChange={(value) =>
-                setUserDialog((prev) => ({ ...prev, form: { ...prev.form, password: value } }))
-              }
-              placeholder="初始密码"
-              hint="至少 8 位"
-              required
-            />
-          ) : null}
-          <SwitchInput
-            label="启用"
-            value={userDialog.form.enabled}
-            onChange={(value) => setUserDialog((prev) => ({ ...prev, form: { ...prev.form, enabled: value } }))}
-            hint={userDialog.form.enabled ? '允许登录' : '禁止登录'}
-          />
-        </div>
-      </FormModal>
-
-      <FormModal
-        open={passwordDialog.open}
-        onClose={() => {
-          if (!passwordDialog.saving) setPasswordDialog((prev) => ({ ...prev, open: false }))
-        }}
-        title={`重置密码${passwordDialog.user ? '：' + passwordDialog.user.username : ''}`}
-        footer={
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="tertiary"
-              isDisabled={passwordDialog.saving}
-              onPress={() => setPasswordDialog((prev) => ({ ...prev, open: false }))}
-            >
-              取消
-            </Button>
-            <Button variant="primary" isDisabled={passwordDialog.saving} onPress={() => void savePassword()}>
-              {passwordDialog.saving ? '重置中…' : '重置'}
-            </Button>
-          </div>
-        }
-      >
-        <div className="space-y-5">
-          <Notice status="warning">重置后该用户的所有会话会立即失效（包括当前会话，如果重置的是本人）。</Notice>
-          <TextInput
-            label="新密码"
-            type="password"
-            value={passwordDialog.password}
-            onChange={(value) => setPasswordDialog((prev) => ({ ...prev, password: value }))}
-            hint="至少 8 位"
-            required
-          />
-        </div>
-      </FormModal>
-
-      <FormModal
         open={rawDialog.open}
         onClose={() => setRawDialog((prev) => ({ ...prev, open: false }))}
         title="当前配置（密钥已脱敏）"
@@ -1636,44 +1226,16 @@ export default function Settings() {
       </FormModal>
 
       <ConfirmModal
-        open={!!deleteUser}
-        title="删除用户"
-        content={
-          <>
-            确定要删除用户「{deleteUser?.username}」吗？该用户的所有会话会立即失效。
-          </>
-        }
-        danger
-        confirmText="删除"
-        onCancel={() => setDeleteUser(null)}
-        onConfirm={() => void confirmDeleteUser()}
-      />
-
-      <ConfirmModal
-        open={!!disableUser}
-        title="停用用户"
-        content={
-          <>
-            确定要停用用户「{disableUser?.username}」吗？停用后该账号无法登录，但已有会话仍可能保持有效，如有需要请重置密码。
-          </>
-        }
-        danger
-        confirmText="停用"
-        onCancel={() => setDisableUser(null)}
-        onConfirm={() => void confirmDisableUser()}
-      />
-
-      <ConfirmModal
         open={!!kickTarget}
         title={kickTarget?.id ? '踢出会话' : '无法定向踢出'}
         content={
           kickTarget?.id ? (
             <>
-              确定结束用户「{kickTarget?.username}」来自 {kickTarget?.ip || '未知地址'} 的会话吗？
+              确定结束来自 {kickTarget?.ip || '未知地址'} 的会话吗？
             </>
           ) : (
             <>
-              当前后端返回的会话列表不含会话 ID，无法只结束「{kickTarget?.username}」的这一条会话。是否改为重置该用户密码？重置后该用户的所有会话会立即失效。
+              当前后端返回的会话列表不含会话 ID，无法只结束来自 {kickTarget?.ip || '未知地址'} 的这一条会话。可以结束全部会话，或等待它自然过期。
             </>
           )
         }

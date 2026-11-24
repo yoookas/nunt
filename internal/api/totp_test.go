@@ -55,7 +55,6 @@ func enrollTOTP(t *testing.T, env *testEnv, cookies []*http.Cookie, csrf string)
 func startTOTPLogin(t *testing.T, env *testEnv) string {
 	t.Helper()
 	rec := env.do(t, http.MethodPost, "/api/v1/auth/login", map[string]string{
-		"username": "admin",
 		"password": testPassword,
 	}, nil, nil)
 	if rec.Code != http.StatusOK {
@@ -99,13 +98,12 @@ func TestTOTPEnrollmentAndLogin(t *testing.T) {
 		t.Fatalf("login/totp = %d: %s", rec.Code, rec.Body.String())
 	}
 	var payload struct {
-		CSRF     string `json:"csrf"`
-		Username string `json:"username"`
+		CSRF string `json:"csrf"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if payload.CSRF == "" || payload.Username != "admin" {
+	if payload.CSRF == "" {
 		t.Fatalf("payload = %+v", payload)
 	}
 	session := rec.Result().Cookies()
@@ -233,7 +231,7 @@ func TestTOTPDisableNeedsBothFactors(t *testing.T) {
 
 	// The factor is gone: the next password login returns a session directly.
 	rec = env.do(t, http.MethodPost, "/api/v1/auth/login", map[string]string{
-		"username": "admin", "password": testPassword,
+		"password": testPassword,
 	}, nil, nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"csrf"`) {
 		t.Fatalf("login after disable = %d: %s", rec.Code, rec.Body.String())
