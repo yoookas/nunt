@@ -296,16 +296,19 @@ export default function Web() {
         const domains = Array.isArray(row.domains) ? row.domains : []
         return (
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-              {domains.slice(0, 2).map((domain) => (
-                <span key={domain} className="truncate text-sm font-medium">
-                  {domain}
+            <div className="flex min-w-0 items-center gap-1.5">
+              {domains.length ? (
+                <span className="truncate text-sm font-medium" title={domains.join('\n')}>
+                  {domains[0]}
                 </span>
-              ))}
-              {domains.length > 2 ? (
-                <span className="text-xs text-muted">+{domains.length - 2} 个域名</span>
+              ) : (
+                <span className="text-sm text-muted">全部域名</span>
+              )}
+              {domains.length > 1 ? (
+                <span className="shrink-0 rounded-full bg-default px-1.5 py-px text-[10px] text-muted">
+                  +{domains.length - 1}
+                </span>
               ) : null}
-              {!domains.length ? <span className="text-sm text-muted">全部域名</span> : null}
             </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted">
               <span className="mono shrink-0">{row.path || '/'}</span>
@@ -339,11 +342,11 @@ export default function Web() {
     {
       key: 'security',
       title: '安全',
-      className: 'w-32',
+      className: 'w-40',
       render: (row) => {
         const mode = tlsModeOf(listenerOf(row.listenerId))
         return (
-          <div className="flex flex-wrap items-center gap-1">
+          <div className="flex flex-nowrap items-center gap-1">
             <StatusChip color={tlsColor(mode)}>TLS {mode === 'off' ? '关' : '开'}</StatusChip>
             <StatusChip color={row.waf ? 'success' : 'default'}>WAF {row.waf ? '开' : '关'}</StatusChip>
           </div>
@@ -353,7 +356,7 @@ export default function Web() {
     {
       key: 'requests',
       title: '请求',
-      className: 'w-16 text-right',
+      className: 'w-20 whitespace-nowrap text-right',
       render: (row) => (
         <span className="block text-xs tabular-nums text-muted">
           {Number(row.requests || 0).toLocaleString()}
