@@ -19,7 +19,7 @@
 
 ---
 
-## S0 · 发布前（v1.0.0-rc2）
+## S0 · 发布（v1.0.0-rc3）
 
 目标：把当前改动变成一次可重复、可回滚的发布。**不新增任何功能。**
 
@@ -28,11 +28,11 @@
 | 1 | 发布工作流可用性检查 | ✅ 完成 | tag push 触发；已修 RC 不标预发布、notes 反引号被执行、版本未校验三个问题 |
 | 2 | 死开关清理（`system.checkUpdate`、`web.realIp`） | ✅ 完成 | 两个字段、默认值与设置页开关都已删除 |
 | 3 | 偶发失败的端口复用测试 | ✅ 完成 | 测试改用 20000–31999 的非临时端口，避开与并行包争抢 |
-| 4 | 提交与推送（工作区干净、本地领先 origin/main 58 个提交） | **阻塞** | 需要仓库凭证；本环境无（`gh auth status` 未登录） |
-| 5 | 等 `ci.yml` + `docker-smoke` 绿 | 阻塞于 4 | 这将是镜像构建、健康检查、compose、Trivy 基线的第一次真跑；**必须绿了再打 tag** |
-| 6 | 打 tag `v1.0.0-rc2` 并推送 | 阻塞于 5 | 建议顺序：push main → 等 CI → tag；tag 名必须是 `vX.Y.Z-rcN`（点号分隔的 `v1.0.0.rc1` 会被版本校验拒绝） |
+| 4 | 提交与推送 | ✅ 完成 | 凭证已配好，`main` 与远端同步 |
+| 5 | 等 `ci.yml` + `docker-smoke` 绿 | ✅ 完成 | rc1 / rc2 两个 tag 上均全绿；镜像构建、健康检查、compose、Trivy 基线都真跑过 |
+| 6 | 打 tag 并推送 | 🟡 进行中 | rc1、rc2 已发布；rc3 按同一流程：push main → 等 CI → tag；tag 名必须是 `vX.Y.Z-rcN`（点号分隔的 `v1.0.0.rc1` 会被版本校验拒绝） |
 
-**验收**：Release 页出现一次 Pre-release，附件为三个单架构归档 + 一个 OCI 归档 + `SHA256SUMS`；`docker load` 一份并 `docker compose up -d` 能起来，`nunt healthcheck` 返回 0。
+**验收**：Release 页出现一次 Pre-release，附件为三个单架构归档 + 一个 OCI 归档 + `SHA256SUMS`（四个归档都有校验和）；`docker load` 一份并 `docker compose up -d` 能起来，`nunt healthcheck` 返回 0。
 
 ---
 
