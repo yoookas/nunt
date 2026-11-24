@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Avatar, Button, Drawer, Dropdown, Menu, useOverlayState } from '@heroui/react'
-import { LogOut, Menu as MenuIcon, Monitor, Moon, Sun, TriangleAlert } from 'lucide-react'
+import { LogOut, Menu as MenuIcon, TriangleAlert } from 'lucide-react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api'
+import ThemeSwitch from '../ThemeSwitch'
 import { menu } from '../menu'
 import { useAuth } from '../session'
-import { useTheme, type ThemeMode } from '../theme'
 import { usePolling } from '../usePolling'
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
@@ -48,7 +48,6 @@ interface HealthProblem {
 
 export default function AppLayout() {
   const { user, logout } = useAuth()
-  const { theme, setTheme } = useTheme()
   const navigate = useNavigate()
   const location = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -160,30 +159,7 @@ export default function AppLayout() {
               </Dropdown.Popover>
             </Dropdown>
           ) : null}
-          <Dropdown>
-            <Dropdown.Trigger>
-              <Button isIconOnly variant="ghost" aria-label="颜色模式">
-                {theme === 'system' ? <Monitor size={18} /> : theme === 'light' ? <Sun size={18} /> : <Moon size={18} />}
-              </Button>
-            </Dropdown.Trigger>
-            <Dropdown.Popover>
-              <Dropdown.Menu
-                selectionMode="single"
-                selectedKeys={[theme]}
-                onAction={(key) => setTheme(String(key) as ThemeMode)}
-              >
-                <Dropdown.Item id="light" textValue="浅色">
-                  浅色
-                </Dropdown.Item>
-                <Dropdown.Item id="dark" textValue="深色">
-                  深色
-                </Dropdown.Item>
-                <Dropdown.Item id="system" textValue="跟随系统">
-                  跟随系统
-                </Dropdown.Item>
-              </Dropdown.Menu>
-            </Dropdown.Popover>
-          </Dropdown>
+          <ThemeSwitch />
           <Dropdown>
             <Dropdown.Trigger>
               <Button variant="ghost">

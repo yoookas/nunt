@@ -3,6 +3,7 @@ import { Button, Card, Typography } from '@heroui/react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { errorText } from '../api'
 import { isTOTPChallenge, useAuth, type AuthUser } from '../session'
+import ThemeSwitch from '../ThemeSwitch'
 import { TextInput, toast } from '../ui'
 
 export default function Login() {
@@ -94,7 +95,8 @@ export default function Login() {
   const secondStep = challenge !== ''
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+    <div className="relative flex min-h-screen items-center justify-center bg-background p-4">
+      <ThemeSwitch className="absolute right-3 top-3" />
       <Card className="w-full max-w-sm">
         <Card.Content className="p-6 sm:p-8">
           <div className="mb-6 flex items-center gap-2.5">
