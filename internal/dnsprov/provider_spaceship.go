@@ -148,6 +148,18 @@ func (p *spaceshipProvider) Set(ctx context.Context, rec Record) error {
 	}
 	name := spaceshipName(rec)
 	typ := strings.ToUpper(strings.TrimSpace(rec.Type))
+	if isTXT(rec) {
+		// TXT is a multi-value set: keep the other values at this name and add
+		// this one unless it is already there.
+		for _, item := range existing {
+			if matches(item, name, typ) && item.Address == rec.Value {
+				return nil
+			}
+		}
+		items := append(append([]spaceshipRecord{}, existing...),
+			spaceshipRecord{Type: typ, Name: name, TTL: rec.TTL, Address: rec.Value})
+		return p.put(ctx, zone, items)
+	}
 	items := make([]spaceshipRecord, 0, len(existing)+1)
 	for _, item := range existing {
 		if matches(item, name, typ) {
@@ -174,6 +186,11 @@ func (p *spaceshipProvider) Delete(ctx context.Context, rec Record) error {
 	items := make([]spaceshipRecord, 0, len(existing))
 	for _, item := range existing {
 		if matches(item, name, typ) {
+			if isTXT(rec) && item.Address != rec.Value {
+				// Another value at the same name belongs to a different
+				// challenge in the same order; keep it.
+				items = append(items, item)
+			}
 			continue
 		}
 		items = append(items, item)

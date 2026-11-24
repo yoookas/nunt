@@ -96,6 +96,31 @@ func TestSpaceshipSetKeepsOtherRecords(t *testing.T) {
 	}
 }
 
+func TestSpaceshipKeepsBothTXTValuesAtOneName(t *testing.T) {
+	f := &fakeSpaceship{}
+	p := newSpaceshipForTest(t, f)
+	first := Record{Domain: "example.com", SubDomain: "_acme-challenge", Type: "TXT", Value: "value-a"}
+	second := first
+	second.Value = "value-b"
+
+	if err := p.Set(context.Background(), first); err != nil {
+		t.Fatalf("set first: %v", err)
+	}
+	if err := p.Set(context.Background(), second); err != nil {
+		t.Fatalf("set second: %v", err)
+	}
+	if len(f.put) != 2 {
+		t.Fatalf("zone = %+v, want both TXT values", f.put)
+	}
+
+	if err := p.Delete(context.Background(), first); err != nil {
+		t.Fatalf("delete first: %v", err)
+	}
+	if len(f.put) != 1 || f.put[0].Address != "value-b" {
+		t.Fatalf("zone after delete = %+v", f.put)
+	}
+}
+
 func TestSpaceshipDeleteKeepsOtherRecords(t *testing.T) {
 	f := &fakeSpaceship{records: []spaceshipRecord{
 		{Type: "A", Name: "www", Address: "192.0.2.9"},

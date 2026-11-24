@@ -285,6 +285,37 @@ func TestTencentSetCreatesUpdatesAndSkipsUnchanged(t *testing.T) {
 	}
 }
 
+// An apex and its wildcard share the _acme-challenge host but need different
+// TXT values at the same time; the second write must add a record instead of
+// replacing the first one, and deletion must only remove the value it owns.
+func TestTencentKeepsBothTXTValuesAtOneName(t *testing.T) {
+	fake := &tencentFake{}
+	p := newTencentProvider(t, fake, 1700000000)
+	first := Record{Domain: "lcyk.cc", SubDomain: "_acme-challenge", Type: "TXT", Value: "value-a"}
+	second := first
+	second.Value = "value-b"
+
+	if err := p.Set(context.Background(), first); err != nil {
+		t.Fatalf("set first: %v", err)
+	}
+	if err := p.Set(context.Background(), second); err != nil {
+		t.Fatalf("set second: %v", err)
+	}
+	if len(fake.records) != 2 {
+		t.Fatalf("records = %+v, want both TXT values", fake.records)
+	}
+	if got := fake.actions(); got[len(got)-1] != "CreateRecord" {
+		t.Fatalf("the second value must be created, calls = %v", got)
+	}
+
+	if err := p.Delete(context.Background(), first); err != nil {
+		t.Fatalf("delete first: %v", err)
+	}
+	if len(fake.records) != 1 || fake.records[0].Value != "value-b" {
+		t.Fatalf("records after delete = %+v", fake.records)
+	}
+}
+
 // The dns-01 solver asks for a 60 second TTL, which a free DNSPod plan rejects
 // with LimitExceeded.RecordTtlLimit; the provider has to raise it to the
 // minimum the API accepts.

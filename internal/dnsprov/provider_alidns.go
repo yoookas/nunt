@@ -143,8 +143,8 @@ func pickAliDNSRecord(records []aliDNSRecord, rr, typ string) *aliDNSRecord {
 	return nil
 }
 
-// find returns the record that should be updated, if any.
-func (p *aliDNSProvider) find(ctx context.Context, rec Record) (*aliDNSRecord, error) {
+// records returns every record of the name and type.
+func (p *aliDNSProvider) records(ctx context.Context, rec Record) ([]aliDNSRecord, error) {
 	out, err := p.rpc(ctx, "DescribeSubDomainRecords", map[string]string{
 		"DomainName": rootDomain(rec.Domain),
 		"SubDomain":  rec.FQDN(),
@@ -154,14 +154,23 @@ func (p *aliDNSProvider) find(ctx context.Context, rec Record) (*aliDNSRecord, e
 	if err != nil {
 		return nil, err
 	}
-	return pickAliDNSRecord(out.Records.Record, recordName(rec), rec.Type), nil
+	return out.Records.Record, nil
+}
+
+// find returns the record that should be updated, if any.
+func (p *aliDNSProvider) find(ctx context.Context, rec Record) (*aliDNSRecord, error) {
+	records, err := p.records(ctx, rec)
+	if err != nil {
+		return nil, err
+	}
+	return pickAliDNSRecord(records, recordName(rec), rec.Type), nil
 }
 
 func (p *aliDNSProvider) Set(ctx context.Context, rec Record) error {
 	if strings.TrimSpace(rec.Value) == "" {
 		return fmt.Errorf("alidns: record value is empty")
 	}
-	existing, err := p.find(ctx, rec)
+	records, err := p.records(ctx, rec)
 	if err != nil {
 		return err
 	}
@@ -170,7 +179,7 @@ func (p *aliDNSProvider) Set(ctx context.Context, rec Record) error {
 	if line == "" {
 		line = "default"
 	}
-	if existing == nil {
+	add := func() error {
 		_, err := p.rpc(ctx, "AddDomainRecord", map[string]string{
 			"DomainName": rootDomain(rec.Domain),
 			"RR":         recordName(rec),
@@ -180,6 +189,20 @@ func (p *aliDNSProvider) Set(ctx context.Context, rec Record) error {
 			"Line":       line,
 		})
 		return err
+	}
+	if isTXT(rec) {
+		// A TXT name is a multi-value set: the apex and its wildcard share the
+		// name with different values, so the record is added, never updated.
+		for i := range records {
+			if strings.EqualFold(records[i].Type, "TXT") && records[i].Value == rec.Value {
+				return nil
+			}
+		}
+		return add()
+	}
+	existing := pickAliDNSRecord(records, recordName(rec), rec.Type)
+	if existing == nil {
+		return add()
 	}
 	if existing.Value == rec.Value {
 		return nil
@@ -196,15 +219,31 @@ func (p *aliDNSProvider) Set(ctx context.Context, rec Record) error {
 }
 
 func (p *aliDNSProvider) Delete(ctx context.Context, rec Record) error {
-	existing, err := p.find(ctx, rec)
+	records, err := p.records(ctx, rec)
 	if err != nil {
 		return err
 	}
-	if existing == nil {
+	targets := records
+	if isTXT(rec) {
+		// Only the value this caller wrote; another TXT record at the same
+		// name may belong to a different authorization.
+		targets = make([]aliDNSRecord, 0, len(records))
+		for i := range records {
+			if strings.EqualFold(records[i].Type, "TXT") && records[i].Value == rec.Value {
+				targets = append(targets, records[i])
+			}
+		}
+	} else if existing := pickAliDNSRecord(records, recordName(rec), rec.Type); existing != nil {
+		targets = []aliDNSRecord{*existing}
+	} else {
 		return nil
 	}
-	_, err = p.rpc(ctx, "DeleteDomainRecord", map[string]string{"RecordId": existing.RecordID})
-	return err
+	for _, item := range targets {
+		if _, err := p.rpc(ctx, "DeleteDomainRecord", map[string]string{"RecordId": item.RecordID}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // signAliyunRPC implements the Aliyun RPC signature version 1.0 (HMAC-SHA1).

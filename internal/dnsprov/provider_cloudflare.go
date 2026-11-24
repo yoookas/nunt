@@ -178,6 +178,16 @@ func (p *cloudflareProvider) Set(ctx context.Context, rec Record) error {
 	if err != nil {
 		return err
 	}
+	if isTXT(rec) {
+		// TXT is a multi-value set (apex and wildcard share the challenge
+		// name), so a missing value is added next to the others.
+		for _, item := range existing {
+			if item.Content == rec.Value {
+				return nil
+			}
+		}
+		return p.call(ctx, http.MethodPost, "/zones/"+url.PathEscape(zone)+"/dns_records", body, nil)
+	}
 	if len(existing) == 0 {
 		return p.call(ctx, http.MethodPost, "/zones/"+url.PathEscape(zone)+"/dns_records", body, nil)
 	}
@@ -202,6 +212,9 @@ func (p *cloudflareProvider) Delete(ctx context.Context, rec Record) error {
 		return err
 	}
 	for _, item := range existing {
+		if isTXT(rec) && item.Content != rec.Value {
+			continue
+		}
 		if err := p.call(ctx, http.MethodDelete, recordPath(zone, item.ID), nil, nil); err != nil {
 			return err
 		}

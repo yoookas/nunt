@@ -154,7 +154,7 @@ func (p *tencentProvider) call(ctx context.Context, action string, payload any) 
 
 // find returns the record of the given type and line, or nil when it does not
 // exist. A nil line matches the provider default line.
-func (p *tencentProvider) find(ctx context.Context, domain, sub, typ, line string) (*tencentRecord, error) {
+func (p *tencentProvider) list(ctx context.Context, domain, sub, typ, line string) ([]tencentRecord, error) {
 	out, err := p.call(ctx, "DescribeRecordList", map[string]any{
 		"Domain":     domain,
 		"Subdomain":  sub,
@@ -164,6 +164,7 @@ func (p *tencentProvider) find(ctx context.Context, domain, sub, typ, line strin
 	if err != nil {
 		return nil, err
 	}
+	matched := make([]tencentRecord, 0, len(out.Response.RecordList))
 	for i := range out.Response.RecordList {
 		item := out.Response.RecordList[i]
 		if !strings.EqualFold(item.Type, typ) {
@@ -172,9 +173,17 @@ func (p *tencentProvider) find(ctx context.Context, domain, sub, typ, line strin
 		if line != "" && item.Line != "" && item.Line != line {
 			continue
 		}
-		return &item, nil
+		matched = append(matched, item)
 	}
-	return nil, nil
+	return matched, nil
+}
+
+func (p *tencentProvider) find(ctx context.Context, domain, sub, typ, line string) (*tencentRecord, error) {
+	items, err := p.list(ctx, domain, sub, typ, line)
+	if err != nil || len(items) == 0 {
+		return nil, err
+	}
+	return &items[0], nil
 }
 
 // tencentMinTTL is the lowest TTL DNSPod accepts for a free plan domain. The
@@ -202,11 +211,19 @@ func (p *tencentProvider) Set(ctx context.Context, rec Record) error {
 	if line == "" {
 		line = "默认"
 	}
-	existing, err := p.find(ctx, domain, sub, typ, line)
+	existing, err := p.list(ctx, domain, sub, typ, line)
 	if err != nil {
 		return err
 	}
-	if existing != nil && existing.Value == rec.Value {
+	if isTXT(rec) {
+		// A TXT name holds a set of values; only skip when this exact value is
+		// already present, otherwise add it next to the others.
+		for i := range existing {
+			if existing[i].Value == rec.Value {
+				return nil
+			}
+		}
+	} else if len(existing) > 0 && existing[0].Value == rec.Value {
 		return nil
 	}
 	// Note the capital D: CreateRecord and ModifyRecord expect "SubDomain",
@@ -220,29 +237,42 @@ func (p *tencentProvider) Set(ctx context.Context, rec Record) error {
 		"Value":      rec.Value,
 		"TTL":        tencentTTL(rec),
 	}
-	if existing == nil {
+	if isTXT(rec) || len(existing) == 0 {
 		_, err = p.call(ctx, "CreateRecord", payload)
 		return err
 	}
-	payload["RecordId"] = existing.RecordID
+	payload["RecordId"] = existing[0].RecordID
 	_, err = p.call(ctx, "ModifyRecord", payload)
 	return err
 }
 
 func (p *tencentProvider) Delete(ctx context.Context, rec Record) error {
+	domain := rootDomain(rec.Domain)
 	line := strings.TrimSpace(rec.Line)
-	existing, err := p.find(ctx, rootDomain(rec.Domain), recordName(rec), normalizeType(rec.Type), line)
+	existing, err := p.list(ctx, domain, recordName(rec), normalizeType(rec.Type), line)
 	if err != nil {
 		return err
 	}
-	if existing == nil {
-		return nil
+	targets := existing
+	if isTXT(rec) {
+		// Only the value this caller wrote: another TXT record at the same name
+		// may belong to a different authorization in the same order.
+		targets = targets[:0]
+		for i := range existing {
+			if existing[i].Value == rec.Value {
+				targets = append(targets, existing[i])
+			}
+		}
 	}
-	_, err = p.call(ctx, "DeleteRecord", map[string]any{
-		"Domain":   rootDomain(rec.Domain),
-		"RecordId": existing.RecordID,
-	})
-	return err
+	for _, item := range targets {
+		if _, err := p.call(ctx, "DeleteRecord", map[string]any{
+			"Domain":   domain,
+			"RecordId": item.RecordID,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // tc3Authorization builds the Authorization header of a Tencent Cloud API 3.0

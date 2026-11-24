@@ -242,6 +242,15 @@ func absoluteName(rec Record) string {
 }
 
 // ttlOr returns the record TTL, or fallback when unset.
+// isTXT reports whether the record is a TXT record. TXT records are a
+// multi-value set: the dns-01 challenge for a name and its wildcard writes two
+// different values at the same _acme-challenge host, and both must exist at
+// the same time. Writing a TXT value therefore means "add this value", never
+// "replace whatever is there".
+func isTXT(rec Record) bool {
+	return strings.EqualFold(strings.TrimSpace(rec.Type), "TXT")
+}
+
 func ttlOr(rec Record, fallback int) int {
 	if rec.TTL > 0 {
 		return rec.TTL

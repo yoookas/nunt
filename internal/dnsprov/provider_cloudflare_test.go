@@ -151,6 +151,31 @@ func TestCloudflareCreatesAndUpdatesRecords(t *testing.T) {
 	}
 }
 
+func TestCloudflareKeepsBothTXTValuesAtOneName(t *testing.T) {
+	fake := &fakeCloudflare{zones: []cloudflareZone{{ID: "z1", Name: "example.com"}}}
+	p := newCloudflareForTest(t, fake)
+	first := Record{Domain: "example.com", SubDomain: "_acme-challenge", Type: "TXT", Value: "value-a"}
+	second := first
+	second.Value = "value-b"
+
+	if err := p.Set(context.Background(), first); err != nil {
+		t.Fatalf("set first: %v", err)
+	}
+	if err := p.Set(context.Background(), second); err != nil {
+		t.Fatalf("set second: %v", err)
+	}
+	if len(fake.records) != 2 {
+		t.Fatalf("records = %+v, want both TXT values", fake.records)
+	}
+
+	if err := p.Delete(context.Background(), first); err != nil {
+		t.Fatalf("delete first: %v", err)
+	}
+	if len(fake.records) != 1 || fake.records[0].Content != "value-b" {
+		t.Fatalf("records after delete = %+v", fake.records)
+	}
+}
+
 func TestCloudflareZoneLookupWalksUp(t *testing.T) {
 	f := &fakeCloudflare{zones: []cloudflareZone{{ID: "zone-1", Name: "example.com"}}}
 	p := newCloudflareForTest(t, f)
