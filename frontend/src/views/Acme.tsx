@@ -775,25 +775,11 @@ export default function Acme() {
         }
       />
 
-      <Tabs defaultSelectedKey="jobs" className="w-full">
+      <Tabs defaultSelectedKey="certs" className="w-full">
         <Tabs.List aria-label="证书分类">
-          <Tabs.Tab id="jobs">证书任务</Tabs.Tab>
           <Tabs.Tab id="certs">证书仓库</Tabs.Tab>
+          <Tabs.Tab id="jobs">证书任务</Tabs.Tab>
         </Tabs.List>
-        <Tabs.Panel id="jobs" className="pt-4">
-        <Panel
-          title="证书任务"
-          extra={<span className="text-xs text-muted">自动续期只在任务启用时参与</span>}
-        >
-          <DataTable
-            items={jobs}
-            columns={jobColumns}
-            rowKey={(row) => row.id}
-            ariaLabel="证书任务"
-            empty="还没有证书任务，点右上角「新建任务」创建"
-          />
-        </Panel>
-        </Tabs.Panel>
         <Tabs.Panel id="certs" className="pt-4">
         <Panel
           title="证书仓库"
@@ -805,6 +791,20 @@ export default function Acme() {
             rowKey={(row) => row.id}
             ariaLabel="证书仓库"
             empty="证书仓库为空"
+          />
+        </Panel>
+        </Tabs.Panel>
+        <Tabs.Panel id="jobs" className="pt-4">
+        <Panel
+          title="证书任务"
+          extra={<span className="text-xs text-muted">自动续期只在任务启用时参与</span>}
+        >
+          <DataTable
+            items={jobs}
+            columns={jobColumns}
+            rowKey={(row) => row.id}
+            ariaLabel="证书任务"
+            empty="还没有证书任务，点右上角「新建任务」创建"
           />
         </Panel>
         </Tabs.Panel>
