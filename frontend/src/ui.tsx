@@ -133,14 +133,16 @@ export function StatCard({
         {icon ? <div className="shrink-0 rounded-md bg-default p-1.5 text-foreground">{icon}</div> : null}
         <div className="min-w-0 flex-1">
           <div className="truncate text-[11px] leading-4 text-muted">{label}</div>
-          <div className="flex flex-col sm:flex-row sm:items-baseline sm:gap-2">
-            <span className="truncate text-base font-semibold leading-5">{value}</span>
-            {hint ? (
-              <span className="truncate text-[11px] leading-4 text-muted" title={typeof hint === 'string' ? hint : undefined}>
-                {hint}
-              </span>
-            ) : null}
+          {/* The value owns its line: sharing it with the hint made the two
+              fight for width and clipped the value ("49 …"). */}
+          <div className="truncate text-base font-semibold leading-5" title={typeof value === 'string' ? value : undefined}>
+            {value}
           </div>
+          {hint ? (
+            <div className="truncate text-[11px] leading-4 text-muted" title={typeof hint === 'string' ? hint : undefined}>
+              {hint}
+            </div>
+          ) : null}
         </div>
       </Card.Content>
     </Card>

@@ -102,7 +102,6 @@ export default function AppLayout() {
           </Button>
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold">{current?.title || '概览'}</div>
-            <div className="truncate text-[11px] text-muted">nunt 管理后台</div>
           </div>
           <div className="flex-1" />
           {problems.length > 0 ? (
