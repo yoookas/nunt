@@ -6,6 +6,7 @@ import {
   Card,
   Chip,
   Description,
+  Dropdown,
   EmptyState,
   Input,
   Label,
@@ -767,62 +768,49 @@ export function MultiSelectInput({
   placeholder?: string
   hint?: ReactNode
 }) {
-  const [open, setOpen] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [open])
-
-  const toggle = (item: string) => {
-    onChange(value.includes(item) ? value.filter((entry) => entry !== item) : [...value, item])
-  }
-
+  // A Dropdown with a multiple-selection menu: the popover is portalled and
+  // collision aware, so it is never clipped by the scrolling form body. The
+  // menu stays open while items are toggled.
   return (
-    <div className="flex flex-col gap-1.5" ref={rootRef}>
+    <div className="flex flex-col gap-1.5">
       {label ? <span className="text-sm font-medium">{label}</span> : null}
-      <div className="relative">
-        <button
-          type="button"
-          onClick={() => setOpen((prev) => !prev)}
-          className="flex min-h-9 w-full flex-wrap items-center gap-1 rounded-lg border border-border bg-surface px-2 py-1 text-left text-sm"
-        >
+      <Dropdown>
+        <Dropdown.Trigger className="flex min-h-9 w-full flex-wrap items-center gap-1 rounded-lg border border-border bg-surface px-2 py-1 text-left text-sm">
           {value.length === 0 ? (
             <span className="text-muted">{placeholder}</span>
           ) : (
-            value.map((item) => (
-              <Tag key={item}>{item}</Tag>
-            ))
+            value.map((item) => <Tag key={item}>{item}</Tag>)
           )}
           <ChevronDown size={14} className="ml-auto text-muted" />
-        </button>
-        {open ? (
-          <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-border bg-overlay p-1 shadow-lg">
+        </Dropdown.Trigger>
+        <Dropdown.Popover className="w-64 p-1">
+          <Dropdown.Menu
+            selectionMode="multiple"
+            selectedKeys={new Set(value)}
+            shouldCloseOnSelect={false}
+            onSelectionChange={(keys) => {
+              if (keys === 'all') {
+                onChange(options.map((option) => option.value))
+                return
+              }
+              onChange([...keys].map(String))
+            }}
+            className="max-h-64 overflow-auto"
+          >
             {options.length === 0 ? (
-              <div className="px-2 py-3 text-xs text-muted">没有可选项</div>
+              <Dropdown.Item id="__empty" textValue="没有可选项" isDisabled>
+                没有可选项
+              </Dropdown.Item>
             ) : (
               options.map((option) => (
-                <label
-                  key={option.value}
-                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-default"
-                >
-                  <input
-                    type="checkbox"
-                    checked={value.includes(option.value)}
-                    onChange={() => toggle(option.value)}
-                  />
-                  <span>{option.label}</span>
-                </label>
+                <Dropdown.Item key={option.value} id={option.value} textValue={option.label}>
+                  {option.label}
+                </Dropdown.Item>
               ))
             )}
-          </div>
-        ) : null}
-      </div>
+          </Dropdown.Menu>
+        </Dropdown.Popover>
+      </Dropdown>
       {hint ? <span className="field-hint">{hint}</span> : null}
     </div>
   )

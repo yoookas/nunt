@@ -169,7 +169,18 @@ export default function Web() {
   }
 
   const rowCell = (listener: WebListenerView, content: ReactNode) => (
-    <div className="cursor-pointer" onClick={() => selectListener(listener)}>
+    <div
+      role="button"
+      tabIndex={0}
+      className="cursor-pointer rounded focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+      onClick={() => selectListener(listener)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          selectListener(listener)
+        }
+      }}
+    >
       {content}
     </div>
   )
@@ -541,6 +552,7 @@ export default function Web() {
             {listeners.length > 0 ? (
               <button
                 type="button"
+                aria-pressed={selectedListenerId === 'all'}
                 onClick={() => setSelectedListenerId('all')}
                 className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition-colors ${
                   selectedListenerId === 'all'
@@ -567,6 +579,7 @@ export default function Web() {
                   <button
                     type="button"
                     className="w-full text-left"
+                    aria-pressed={active}
                     onClick={() => selectListener(listener)}
                   >
                     <div className="flex items-center justify-between gap-2">
