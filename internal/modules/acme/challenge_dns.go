@@ -18,8 +18,10 @@ import (
 var (
 	defaultDNSResolvers = []string{"1.1.1.1:53", "8.8.8.8:53", "223.5.5.5:53"}
 	dnsWaitWindow       = 5 * time.Minute
-	dnsPollInterval     = 5 * time.Second
-	dnsQueryTimeout     = 5 * time.Second
+	// certmagic polls every two seconds; the shorter interval finds a record
+	// that is already served much sooner and keeps the whole issuance short.
+	dnsPollInterval = 2 * time.Second
+	dnsQueryTimeout = 5 * time.Second
 )
 
 // startDNS01 creates the _acme-challenge TXT record, waits for it to propagate
