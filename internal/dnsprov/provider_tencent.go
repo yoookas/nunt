@@ -26,6 +26,11 @@ const (
 	// tencentContentType is both sent and signed; the API rejects a different
 	// value in the canonical request.
 	tencentContentType = "application/json"
+	// tencentNoDataCode is how DNSPod answers a DescribeRecordList for a name
+	// that has no records yet: an error inside a 200 response. It is not a
+	// failure, it means "the list is empty".
+	tencentNoDataCode = "ResourceNotFound.NoDataOfRecord"
+
 	// tencentSignedHeaders lists the headers covered by the signature. The
 	// official SDK signs exactly these two; X-TC-Action travels unsigned. It
 	// used to be listed here without being part of the canonical headers,
@@ -133,6 +138,14 @@ func (p *tencentProvider) call(ctx context.Context, action string, payload any) 
 		return nil, fmt.Errorf("tencent %s: %w", action, err)
 	}
 	if out.Response.Error != nil {
+		if out.Response.Error.Code == tencentNoDataCode {
+			// The first issuance for a name always lands here: the API reports
+			// the empty list as an error. Treat it as "no record found" so the
+			// caller creates the TXT record instead of failing the renewal.
+			out.Response.Error = nil
+			out.Response.RecordList = nil
+			return &out, nil
+		}
 		return nil, fmt.Errorf("tencent %s failed: %s %s", action,
 			out.Response.Error.Code, sanitize(out.Response.Error.Message, p.creds, summaryLimit))
 	}

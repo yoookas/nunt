@@ -85,7 +85,29 @@ func (f *tencentFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	resp := map[string]any{"RequestId": "test-request"}
 	if call.Action == "DescribeRecordList" {
-		resp["RecordList"] = records
+		// Mirror the real API: it filters by name and type, and reports an
+		// empty result as an error (ResourceNotFound.NoDataOfRecord) inside a
+		// 200 response. That detail is what broke the first TXT record.
+		sub := str(payload["Subdomain"])
+		typ := str(payload["RecordType"])
+		matched := make([]tencentRecord, 0, len(records))
+		for _, rec := range records {
+			if sub != "" && !strings.EqualFold(rec.Name, sub) {
+				continue
+			}
+			if typ != "" && !strings.EqualFold(rec.Type, typ) {
+				continue
+			}
+			matched = append(matched, rec)
+		}
+		if len(matched) == 0 {
+			resp["Error"] = map[string]any{
+				"Code":    tencentNoDataCode,
+				"Message": "记录列表为空。",
+			}
+		} else {
+			resp["RecordList"] = matched
+		}
 	} else {
 		resp["RecordId"] = f.nextID
 	}
@@ -234,6 +256,25 @@ func TestTencentSetCreatesUpdatesAndSkipsUnchanged(t *testing.T) {
 	}
 	if fake.records[0].Value != "9.9.9.9" {
 		t.Fatalf("stored value = %q", fake.records[0].Value)
+	}
+}
+
+// The first record for a name makes the API answer DescribeRecordList with
+// ResourceNotFound.NoDataOfRecord; that must read as "no record yet" and the
+// provider has to create it instead of failing the challenge.
+func TestTencentCreatesWhenTheRecordListIsEmpty(t *testing.T) {
+	fake := &tencentFake{}
+	p := newTencentProvider(t, fake, 1700000000)
+	rec := Record{Domain: "cykk.site", SubDomain: "_acme-challenge", Type: "TXT", Value: "challenge-token"}
+	if err := p.Set(context.Background(), rec); err != nil {
+		t.Fatalf("creating the first record failed: %v", err)
+	}
+	actions := fake.actions()
+	if len(actions) != 2 || actions[0] != "DescribeRecordList" || actions[1] != "CreateRecord" {
+		t.Fatalf("calls = %v, want a lookup followed by a create", actions)
+	}
+	if len(fake.records) != 1 || fake.records[0].Value != "challenge-token" {
+		t.Fatalf("records = %+v", fake.records)
 	}
 }
 
