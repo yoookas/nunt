@@ -19,7 +19,7 @@
 
 ---
 
-## S0 · 发布（v1.0.0-rc8）
+## S0 · 发布（v1.0.0-rc9）
 
 目标：把当前改动变成一次可重复、可回滚的发布。**不新增任何功能。**
 
@@ -30,7 +30,7 @@
 | 3 | 偶发失败的端口复用测试 | ✅ 完成 | 测试改用 20000–31999 的非临时端口，避开与并行包争抢 |
 | 4 | 提交与推送 | ✅ 完成 | 凭证已配好，`main` 与远端同步 |
 | 5 | 等 `ci.yml` + `docker-smoke` 绿 | ✅ 完成 | rc1 / rc2 两个 tag 上均全绿；镜像构建、健康检查、compose、Trivy 基线都真跑过 |
-| 6 | 打 tag 并推送 | 🟡 进行中 | rc1–rc7 已发布；rc8 按同一流程：push main → 等 CI → tag；tag 名必须是 `vX.Y.Z-rcN`（点号分隔的 `v1.0.0.rc1` 会被版本校验拒绝） |
+| 6 | 打 tag 并推送 | 🟡 进行中 | rc1–rc8 已发布；rc9 按同一流程：push main → 等 CI → tag；tag 名必须是 `vX.Y.Z-rcN`（点号分隔的 `v1.0.0.rc1` 会被版本校验拒绝） |
 
 **验收**：Release 页出现一次 Pre-release，附件为三个单架构归档 + 一个 OCI 归档 + `SHA256SUMS`（四个归档都有校验和）；`docker load` 一份并 `docker compose up -d` 能起来，`nunt healthcheck` 返回 0。
 
