@@ -120,7 +120,7 @@ async function copyLogJSON(item: LogEntry | null): Promise<void> {
     null,
     2,
   )
-  if (await copyText(text)) {
+  if (copyText(text)) {
     toast.success('已复制 JSON')
   } else {
     toast.danger('复制失败，请手动选择文本')

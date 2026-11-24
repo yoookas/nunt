@@ -43,7 +43,7 @@ function QRCode({ text }: { text: string }) {
 type Flow = '' | 'password' | 'scan' | 'codes' | 'disable' | 'regen'
 
 const copy = async (text: string, label: string) => {
-  if (await copyText(text)) {
+  if (copyText(text)) {
     toast.success(`${label}已复制`)
   } else {
     toast.danger('复制失败，请手动选择文本')

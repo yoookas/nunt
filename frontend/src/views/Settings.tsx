@@ -601,7 +601,7 @@ export default function Settings() {
   }
 
   const copyRawConfig = async () => {
-    const ok = await copyText(rawDialog.text)
+    const ok = copyText(rawDialog.text)
     if (ok) toast.success('已复制到剪贴板')
     else toast.danger('复制失败，请手动选择文本')
   }

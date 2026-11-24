@@ -1,31 +1,31 @@
 /**
  * Copy text to the clipboard.
  *
- * The async clipboard API only exists in a secure context, and the console is
- * often served over plain HTTP on a LAN address. The deprecated execCommand
- * path still works there, so it is the fallback instead of an error toast that
- * tells the operator to select the text by hand.
+ * One path only: the temporary textarea plus execCommand('copy'). The console
+ * usually runs over plain HTTP on a LAN address, where the async clipboard API
+ * does not exist, so using it would mean carrying two implementations for the
+ * same button. execCommand is deprecated but every current browser still
+ * supports it, and it runs synchronously inside the click handler, which is
+ * what Safari requires anyway.
  */
-export async function copyText(text: string): Promise<boolean> {
+export function copyText(text: string): boolean {
+  const area = document.createElement('textarea')
+  area.value = text
+  area.setAttribute('readonly', '')
+  area.style.position = 'fixed'
+  area.style.top = '0'
+  area.style.left = '0'
+  area.style.opacity = '0'
+  document.body.appendChild(area)
+  // iOS only copies a selection that belongs to a focused field.
+  area.focus()
+  area.select()
+  area.setSelectionRange(0, area.value.length)
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text)
-      return true
-    }
-  } catch {
-    /* fall through to the execCommand path */
-  }
-  try {
-    const area = document.createElement('textarea')
-    area.value = text
-    area.style.position = 'fixed'
-    area.style.opacity = '0'
-    document.body.appendChild(area)
-    area.select()
-    const ok = document.execCommand('copy')
-    area.remove()
-    return ok
+    return document.execCommand('copy')
   } catch {
     return false
+  } finally {
+    area.remove()
   }
 }
