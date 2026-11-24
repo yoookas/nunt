@@ -13,11 +13,10 @@ import (
 	"github.com/nunt/nunt/internal/dnsprov"
 )
 
-// DNS-01 tuning. defaultDNSResolvers are public resolvers used to confirm that
-// a TXT record has propagated before the CA is asked to validate it.
+// DNS-01 tuning. Propagation is checked against the zone's authoritative
+// nameservers unless the job names its own resolvers.
 var (
-	defaultDNSResolvers = []string{"1.1.1.1:53", "8.8.8.8:53", "223.5.5.5:53"}
-	dnsWaitWindow       = 5 * time.Minute
+	dnsWaitWindow = 5 * time.Minute
 	// certmagic polls every two seconds; the shorter interval finds a record
 	// that is already served much sooner and keeps the whole issuance short.
 	dnsPollInterval = 2 * time.Second
@@ -76,11 +75,7 @@ func (a *ACME) startDNS01(ctx context.Context, client *acme.Client, chal *acme.C
 		return nil, fmt.Errorf("create TXT record %s at %s: %w", writeName, req.dnsProvider, err)
 	}
 
-	resolvers := req.dnsResolvers
-	if len(resolvers) == 0 {
-		resolvers = defaultDNSResolvers
-	}
-	waitErr := waitForTXT(ownCtx, resolver, zone, resolvers, writeName, value)
+	waitErr := waitForTXT(ownCtx, resolver, zone, req.dnsResolvers, writeName, value)
 	if waitErr != nil {
 		removeCtx, removeCancel := context.WithTimeout(context.Background(), time.Minute)
 		if derr := provider.Delete(removeCtx, record); derr != nil {
@@ -195,13 +190,21 @@ func splitZone(ctx context.Context, resolver *net.Resolver, name string) (string
 // the answer for its TTL, and the minimum TTL DNSPod accepts is 600 seconds. A
 // second TXT value at the same name (an apex and its wildcard) therefore stays
 // invisible to those resolvers for up to ten minutes while the authoritative
-// servers already serve it. The authoritative servers are asked first and are
-// enough on their own; the configured resolvers are only a fallback for zones
-// whose nameservers cannot be resolved.
-func waitForTXT(ctx context.Context, zoneResolver *net.Resolver, zone string, resolvers []string, name, want string) error {
+// servers already serve it.
+//
+// A job that names its own resolvers (split horizon, or an environment where
+// the authoritative servers are not reachable) is checked against those
+// instead, exactly like certmagic's Resolvers option. Without them the
+// authoritative servers are the only check: a zone whose nameservers cannot be
+// resolved fails here rather than being waved through by a cache.
+func waitForTXT(ctx context.Context, zoneResolver *net.Resolver, zone string, custom []string, name, want string) error {
 	deadline := time.Now().Add(dnsWaitWindow)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
+	}
+
+	if len(custom) > 0 {
+		return waitForTXTOn(ctx, normalizeResolvers(custom), name, want, deadline, "配置的解析器")
 	}
 
 	if zoneResolver == nil {
@@ -210,15 +213,13 @@ func waitForTXT(ctx context.Context, zoneResolver *net.Resolver, zone string, re
 	lookupCtx, cancel := context.WithTimeout(ctx, dnsQueryTimeout)
 	authoritative, err := authoritativeServers(lookupCtx, zoneResolver, zone)
 	cancel()
-	if err == nil && len(authoritative) > 0 {
-		return waitForTXTOn(ctx, authoritative, name, want, deadline, "权威服务器")
+	if err != nil {
+		return fmt.Errorf("cannot resolve the authoritative nameservers of %s: %w", zone, err)
 	}
-
-	servers := normalizeResolvers(resolvers)
-	if len(servers) == 0 {
-		servers = normalizeResolvers(defaultDNSResolvers)
+	if len(authoritative) == 0 {
+		return fmt.Errorf("no authoritative nameserver answered for %s", zone)
 	}
-	return waitForTXTOn(ctx, servers, name, want, deadline, "解析器")
+	return waitForTXTOn(ctx, authoritative, name, want, deadline, "权威服务器")
 }
 
 // waitForTXTOn polls the given servers until one of them answers the expected

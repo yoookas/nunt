@@ -49,17 +49,8 @@ func TestNormalizeResolvers(t *testing.T) {
 	}
 }
 
-// TestDefaultResolversAreUsable makes sure every built in resolver is a valid
-// host:port address.
-func TestDefaultResolversAreUsable(t *testing.T) {
-	if len(defaultDNSResolvers) == 0 {
-		t.Fatal("no default DNS resolver configured")
-	}
-	for _, server := range defaultDNSResolvers {
-		if !strings.Contains(server, ":") {
-			t.Fatalf("default resolver %q has no port", server)
-		}
-	}
+// TestDNSTimingsAreUsable keeps the wait parameters in a sane relation.
+func TestDNSTimingsAreUsable(t *testing.T) {
 	if dnsWaitWindow <= 0 || dnsPollInterval <= 0 || dnsQueryTimeout <= 0 {
 		t.Fatal("the dns-01 timings must be positive")
 	}

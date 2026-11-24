@@ -939,7 +939,7 @@ export default function Acme() {
                 }
                 rows={2}
                 placeholder={'每行一个，例如：\n1.1.1.1:53\n8.8.8.8:53'}
-                hint="校验 TXT 记录时使用的解析服务器，留空使用系统默认"
+                hint="留空时直接检查域名的权威服务器；填写后改为检查这些解析服务器"
               />
               ) : null}
             </>
