@@ -1,5 +1,7 @@
 // Package ip2region wraps the ip2region xdb database: it answers which
-// country/province an address belongs to.
+// country, province and city an address belongs to. The official v4/v6 files
+// store country|province|city|isp|country-code; reserved ranges have no
+// geography.
 //
 // The upstream searcher is not safe for concurrent use, so every lookup is
 // serialised. A database of a few megabytes lives in memory, which keeps a
@@ -24,9 +26,10 @@ var ErrUnavailable = errors.New("ip2region database is not available")
 
 // Record is one decoded ip2region row:
 // country|region|province|city|isp.
+// Record is one decoded row of the official database layout:
+// country|province|city|isp|country-code.
 type Record struct {
 	Country  string `json:"country"`
-	Region   string `json:"region"`
 	Province string `json:"province"`
 	City     string `json:"city"`
 	ISP      string `json:"isp"`
@@ -284,24 +287,14 @@ func load(family int, path string, info os.FileInfo) (*dataset, Status, error) {
 func ParseRegion(raw string) Record {
 	out := Record{Raw: raw}
 	parts := strings.Split(raw, "|")
-	if len(parts) == 0 {
+	if len(parts) < 3 {
 		return out
 	}
-	// The current official v4/v6 databases store
-	// country|province|city|isp|country-code, while older databases store
-	// country|region|province|city|isp. The ISO code in the last field is the
-	// discriminator; reserved ranges end in "0" and match neither layout, so
-	// they fall through to the legacy mapping and are emptied below.
-	if len(parts) >= 5 && isCountryCode(parts[4]) {
-		out.Country = cleanField(parts[0])
-		out.Province = cleanField(parts[1])
-		out.City = cleanField(parts[2])
+	out.Country = cleanField(parts[0])
+	out.Province = cleanField(parts[1])
+	out.City = cleanField(parts[2])
+	if len(parts) > 3 {
 		out.ISP = cleanField(parts[3])
-		return out
-	}
-	fields := []*string{&out.Country, &out.Region, &out.Province, &out.City, &out.ISP}
-	for i := 0; i < len(fields) && i < len(parts); i++ {
-		*fields[i] = cleanField(parts[i])
 	}
 	return out
 }
@@ -315,15 +308,6 @@ func cleanField(value string) string {
 		return ""
 	}
 	return value
-}
-
-// isCountryCode reports whether the value looks like the ISO country code of
-// the current database layout (CN, AU, GB, ...).
-func isCountryCode(value string) bool {
-	value = strings.TrimSpace(value)
-	return len(value) == 2 &&
-		value[0] >= 'A' && value[0] <= 'Z' &&
-		value[1] >= 'A' && value[1] <= 'Z'
 }
 
 var provinceNames = []string{

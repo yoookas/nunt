@@ -16,7 +16,6 @@ interface DbStatus {
 
 interface LookupRecord {
   country?: string
-  region?: string
   province?: string
   provinceNormalized?: string
   city?: string

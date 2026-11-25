@@ -172,7 +172,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		rest.Fail(w, http.StatusBadRequest, "管理后台 IP 白名单不合法：%s", err)
 		return
 	}
-	// The address database has its own endpoint (PUT /system/ip2region) and is
+	// The address database has its own endpoint (upload) and is
 	// no longer edited by the system form. The update below replaces the whole
 	// SystemConfig, so an omitted field would silently wipe the database path.
 	req.IP2RegionDB = s.opts.Cfg.Snapshot().System.IP2RegionDB
@@ -707,7 +707,6 @@ func (s *Server) handleIP2RegionLookup(w http.ResponseWriter, r *http.Request) {
 	rest.OK(w, map[string]any{
 		"ip":                 ip.String(),
 		"country":            record.Country,
-		"region":             record.Region,
 		"province":           record.Province,
 		"provinceNormalized": ip2region.NormalizeProvince(record.Province),
 		"city":               record.City,

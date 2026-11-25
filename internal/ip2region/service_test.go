@@ -14,15 +14,14 @@ func TestParseRegion(t *testing.T) {
 		raw  string
 		want Record
 	}{
-		{"中国|0|浙江省|杭州市|电信", Record{Country: "中国", Province: "浙江省", City: "杭州市", ISP: "电信", Raw: "中国|0|浙江省|杭州市|电信"}},
-		{"0|0|0|0|0", Record{Raw: "0|0|0|0|0"}},
-		{"", Record{}},
-		{"美国|0|加利福尼亚州|洛杉矶|0", Record{Country: "美国", Province: "加利福尼亚州", City: "洛杉矶", Raw: "美国|0|加利福尼亚州|洛杉矶|0"}},
-		// Current official layout: country|province|city|isp|ISO code.
+		// Official layout: country|province|city|isp|ISO code.
 		{"中国|江苏省|南京市|南京新锋信息|CN", Record{Country: "中国", Province: "江苏省", City: "南京市", ISP: "南京新锋信息", Raw: "中国|江苏省|南京市|南京新锋信息|CN"}},
+		{"中国|浙江省|杭州市|阿里|CN", Record{Country: "中国", Province: "浙江省", City: "杭州市", ISP: "阿里", Raw: "中国|浙江省|杭州市|阿里|CN"}},
 		{"Australia|Queensland|Brisbane|0|AU", Record{Country: "Australia", Province: "Queensland", City: "Brisbane", Raw: "Australia|Queensland|Brisbane|0|AU"}},
 		// Reserved ranges have no geography at all.
 		{"Reserved|Reserved|Reserved|0|0", Record{Raw: "Reserved|Reserved|Reserved|0|0"}},
+		{"0|0|0|0|0", Record{Raw: "0|0|0|0|0"}},
+		{"", Record{}},
 	}
 	for _, tc := range cases {
 		if got := ParseRegion(tc.raw); got != tc.want {
@@ -185,7 +184,7 @@ func writeRegionXDBv6(t *testing.T, region string, lo, hi net.IP) string {
 }
 
 func TestIPv6DatabaseIsUsedForIPv6Only(t *testing.T) {
-	path := writeRegionXDBv6(t, "中国|0|浙江省|杭州市|电信",
+	path := writeRegionXDBv6(t, "中国|浙江省|杭州市|电信|CN",
 		net.ParseIP("2400:3200::"), net.ParseIP("2400:3200::ffff"))
 	s := New()
 	if err := s.Configure(Paths{V6: path}); err != nil {
