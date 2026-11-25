@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Alert, Button, Switch } from '@heroui/react'
+import { Alert, Button, Dropdown, Switch } from '@heroui/react'
 import { api, errorText } from '../api'
+import { Ellipsis, FileText, Pencil, Trash2 } from 'lucide-react'
 import { fmtBytes, fmtTime, splitLines } from '../format'
 import { usePolling } from '../usePolling'
 import { useProvinces } from '../useProvinces'
@@ -600,18 +601,37 @@ export default function Forward() {
     {
       key: 'actions',
       title: '操作',
+      className: 'w-16',
       render: (row) => (
-        <div className="flex flex-wrap gap-1">
-          <Button size="sm" variant="tertiary" onPress={() => openLogsFor(row)}>
-            日志
-          </Button>
-          <Button size="sm" variant="tertiary" onPress={() => openEdit(row)}>
-            编辑
-          </Button>
-          <Button size="sm" variant="danger-soft" onPress={() => setDeleteTarget(row)}>
-            删除
-          </Button>
-        </div>
+        <Dropdown>
+          <Dropdown.Trigger>
+            <Button isIconOnly size="sm" variant="ghost" aria-label={`规则操作 ${row.name || row.id}`}>
+              <Ellipsis size={16} />
+            </Button>
+          </Dropdown.Trigger>
+          <Dropdown.Popover>
+            <Dropdown.Menu
+              onAction={(key) => {
+                if (key === 'logs') openLogsFor(row)
+                if (key === 'edit') openEdit(row)
+                if (key === 'delete') setDeleteTarget(row)
+              }}
+            >
+              <Dropdown.Item id="logs" textValue="查看日志">
+                <FileText size={14} className="mr-2 inline" />
+                查看日志
+              </Dropdown.Item>
+              <Dropdown.Item id="edit" textValue="编辑规则">
+                <Pencil size={14} className="mr-2 inline" />
+                编辑规则
+              </Dropdown.Item>
+              <Dropdown.Item id="delete" textValue="删除规则">
+                <Trash2 size={14} className="mr-2 inline" />
+                删除规则
+              </Dropdown.Item>
+            </Dropdown.Menu>
+          </Dropdown.Popover>
+        </Dropdown>
       ),
     },
   ]
