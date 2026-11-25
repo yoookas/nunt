@@ -291,6 +291,7 @@ export default function Web() {
     {
       key: 'site',
       title: '站点',
+      className: 'w-auto',
       render: (row) => {
         const domains = Array.isArray(row.domains) ? row.domains : []
         return (
@@ -323,25 +324,22 @@ export default function Web() {
       },
     },
     {
-      key: 'type',
-      title: '类型',
-      className: 'w-24',
-      render: (row) => <StatusChip color={ruleTypeColor(row.type)}>{ruleTypeLabel(row.type)}</StatusChip>,
-    },
-    {
-      key: 'target',
-      title: '上游',
-      className: 'w-48',
+      key: 'route',
+      title: '路由',
+      className: 'w-56',
       render: (row) => (
-        <span className="mono block max-w-56 truncate text-xs text-muted" title={targetText(row)}>
-          {targetText(row)}
-        </span>
+        <div className="min-w-0">
+          <StatusChip color={ruleTypeColor(row.type)}>{ruleTypeLabel(row.type)}</StatusChip>
+          <div className="mono mt-0.5 truncate text-xs text-muted" title={targetText(row)}>
+            {targetText(row)}
+          </div>
+        </div>
       ),
     },
     {
       key: 'security',
       title: '安全',
-      className: 'w-36',
+      className: 'w-28',
       render: (row) => {
         const mode = tlsModeOf(listenerOf(row.listenerId))
         return (
@@ -353,19 +351,9 @@ export default function Web() {
       },
     },
     {
-      key: 'requests',
-      title: '请求',
-      className: 'w-20 whitespace-nowrap text-right',
-      render: (row) => (
-        <span className="block text-xs tabular-nums text-muted">
-          {Number(row.requests || 0).toLocaleString()}
-        </span>
-      ),
-    },
-    {
       key: 'status',
       title: '状态',
-      className: 'w-32',
+      className: 'w-36',
       render: (row) => (
         <div className="flex items-center gap-2 whitespace-nowrap">
           <Switch
@@ -380,13 +368,18 @@ export default function Web() {
               </Switch.Control>
             </Switch.Content>
           </Switch>
-          {!row.enable ? (
-            <span className="text-xs text-muted">已停用</span>
-          ) : row.active ? (
-            <StatusChip color="success">运行中</StatusChip>
-          ) : (
-            <StatusChip color="warning">未生效</StatusChip>
-          )}
+          <div className="min-w-0">
+            {!row.enable ? (
+              <span className="text-xs text-muted">已停用</span>
+            ) : row.active ? (
+              <StatusChip color="success">运行中</StatusChip>
+            ) : (
+              <StatusChip color="warning">未生效</StatusChip>
+            )}
+            <div className="mt-0.5 text-[11px] tabular-nums text-muted">
+              {Number(row.requests || 0).toLocaleString()} 次请求
+            </div>
+          </div>
         </div>
       ),
     },
@@ -593,6 +586,7 @@ export default function Web() {
             rowKey={(row) => row.id}
             ariaLabel="Web 路由"
             variant="primary"
+            tableClassName="table-fixed"
             sortable
             onReorder={(ids) => void reorderRules(ids)}
             empty={loading ? '加载中…' : routeEmptyText}

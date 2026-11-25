@@ -332,6 +332,7 @@ export function DataTable<T>({
   variant = 'secondary',
   sortable = false,
   onReorder,
+  tableClassName,
 }: {
   items: T[]
   columns: Column<T>[]
@@ -344,6 +345,9 @@ export function DataTable<T>({
   /** Rows get a drag handle and can be reordered by hand. */
   sortable?: boolean
   onReorder?: (next: string[]) => void
+  /** Extra classes for the <table>; "table-fixed" keeps long cells from
+   * stretching the table past its container. */
+  tableClassName?: string
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [overflow, setOverflow] = useState(false)
@@ -394,7 +398,7 @@ export function DataTable<T>({
   const draggable = sortable && onReorder !== undefined
   const table = (
     <Table variant={variant}>
-      <Table.Content aria-label={ariaLabel}>
+      <Table.Content aria-label={ariaLabel} className={tableClassName}>
         <Table.Header>
           {draggable ? (
             <Table.Column className="w-8">
