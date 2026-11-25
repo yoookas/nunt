@@ -108,6 +108,8 @@ func New(opts Options) *Server {
 	opts.Cfg.Subscribe(func(cfg *model.Config) {
 		s.allowList.Store(newIPAllowList(log, cfg.System))
 		s.bindSessionIP.Store(cfg.System.SessionBindIP)
+		s.loginLimiter.Configure(cfg.System.LoginMaxFail,
+			time.Duration(cfg.System.LoginLockMin)*time.Minute)
 	})
 	s.mux = rest.NewMux(log, rest.Recover(log), rest.AccessLog(log))
 	s.mux = s.mux.With(s.apiLimit)

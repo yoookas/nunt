@@ -183,11 +183,21 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	if admin := s.opts.Cfg.Admin(); admin != nil && admin.ID == id.UserID {
 		currentHash = admin.PasswordHash
 	}
+	// The current password is a credential check just like the login form, so
+	// it shares the same limiter. Without this gate a stolen session could
+	// brute-force the password and take the account over permanently.
+	limitKey := "pw:" + s.clientIP(r).String()
+	if ok, wait := s.loginLimiter.Allow(limitKey); !ok {
+		rest.FailCode(w, http.StatusTooManyRequests, "locked",
+			"尝试次数过多，请在 %s 后重试", wait.Round(time.Second))
+		return
+	}
 	if !security.VerifyPassword(currentHash, req.Current) {
-		s.loginLimiter.Fail("pw:" + s.clientIP(r).String())
+		s.loginLimiter.Fail(limitKey)
 		rest.FailCode(w, http.StatusUnauthorized, "invalid_credentials", "当前密码不正确")
 		return
 	}
+	s.loginLimiter.Reset(limitKey)
 	hash, err := security.HashPassword(req.New)
 	if err != nil {
 		rest.Fail(w, http.StatusInternalServerError, "无法生成密码哈希：%s", err)

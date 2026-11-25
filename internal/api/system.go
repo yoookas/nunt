@@ -435,6 +435,23 @@ func maskConfigSecrets(cfg *model.Config) {
 			cfg.ACME.Jobs[i].DNSCreds[k] = secret.Mask(v)
 		}
 	}
+	// Route level basic auth users are separate credentials from the admin:
+	// their hashes must not travel in an export.
+	for i := range cfg.Web.Rules {
+		auth := cfg.Web.Rules[i].BasicAuth
+		if auth == nil {
+			continue
+		}
+		copied := *auth
+		copied.Users = make([]model.BasicAuthUser, len(auth.Users))
+		for j, u := range auth.Users {
+			copied.Users[j] = u
+			if u.Password != "" {
+				copied.Users[j].Password = maskSentinel
+			}
+		}
+		cfg.Web.Rules[i].BasicAuth = &copied
+	}
 }
 
 func restoreSecrets(old, next *model.Config) {
@@ -468,6 +485,35 @@ func restoreSecrets(old, next *model.Config) {
 		for k, v := range j.DNSCreds {
 			if isMasked(v) && prev != nil {
 				j.DNSCreds[k] = prev[k]
+			}
+		}
+	}
+
+	// Basic auth hashes are masked in exports; an import that keeps the mask
+	// for a known route/user must keep the stored hash.
+	oldAuth := map[string]map[string]string{}
+	for _, r := range old.Web.Rules {
+		if r.BasicAuth == nil {
+			continue
+		}
+		users := map[string]string{}
+		for _, u := range r.BasicAuth.Users {
+			users[u.Username] = u.Password
+		}
+		oldAuth[r.ID] = users
+	}
+	for i := range next.Web.Rules {
+		r := &next.Web.Rules[i]
+		if r.BasicAuth == nil {
+			continue
+		}
+		users := oldAuth[r.ID]
+		for j := range r.BasicAuth.Users {
+			u := &r.BasicAuth.Users[j]
+			if isMasked(u.Password) && users != nil {
+				if hash, ok := users[u.Username]; ok {
+					u.Password = hash
+				}
 			}
 		}
 	}

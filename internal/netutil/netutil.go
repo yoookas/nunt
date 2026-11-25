@@ -99,14 +99,10 @@ func UAAllowed(mode string, patterns []string, ua string) bool {
 func ClientIP(r *http.Request, trustProxy bool) net.IP {
 	if trustProxy {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			// The nearest proxy appends the address it saw last, so the
+			// rightmost entry is the client. A value the client prepended sits
+			// on the left and must never win.
 			parts := strings.Split(xff, ",")
-			for _, p := range parts {
-				ip := net.ParseIP(strings.TrimSpace(p))
-				if ip != nil && !ip.IsPrivate() && !ip.IsLoopback() {
-					return ip
-				}
-			}
-			// fall back to the last hop when every entry is private
 			for i := len(parts) - 1; i >= 0; i-- {
 				if ip := net.ParseIP(strings.TrimSpace(parts[i])); ip != nil {
 					return ip
@@ -123,8 +119,13 @@ func ClientIP(r *http.Request, trustProxy bool) net.IP {
 	if err != nil {
 		host = r.RemoteAddr
 	}
-	ip := net.ParseIP(strings.Trim(host, "[]"))
-	return ip
+	host = strings.Trim(host, "[]")
+	// A link-local peer may carry a zone ("fe80::1%eth0"); net.ParseIP does
+	// not accept it, and a nil address would make deny rules fail open.
+	if i := strings.LastIndexByte(host, '%'); i >= 0 {
+		host = host[:i]
+	}
+	return net.ParseIP(host)
 }
 
 // HostOnly strips the port and normalises a Host header value.

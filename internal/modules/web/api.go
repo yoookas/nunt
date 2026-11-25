@@ -437,6 +437,18 @@ func (w *Web) listenerBound(id string) bool {
 
 // view decorates a stored rule with its runtime state.
 func (w *Web) view(raw model.WebRule) ruleView {
+	// The basic auth hashes are credentials: the list only needs the user
+	// names so the form can keep an unchanged password (an empty password
+	// means "keep").
+	if raw.BasicAuth != nil {
+		auth := *raw.BasicAuth
+		auth.Users = make([]model.BasicAuthUser, len(raw.BasicAuth.Users))
+		for i, u := range raw.BasicAuth.Users {
+			auth.Users[i] = u
+			auth.Users[i].Password = ""
+		}
+		raw.BasicAuth = &auth
+	}
 	out := ruleView{WebRule: raw}
 	// A compiled rule is only served while its listener is actually bound:
 	// a disabled listener or a failed bind leaves it inactive.

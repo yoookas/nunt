@@ -546,6 +546,7 @@ func (w *Web) disableListeners(ids []string) {
 func (w *Web) compileWeb(cfg *model.Config) ([]*rule, map[string]*listenerPlan, []error) {
 	plans := map[string]*listenerPlan{}
 	byListener := map[string][]*listenerPlan{}
+	var errs []error
 	for _, l := range cfg.Web.Listeners {
 		if l.Disabled {
 			continue
@@ -558,12 +559,16 @@ func (w *Web) compileWeb(cfg *model.Config) ([]*rule, map[string]*listenerPlan, 
 		if auth, on := clientAuthFor(l.TLS.ClientAuth); on {
 			pool, err := clientCAPool(l.TLS.ClientCA)
 			if err != nil {
-				w.logger().Error("web：客户端证书校验已关闭", "listener", l.Name, "error", err)
+				// Never fail open: a listener that promises client
+				// certificates must not start without the CA that verifies
+				// them. Refuse this listener and surface the error instead.
+				w.logger().Error("web：客户端证书配置无效，监听器未启动", "listener", l.Name, "error", err)
+				errs = append(errs, fmt.Errorf("listener %q: %w", l.Name, err))
 				w.SetError(fmt.Errorf("listener %q: %w", l.Name, err))
-			} else {
-				tls.clientAuth = auth
-				tls.clientCAs = pool
+				continue
 			}
+			tls.clientAuth = auth
+			tls.clientCAs = pool
 		}
 		seen := map[string]bool{}
 		for _, addr := range l.Listen {
@@ -582,7 +587,6 @@ func (w *Web) compileWeb(cfg *model.Config) ([]*rule, map[string]*listenerPlan, 
 	}
 
 	compiled := make([]*rule, 0, len(cfg.Web.Rules))
-	var errs []error
 	for i, raw := range cfg.Web.Rules {
 		if !raw.Enable {
 			continue

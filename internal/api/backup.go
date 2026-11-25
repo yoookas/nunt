@@ -38,6 +38,7 @@ func (s *Server) handleBackupDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r, "system.backup.create", "file", filepath.Base(path))
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(path)))
 	w.Header().Set("Content-Type", "application/gzip")
 	http.ServeFile(w, r, path)

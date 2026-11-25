@@ -1,7 +1,6 @@
 package ddns
 
 import (
-	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -239,25 +238,22 @@ func (d *DDNS) handleProviderTest(w http.ResponseWriter, r *http.Request) {
 		rest.Fail(w, http.StatusBadRequest, "%s", err.Error())
 		return
 	}
+	// This endpoint must not touch the live zone: the previous implementation
+	// wrote 192.0.2.1 over the existing record and deleted it afterwards, which
+	// left the name without an address until the scheduler noticed (up to 24h).
+	// Validating the credentials and constructing the provider is read-only.
+	_ = provider
 	recordType := req.Type
 	if recordType == "" {
 		recordType = "A"
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	rec := dnsprov.Record{
-		Domain:    req.Domain,
-		SubDomain: req.Sub,
-		Type:      recordType,
-		Value:     "192.0.2.1",
-		TTL:       600,
-	}
-	if err := provider.Set(ctx, rec); err != nil {
-		rest.Fail(w, http.StatusBadGateway, "the provider refused the request: %s", err)
-		return
-	}
-	_ = provider.Delete(ctx, rec)
-	rest.OK(w, map[string]any{"status": "ok", "provider": provider.Name(), "record": rec.FQDN()})
+	_ = recordType
+	rest.OK(w, map[string]any{
+		"status":   "ok",
+		"provider": provider.Name(),
+		"record":   "",
+		"mode":     "validate-only",
+	})
 }
 
 func (d *DDNS) handleStatus(w http.ResponseWriter, r *http.Request) {

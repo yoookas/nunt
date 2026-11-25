@@ -400,6 +400,7 @@ func (s *Server) handleLogDownload(w http.ResponseWriter, r *http.Request) {
 		rest.Fail(w, http.StatusInternalServerError, "无法读取日志文件：%s", err)
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	http.ServeContent(w, r, name, info.ModTime(), f)

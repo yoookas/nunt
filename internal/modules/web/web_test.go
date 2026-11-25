@@ -1256,3 +1256,61 @@ func TestIdsInOrder(t *testing.T) {
 		}
 	}
 }
+
+// The router canonicalises the path before matching so a raw path that an
+// upstream would normalise cannot skip the rule protecting /admin.
+func TestCanonicalPath(t *testing.T) {
+	cases := map[string]string{
+		"/":                "/",
+		"":                 "/",
+		"//admin":          "/admin",
+		"/./admin":         "/admin",
+		"/x/../admin":      "/admin",
+		"/admin\\secret":   "/admin/secret",
+		"/admin/":          "/admin/",
+		"/a//b/":           "/a/b/",
+		"/admin//./secret": "/admin/secret",
+	}
+	for in, want := range cases {
+		got, ok := canonicalPath(in)
+		if !ok || got != want {
+			t.Fatalf("canonicalPath(%q) = %q, %v; want %q", in, got, ok, want)
+		}
+	}
+	if _, ok := canonicalPath("/index\x00.html"); ok {
+		t.Fatal("a NUL byte must be rejected")
+	}
+	if !matchPath("/admin", mustCanonical(t, "//admin")) {
+		t.Fatal("//admin must match the /admin rule after canonicalisation")
+	}
+}
+
+func mustCanonical(t *testing.T, p string) string {
+	t.Helper()
+	got, ok := canonicalPath(p)
+	if !ok {
+		t.Fatalf("canonicalPath(%q) rejected", p)
+	}
+	return got
+}
+
+// A listener that requires a client certificate must not start when its CA
+// bundle cannot be parsed.
+func TestMTLSRequiresAValidCA(t *testing.T) {
+	w := &Web{deps: &module.Deps{}}
+	cfg := &model.Config{Web: model.WebConfig{
+		Listeners: []model.WebListener{{
+			ID:     "l1",
+			Name:   "mtls",
+			Listen: []string{":18443"},
+			TLS:    model.WebTLS{Mode: model.TLSModeOff, ClientAuth: model.ClientAuthRequire, ClientCA: "not a pem"},
+		}},
+	}}
+	_, plans, errs := w.compileWeb(cfg)
+	if len(errs) == 0 {
+		t.Fatal("an invalid client CA must be reported")
+	}
+	if _, ok := plans[":18443"]; ok {
+		t.Fatal("the listener must not start without client certificate verification")
+	}
+}

@@ -655,7 +655,7 @@ export default function Ddns() {
         sub: payload.sub,
         type: payload.type,
       })
-      toast.success(`连通正常：${result?.record || result?.provider || providerTitle(payload.provider)}`)
+      toast.success(`凭据格式有效：${result?.provider || providerTitle(payload.provider)}（未写入任何记录）`)
     } catch (err) {
       toast.danger(`测试失败：${errorText(err)}`)
     } finally {
@@ -1105,7 +1105,7 @@ export default function Ddns() {
                 isDisabled={testing || !form.provider}
                 onPress={testProvider}
               >
-                {testing ? '测试中…' : '测试连通性'}
+                {testing ? '校验中…' : '校验凭据'}
               </Button>
             }
           />
@@ -1116,7 +1116,7 @@ export default function Ddns() {
           ) : (
             <div className="mb-3">
               <InlineAlert status="accent">
-                已保存的凭据以 ******** 回显，保持掩码表示不修改；测试连通性需要重新填写凭据。
+                已保存的凭据以 ******** 回显，保持掩码表示不修改；校验凭据需要重新填写凭据。只校验格式，不会写入或删除解析记录。
               </InlineAlert>
             </div>
           )}
@@ -1415,13 +1415,11 @@ export default function Ddns() {
 
       <ConfirmModal
         open={!!testPayload}
-        title="测试提供商连通性"
-        confirmText="开始测试"
+        title="校验提供商凭据"
+        confirmText="开始校验"
         content={
           testPayload
-            ? `会使用当前表单中的凭据，向「${providerTitle(testPayload.provider)}」真实写入一条 ${
-                testPayload.fqdn
-              } 的 ${testPayload.type} 测试记录（值为 192.0.2.1），随后立即删除。确定继续？`
+            ? `会使用当前表单中的凭据，校验「${providerTitle(testPayload.provider)}」的字段是否完整、客户端能否构造。不会写入或删除任何解析记录。确定继续？`
             : ''
         }
         onCancel={() => setTestPayload(null)}

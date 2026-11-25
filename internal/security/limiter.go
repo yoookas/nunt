@@ -38,6 +38,21 @@ func NewLimiter(maxFails int, lockFor, window time.Duration) *Limiter {
 	return l
 }
 
+// Configure updates the thresholds without restarting the process. Existing
+// counters stay; only the next failure uses the new limit.
+func (l *Limiter) Configure(maxFails int, lockFor time.Duration) {
+	if maxFails <= 0 {
+		maxFails = 5
+	}
+	if lockFor <= 0 {
+		lockFor = 10 * time.Minute
+	}
+	l.mu.Lock()
+	l.maxFails = maxFails
+	l.lockFor = lockFor
+	l.mu.Unlock()
+}
+
 // Allow reports whether the key may attempt an operation right now and, when
 // it may not, how long the caller has to wait.
 func (l *Limiter) Allow(key string) (bool, time.Duration) {

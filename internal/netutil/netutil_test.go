@@ -119,7 +119,36 @@ func TestClientIP(t *testing.T) {
 	if got := ClientIP(r, false); got.String() != "203.0.113.9" {
 		t.Fatalf("X-Forwarded-For must be ignored without a trusted proxy, got %v", got)
 	}
-	if got := ClientIP(r, true); got.String() != "198.51.100.7" {
+	// The rightmost entry is the one the nearest proxy appended, i.e. the
+	// client as that proxy saw it; anything to its left may be forged.
+	if got := ClientIP(r, true); got.String() != "10.0.0.1" {
 		t.Fatalf("ClientIP with trusted proxy = %v", got)
+	}
+}
+
+// A client that prepends its own address must not be able to choose the value
+// used by access rules and rate limits: the address appended by the proxy wins.
+func TestClientIPSpoofIsIgnored(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.2:5555"
+	r.Header.Set("X-Forwarded-For", "203.0.113.7, 198.51.100.9")
+	if got := ClientIP(r, true); got == nil || got.String() != "198.51.100.9" {
+		t.Fatalf("ClientIP = %v, want the proxy-appended 198.51.100.9", got)
+	}
+	// The rightmost entry is the client even when it is a LAN address.
+	r.Header.Set("X-Forwarded-For", "10.9.9.9, 10.1.2.3")
+	if got := ClientIP(r, true); got == nil || got.String() != "10.1.2.3" {
+		t.Fatalf("ClientIP = %v, want the LAN client 10.1.2.3", got)
+	}
+}
+
+// A link-local peer with a zone must still resolve to an address, otherwise
+// deny rules see nil and let it through.
+func TestClientIPScopedIPv6(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "[fe80::1%eth0]:1234"
+	ip := ClientIP(r, false)
+	if ip == nil || ip.String() != "fe80::1" {
+		t.Fatalf("ClientIP = %v, want fe80::1", ip)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -190,6 +191,20 @@ func (rt *router) currentPlan() *listenerPlan {
 
 // ServeHTTP resolves the rule and runs the middleware chain.
 func (rt *router) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+	// Routing, static resolution and proxying must all see the same path. A
+	// raw path such as "//admin", "/./admin" or "/admin\\secret" would miss the
+	// rule that protects /admin while the upstream (nginx merges slashes and
+	// dot segments by default) still serves it. Canonicalise once, here.
+	canonical, ok := canonicalPath(req.URL.Path)
+	if !ok {
+		http.Error(rw, "invalid path", http.StatusBadRequest)
+		return
+	}
+	if canonical != req.URL.Path {
+		req.URL.Path = canonical
+		req.URL.RawPath = ""
+	}
+
 	// An ACME http-01 challenge is answered before routing: it belongs to no
 	// rule, and the CA only accepts it on port 80, which this listener may own.
 	if strings.HasPrefix(req.URL.Path, acmeChallengePath) {
@@ -250,6 +265,27 @@ func (rt *router) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		handler = rt.web.rateLimitHandler(r, handler)
 	}
 	handler.ServeHTTP(rec, req)
+}
+
+// canonicalPath returns the routing form of a request path: backslashes count
+// as separators, duplicate slashes and dot segments collapse, and a trailing
+// slash is preserved. A NUL byte is never valid.
+func canonicalPath(p string) (string, bool) {
+	if strings.ContainsRune(p, 0) {
+		return "", false
+	}
+	if p == "" {
+		return "/", true
+	}
+	p = strings.ReplaceAll(p, "\\", "/")
+	cleaned := path.Clean("/" + strings.TrimPrefix(p, "/"))
+	if cleaned == "." {
+		cleaned = "/"
+	}
+	if strings.HasSuffix(p, "/") && cleaned != "/" {
+		cleaned += "/"
+	}
+	return cleaned, true
 }
 
 // isTLSRequest reports whether the request arrived over TLS, honouring a

@@ -536,6 +536,8 @@ func buildProxy(w *Web, r *rule, up upstream, target *model.ProxyTarget) *httput
 				pr.Out.Header.Del("X-Forwarded-For")
 				pr.Out.Header.Del("X-Forwarded-Proto")
 				pr.Out.Header.Del("X-Forwarded-Host")
+				pr.Out.Header.Del("X-Real-IP")
+				pr.Out.Header.Del("X-Client-IP")
 				pr.SetXForwarded()
 			} else {
 				priorProto := pr.In.Header.Get("X-Forwarded-Proto")

@@ -293,7 +293,7 @@ func (s *Server) verifyPasswordAndFactor(w http.ResponseWriter, r *http.Request,
 		rest.FailCode(w, http.StatusUnauthorized, "invalid_credentials", "密码错误")
 		return false
 	}
-	res := s.checkFactor(user, code, time.Now(), true)
+	res := s.checkFactor(user, code, time.Now(), false)
 	if !res.ok {
 		s.loginLimiter.Fail(limitKey)
 		s.log.Warn("双因子验证拒绝", "ip", ip, "action", action)
