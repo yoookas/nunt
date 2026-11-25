@@ -730,9 +730,9 @@ export default function Forward() {
           />
         </div>
 
-        <Panel
-          title="转发规则"
-          extra={
+        <section className="min-w-0">
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+            <div className="text-sm font-semibold sm:text-base">转发规则</div>
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
               <ToolbarSelect
                 label="协议筛选"
@@ -755,11 +755,10 @@ export default function Forward() {
                 共 {rules.length} 条 · 显示 {filteredRules.length} 条
               </span>
             </div>
-          }
-        >
+          </div>
 
           {loadError ? (
-            <div className="p-3">
+            <div className="mb-3">
               <div className="flex flex-wrap items-center gap-2">
                 <div className="w-full sm:w-auto sm:min-w-64 sm:flex-1">
                   <InlineAlert status="danger">加载转发规则失败：{errorText(loadError)}</InlineAlert>
@@ -776,11 +775,12 @@ export default function Forward() {
             columns={columns}
             rowKey={(row) => String(row.id)}
             ariaLabel="转发规则"
+            variant="primary"
             sortable
             onReorder={(ids) => void reorderRules(ids)}
             empty={loading ? '加载中…' : rules.length ? '没有符合筛选条件的规则' : '还没有端口转发规则'}
           />
-        </Panel>
+        </section>
       </div>
 
       <FormModal
