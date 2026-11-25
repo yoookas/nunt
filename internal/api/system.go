@@ -40,7 +40,6 @@ func (s *Server) registerSystem() {
 	g.Get("/sessions", s.handleListSessions)
 
 	g.Get("/ip2region", s.handleGetIP2Region)
-	g.Get("/ip2region/provinces", s.handleIP2RegionProvinces)
 	g.Post("/ip2region/upload", s.handleUploadIP2Region)
 	g.Post("/ip2region/reload", s.handleReloadIP2Region)
 	g.Post("/ip2region/lookup", s.handleIP2RegionLookup)
@@ -554,34 +553,18 @@ func isMasked(v string) bool {
 type ip2regionStatus struct {
 	V4 ip2region.Status `json:"v4"`
 	V6 ip2region.Status `json:"v6"`
-	// Provinces lists the provinces that the picker may offer. Source is
-	// "database" when they were enumerated from the loaded xdb and "builtin"
-	// when the built-in list is used as a fallback.
-	Provinces []string `json:"provinces"`
-	Source    string   `json:"source"`
 }
 
 func (s *Server) ip2regionStatus() ip2regionStatus {
-	out := ip2regionStatus{Provinces: ip2region.Provinces(), Source: "builtin"}
+	out := ip2regionStatus{}
 	if s.opts.Geo != nil {
 		out.V4, out.V6 = s.opts.Geo.Statuses()
-		if provinces, ok := s.opts.Geo.ProvincesFromDatabase(); ok && len(provinces) > 0 {
-			out.Provinces = provinces
-			out.Source = "database"
-		}
 	}
 	return out
 }
 
 func (s *Server) handleGetIP2Region(w http.ResponseWriter, r *http.Request) {
 	rest.OK(w, s.ip2regionStatus())
-}
-
-// handleIP2RegionProvinces serves the province picker: the values come from
-// the loaded database when possible and from the built-in fallback otherwise.
-func (s *Server) handleIP2RegionProvinces(w http.ResponseWriter, r *http.Request) {
-	status := s.ip2regionStatus()
-	rest.OK(w, map[string]any{"provinces": status.Provinces, "source": status.Source})
 }
 
 // maxIP2RegionUpload caps the uploaded xdb file. The IPv6 database is the

@@ -27,8 +27,6 @@ interface LookupRecord {
 interface StatusResponse {
   v4?: DbStatus
   v6?: DbStatus
-  provinces?: string[]
-  source?: string
 }
 
 const LOOKUP_FIELDS: { key: keyof LookupRecord; label: string }[] = [
@@ -53,8 +51,6 @@ function statusText(status: DbStatus): string {
 export default function IpDatabase() {
   const [v4, setV4] = useState<DbStatus>({})
   const [v6, setV6] = useState<DbStatus>({})
-  const [source, setSource] = useState('builtin')
-  const [provinces, setProvinces] = useState<string[]>([])
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState<'' | '4' | '6' | 'reload'>('')
   const [testIP, setTestIP] = useState('')
@@ -67,8 +63,6 @@ export default function IpDatabase() {
   const apply = useCallback((data: StatusResponse | null) => {
     setV4(data?.v4 || {})
     setV6(data?.v6 || {})
-    setProvinces(Array.isArray(data?.provinces) ? data.provinces : [])
-    setSource(data?.source || 'builtin')
   }, [])
 
   const load = useCallback(async () => {
@@ -147,11 +141,6 @@ export default function IpDatabase() {
           <AlertBox status="danger" title="地址库状态异常">
             {status.error}
           </AlertBox>
-        ) : null}
-        {version === 4 && provinces.length ? (
-          <div className="text-xs text-muted">
-            省份列表{source === 'database' ? '来自地址库' : '为内置列表'}（{provinces.length} 个）
-          </div>
         ) : null}
         <div className="flex flex-wrap items-center gap-2">
           <Button

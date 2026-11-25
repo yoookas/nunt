@@ -1,6 +1,6 @@
 // Package ipfilter evaluates the access rule of a web or forward rule: an
-// explicit CIDR list, optionally combined with the country/province data of
-// ip2region. A rule either allows or denies the union of those sets.
+// explicit CIDR list, optionally combined with the country, province or city
+// data of ip2region. A rule either allows or denies the union of those sets.
 package ipfilter
 
 import (
@@ -19,11 +19,10 @@ type Lookup interface {
 
 // Filter is a compiled access rule. It is safe for concurrent use.
 type Filter struct {
-	mode      string
-	nets      []*net.IPNet
-	countries []string
-	provinces []string
-	geo       Lookup
+	mode   string
+	nets   []*net.IPNet
+	names  []string
+	lookup Lookup
 }
 
 // Compile turns a stored access rule into a filter. Invalid CIDRs are an
@@ -33,14 +32,12 @@ func Compile(access model.Access, geo Lookup) (*Filter, error) {
 	if err != nil {
 		return nil, err
 	}
-	f := &Filter{
-		mode:      access.Mode,
-		nets:      nets,
-		countries: cleanList(access.Countries),
-		provinces: cleanList(access.Provinces),
-		geo:       geo,
-	}
-	return f, nil
+	return &Filter{
+		mode:   access.Mode,
+		nets:   nets,
+		names:  cleanList(access.Geo),
+		lookup: geo,
+	}, nil
 }
 
 // Allowed reports whether the client address passes the rule and, when it does
@@ -75,32 +72,61 @@ func (f *Filter) match(ip net.IP) (bool, string, error) {
 			return true, "cidr", nil
 		}
 	}
-	if len(f.countries) == 0 && len(f.provinces) == 0 {
+	if len(f.names) == 0 {
 		return false, "", nil
 	}
-	if f.geo == nil {
+	if f.lookup == nil {
 		return false, "geo-unavailable", ip2region.ErrUnavailable
 	}
-	record, err := f.geo.Lookup(ip)
+	record, err := f.lookup.Lookup(ip)
 	if err != nil {
 		return false, "geo-error", err
 	}
-	if record.Country != "" {
-		for _, country := range f.countries {
-			if strings.EqualFold(strings.TrimSpace(country), record.Country) {
-				return true, "country:" + record.Country, nil
-			}
-		}
-	}
-	if record.Province != "" {
-		province := ip2region.NormalizeProvince(record.Province)
-		for _, want := range f.provinces {
-			if province != "" && province == ip2region.NormalizeProvince(want) {
-				return true, "province:" + province, nil
-			}
+	for _, want := range f.names {
+		if matchGeoName(want, record) {
+			return true, "geo:" + want, nil
 		}
 	}
 	return false, "", nil
+}
+
+// matchGeoName compares one entry against the country, province and city of a
+// record. Provinces use the short spelling ("浙江" matches "浙江省") and cities
+// ignore the common administrative suffixes ("杭州" matches "杭州市").
+func matchGeoName(want string, record ip2region.Record) bool {
+	want = strings.TrimSpace(want)
+	if want == "" {
+		return false
+	}
+	if record.Country != "" && strings.EqualFold(want, record.Country) {
+		return true
+	}
+	if record.Province != "" {
+		wantProvince := ip2region.NormalizeProvince(want)
+		if wantProvince != "" && wantProvince == ip2region.NormalizeProvince(record.Province) {
+			return true
+		}
+	}
+	if record.City != "" && cityMatches(want, record.City) {
+		return true
+	}
+	return false
+}
+
+func cityMatches(want, city string) bool {
+	if strings.EqualFold(want, city) {
+		return true
+	}
+	return strings.EqualFold(trimAdministrativeSuffix(want), trimAdministrativeSuffix(city))
+}
+
+func trimAdministrativeSuffix(name string) string {
+	for _, suffix := range []string{"自治州", "地区", "市", "盟"} {
+		if strings.HasSuffix(name, suffix) && len(name) > len(suffix) {
+			return strings.TrimSuffix(name, suffix)
+		}
+	}
+	return name
 }
 
 func cleanList(in []string) []string {

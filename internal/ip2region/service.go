@@ -7,12 +7,10 @@
 package ip2region
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -89,17 +87,16 @@ func (s *Service) loadPtr(family int) *dataset {
 // dataset is one loaded database, its searcher pool and the provinces that
 // actually appear in it.
 type dataset struct {
-	pool      sync.Pool
-	provinces []string
+	pool sync.Pool
 }
 
-func newDataset(version *xdb.Version, content []byte, provinces []string) (*dataset, error) {
+func newDataset(version *xdb.Version, content []byte) (*dataset, error) {
 	// Validate the buffer once; pool entries are built from the same bytes and
 	// cannot fail after this point.
 	if _, err := xdb.NewWithBuffer(version, content); err != nil {
 		return nil, err
 	}
-	d := &dataset{provinces: provinces}
+	d := &dataset{}
 	d.pool.New = func() any {
 		searcher, err := xdb.NewWithBuffer(version, content)
 		if err != nil {
@@ -231,16 +228,6 @@ func (s *Service) Lookup(ip net.IP) (Record, error) {
 	return ParseRegion(raw), nil
 }
 
-// ProvincesFromDatabase returns the provinces that occur in the loaded
-// database. The second result is false when no database is loaded.
-func (s *Service) ProvincesFromDatabase() ([]string, bool) {
-	data := s.v4.Load()
-	if data == nil {
-		return nil, false
-	}
-	return append([]string{}, data.provinces...), true
-}
-
 // Statuses reports the IPv4 and IPv6 databases in that order.
 func (s *Service) Statuses() (Status, Status) {
 	s.mu.Lock()
@@ -277,13 +264,7 @@ func load(family int, path string, info os.FileInfo) (*dataset, Status, error) {
 	if family == family4 && version != xdb.IPv4 {
 		return nil, Status{Path: path}, errors.New("这是 IPv6 地址库，不能作为 IPv4 库使用")
 	}
-	provinces := []string(nil)
-	if family == family4 {
-		// The v6 database has far more segments; the province picker is built
-		// from the v4 file and falls back to the built-in list without it.
-		provinces = collectProvinces(data, header, version)
-	}
-	loaded, err := newDataset(version, data, provinces)
+	loaded, err := newDataset(version, data)
 	if err != nil {
 		return nil, Status{Path: path}, fmt.Errorf("open: %w", err)
 	}
@@ -300,55 +281,6 @@ func load(family int, path string, info os.FileInfo) (*dataset, Status, error) {
 	return loaded, status, nil
 }
 
-// collectProvinces walks the segment index of the database and collects the
-// distinct third field (province) of every row. The database has no
-// enumeration API, so this one-time scan is what makes a province picker
-// possible without hard-coding a list that can drift from the data.
-func collectProvinces(content []byte, header *xdb.Header, version *xdb.Version) []string {
-	if header == nil || version == nil {
-		return nil
-	}
-	ipBytes := version.Bytes
-	segSize := version.SegmentIndexSize
-	if ipBytes <= 0 || segSize < ipBytes*2+6 {
-		return nil
-	}
-	start, end := int(header.StartIndexPtr), int(header.EndIndexPtr)
-	seen := map[string]struct{}{}
-	for p := start; p <= end && p+segSize <= len(content); p += segSize {
-		entry := content[p : p+segSize]
-		dataLen := int(binary.LittleEndian.Uint16(entry[ipBytes*2:]))
-		dataPtr := int(binary.LittleEndian.Uint32(entry[ipBytes*2+2:]))
-		if dataLen <= 0 || dataPtr < 0 || dataPtr+dataLen > len(content) {
-			continue
-		}
-		parts := strings.Split(string(content[dataPtr:dataPtr+dataLen]), "|")
-		if len(parts) < 3 {
-			continue
-		}
-		name := NormalizeProvince(parts[2])
-		if name == "" || name == "0" {
-			continue
-		}
-		// Only offer provinces the configuration accepts: the picker is built
-		// from this list, and validation refuses anything outside the known
-		// set, so a database-only name would be unselectable in practice.
-		if !provinceSet[name] {
-			continue
-		}
-		seen[name] = struct{}{}
-	}
-	out := make([]string, 0, len(seen))
-	for name := range seen {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// ParseRegion turns a raw ip2region row into a Record. Missing fields are
-// normalised to empty strings, and the "0" placeholder is treated the same
-// way as an empty value.
 func ParseRegion(raw string) Record {
 	out := Record{Raw: raw}
 	parts := strings.Split(raw, "|")
@@ -360,13 +292,6 @@ func ParseRegion(raw string) Record {
 		}
 		*fields[i] = value
 	}
-	return out
-}
-
-// Provinces lists the province short names used by ip2region and this build.
-func Provinces() []string {
-	out := make([]string, len(provinceNames))
-	copy(out, provinceNames)
 	return out
 }
 

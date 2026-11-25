@@ -27,20 +27,20 @@ func TestFilterCIDRAndGeoUnion(t *testing.T) {
 	}{
 		{"cidr allow", model.Access{Mode: model.AccessAllow, IPs: []string{"10.0.0.0/8"}}, nil, "10.1.2.3", true},
 		{"cidr allow miss", model.Access{Mode: model.AccessAllow, IPs: []string{"10.0.0.0/8"}}, nil, "192.168.1.1", false},
-		{"country allow", model.Access{Mode: model.AccessAllow, Countries: []string{"中国"}}, cn, "1.1.1.1", true},
-		{"country allow miss", model.Access{Mode: model.AccessAllow, Countries: []string{"美国"}}, cn, "1.1.1.1", false},
-		{"several countries, one matches", model.Access{Mode: model.AccessAllow, Countries: []string{"美国", "日本", "中国"}}, cn, "1.1.1.1", true},
-		{"several countries, none matches", model.Access{Mode: model.AccessAllow, Countries: []string{"美国", "日本"}}, cn, "1.1.1.1", false},
-		{"several provinces, one matches", model.Access{Mode: model.AccessAllow, Provinces: []string{"江苏省", "浙江"}}, cn, "1.1.1.1", true},
-		{"several provinces, none matches", model.Access{Mode: model.AccessAllow, Provinces: []string{"江苏省", "广东省"}}, cn, "1.1.1.1", false},
-		{"deny list matches the second entry", model.Access{Mode: model.AccessDeny, Provinces: []string{"江苏省", "浙江"}}, cn, "1.1.1.1", false},
-		{"province full name", model.Access{Mode: model.AccessAllow, Provinces: []string{"浙江省"}}, cn, "1.1.1.1", true},
-		{"province short name", model.Access{Mode: model.AccessAllow, Provinces: []string{"浙江"}}, cn, "1.1.1.1", true},
-		{"cidr or country", model.Access{Mode: model.AccessAllow, IPs: []string{"10.0.0.0/8"}, Countries: []string{"美国"}}, cn, "192.168.1.1", false},
-		{"deny country", model.Access{Mode: model.AccessDeny, Countries: []string{"中国"}}, cn, "1.1.1.1", false},
-		{"deny country miss", model.Access{Mode: model.AccessDeny, Countries: []string{"美国"}}, cn, "1.1.1.1", true},
+		{"country allow", model.Access{Mode: model.AccessAllow, Geo: []string{"中国"}}, cn, "1.1.1.1", true},
+		{"country allow miss", model.Access{Mode: model.AccessAllow, Geo: []string{"美国"}}, cn, "1.1.1.1", false},
+		{"several countries, one matches", model.Access{Mode: model.AccessAllow, Geo: []string{"美国", "日本", "中国"}}, cn, "1.1.1.1", true},
+		{"several countries, none matches", model.Access{Mode: model.AccessAllow, Geo: []string{"美国", "日本"}}, cn, "1.1.1.1", false},
+		{"several provinces, one matches", model.Access{Mode: model.AccessAllow, Geo: []string{"江苏省", "浙江"}}, cn, "1.1.1.1", true},
+		{"several provinces, none matches", model.Access{Mode: model.AccessAllow, Geo: []string{"江苏省", "广东省"}}, cn, "1.1.1.1", false},
+		{"deny list matches the second entry", model.Access{Mode: model.AccessDeny, Geo: []string{"江苏省", "浙江"}}, cn, "1.1.1.1", false},
+		{"province full name", model.Access{Mode: model.AccessAllow, Geo: []string{"浙江省"}}, cn, "1.1.1.1", true},
+		{"province short name", model.Access{Mode: model.AccessAllow, Geo: []string{"浙江"}}, cn, "1.1.1.1", true},
+		{"cidr or country", model.Access{Mode: model.AccessAllow, IPs: []string{"10.0.0.0/8"}, Geo: []string{"美国"}}, cn, "192.168.1.1", false},
+		{"deny country", model.Access{Mode: model.AccessDeny, Geo: []string{"中国"}}, cn, "1.1.1.1", false},
+		{"deny country miss", model.Access{Mode: model.AccessDeny, Geo: []string{"美国"}}, cn, "1.1.1.1", true},
 		{"deny cidr", model.Access{Mode: model.AccessDeny, IPs: []string{"1.1.1.0/24"}}, cn, "1.1.1.1", false},
-		{"off", model.Access{Mode: model.AccessOff, Countries: []string{"中国"}}, nil, "1.1.1.1", true},
+		{"off", model.Access{Mode: model.AccessOff, Geo: []string{"中国"}}, nil, "1.1.1.1", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -59,7 +59,7 @@ func TestFilterCIDRAndGeoUnion(t *testing.T) {
 func TestFilterFailsClosedOnGeoErrors(t *testing.T) {
 	broken := fakeGeo{err: errors.New("boom")}
 	for _, mode := range []string{model.AccessAllow, model.AccessDeny} {
-		f, err := Compile(model.Access{Mode: mode, Countries: []string{"中国"}}, broken)
+		f, err := Compile(model.Access{Mode: mode, Geo: []string{"中国"}}, broken)
 		if err != nil {
 			t.Fatalf("compile: %v", err)
 		}
@@ -68,7 +68,7 @@ func TestFilterFailsClosedOnGeoErrors(t *testing.T) {
 		}
 	}
 	// A geo rule compiled without a lookup also refuses instead of allowing.
-	f, err := Compile(model.Access{Mode: model.AccessAllow, Provinces: []string{"浙江"}}, nil)
+	f, err := Compile(model.Access{Mode: model.AccessAllow, Geo: []string{"浙江"}}, nil)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -80,5 +80,30 @@ func TestFilterFailsClosedOnGeoErrors(t *testing.T) {
 func TestCompileRejectsBadCIDR(t *testing.T) {
 	if _, err := Compile(model.Access{Mode: model.AccessAllow, IPs: []string{"nope"}}, nil); err == nil {
 		t.Fatal("an invalid CIDR must be rejected")
+	}
+}
+
+// One flattened list matches any of the three levels and accepts the common
+// short spellings.
+func TestFilterGeoMatchesCountryProvinceOrCity(t *testing.T) {
+	geo := fakeGeo{record: ip2region.Record{Country: "中国", Province: "浙江省", City: "杭州市"}}
+	cases := map[string]bool{
+		"中国":  true,
+		"浙江":  true,
+		"浙江省": true,
+		"杭州":  true,
+		"杭州市": true,
+		"江苏":  false,
+		"上海":  false,
+		"日本":  false,
+	}
+	for name, want := range cases {
+		f, err := Compile(model.Access{Mode: model.AccessAllow, Geo: []string{name}}, geo)
+		if err != nil {
+			t.Fatalf("compile %q: %v", name, err)
+		}
+		if got, _ := f.Allowed(net.ParseIP("1.1.1.1")); got != want {
+			t.Fatalf("%q: allowed = %v, want %v", name, got, want)
+		}
 	}
 }

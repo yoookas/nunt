@@ -100,6 +100,7 @@ func Normalize(c *model.Config) {
 		for j := range l.Listen {
 			l.Listen[j] = strings.TrimSpace(l.Listen[j])
 		}
+		normalizeAccess(&l.Access, false)
 	}
 	for i := range c.Web.Rules {
 		r := &c.Web.Rules[i]
@@ -116,13 +117,7 @@ func Normalize(c *model.Config) {
 		if r.Type == "" {
 			r.Type = model.WebTypeProxy
 		}
-		if r.Access.Mode == "" {
-			r.Access.Mode = model.AccessOff
-		}
-		if r.Access.UAMode == "" {
-			r.Access.UAMode = model.AccessOff
-		}
-		normalizeGeoAccess(&r.Access)
+		normalizeAccess(&r.Access, true)
 		if r.Proxy != nil && r.Proxy.Balance == "" {
 			r.Proxy.Balance = "roundrobin"
 		}
@@ -138,10 +133,7 @@ func Normalize(c *model.Config) {
 		if r.Protocol == "" {
 			r.Protocol = "tcp"
 		}
-		if r.Access.Mode == "" {
-			r.Access.Mode = model.AccessOff
-		}
-		normalizeGeoAccess(&r.Access)
+		normalizeAccess(&r.Access, false)
 		if r.MaxConns == 0 {
 			r.MaxConns = defaultForwardMaxConns
 		}
@@ -302,6 +294,9 @@ func Validate(c *model.Config) error {
 				return fmt.Errorf("listener %q: %w", l.Name, err)
 			}
 		}
+		if err := validateAccess(l.Access, true, c.System.IP2RegionDB); err != nil {
+			return fmt.Errorf("listener %q: %w", l.Name, err)
+		}
 	}
 	seenRoutes := map[string]string{}
 	for _, r := range c.Web.Rules {
@@ -328,7 +323,7 @@ func Validate(c *model.Config) error {
 		if r.Enable && listener.TLS.Mode == model.TLSModeAuto && !hasConcreteDomain(r.Domains) {
 			return fmt.Errorf("web rule %q: automatic TLS needs at least one concrete domain", displayName(r.Name, r.ID))
 		}
-		if err := validateGeoAccess(r.Access, r.Enable, c.System.IP2RegionDB); err != nil {
+		if err := validateAccess(r.Access, r.Enable, c.System.IP2RegionDB); err != nil {
 			return fmt.Errorf("web rule %q: %w", displayName(r.Name, r.ID), err)
 		}
 		switch r.Type {
@@ -361,7 +356,7 @@ func Validate(c *model.Config) error {
 		if r.MaxConnsPerIP < 0 {
 			return fmt.Errorf("forward rule %q: maxConnsPerIP must not be negative", displayName(r.Name, r.ID))
 		}
-		if err := validateGeoAccess(r.Access, r.Enable, c.System.IP2RegionDB); err != nil {
+		if err := validateAccess(r.Access, r.Enable, c.System.IP2RegionDB); err != nil {
 			return fmt.Errorf("forward rule %q: %w", displayName(r.Name, r.ID), err)
 		}
 	}
@@ -479,14 +474,69 @@ func hasConcreteDomain(domains []string) bool {
 	return false
 }
 
-// normalizeGeoAccess trims and canonicalises the country/province lists so the
-// matcher only has to compare the short province names.
-func normalizeGeoAccess(a *model.Access) {
-	a.Countries = normalizeCountryList(a.Countries)
-	a.Provinces = normalizeProvinceList(a.Provinces)
+// normalizeAccess flattens the old country/province lists into Geo, trims the
+// lists and resolves the mode defaults. Inherited rules carry no lists of their
+// own: the listener's access rule is used instead.
+func normalizeAccess(a *model.Access, allowInherit bool) {
+	a.Mode = strings.ToLower(strings.TrimSpace(a.Mode))
+	switch a.Mode {
+	case model.AccessAllow, model.AccessDeny:
+	case model.AccessInherit:
+		if !allowInherit {
+			a.Mode = model.AccessOff
+		}
+	case model.AccessOff:
+		a.Mode = model.AccessOff
+	default:
+		a.Mode = model.AccessOff
+	}
+	merged := make([]string, 0, len(a.Geo)+len(a.Countries)+len(a.Provinces))
+	merged = append(merged, a.Geo...)
+	merged = append(merged, a.Countries...)
+	merged = append(merged, a.Provinces...)
+	a.Geo = normalizeGeoList(merged)
+	a.Countries = nil
+	a.Provinces = nil
+	a.IPs = normalizeStringList(a.IPs)
+	a.UAMode = strings.ToLower(strings.TrimSpace(a.UAMode))
+	switch a.UAMode {
+	case model.AccessAllow, model.AccessDeny:
+	default:
+		a.UAMode = model.AccessOff
+	}
+	a.UAs = normalizeStringList(a.UAs)
+	if a.Mode == model.AccessInherit {
+		a.IPs = nil
+		a.Geo = nil
+		a.UAs = nil
+		a.UAMode = model.AccessOff
+	}
 }
 
-func normalizeCountryList(in []string) []string {
+func normalizeGeoList(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := map[string]bool{}
+	for _, item := range in {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		// A known province is stored in its short form so the matcher compares
+		// one spelling; countries and cities stay as typed.
+		if ip2region.KnownProvince(item) {
+			item = ip2region.NormalizeProvince(item)
+		}
+		key := strings.ToLower(item)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, item)
+	}
+	return out
+}
+
+func normalizeStringList(in []string) []string {
 	out := make([]string, 0, len(in))
 	seen := map[string]bool{}
 	for _, item := range in {
@@ -500,42 +550,31 @@ func normalizeCountryList(in []string) []string {
 	return out
 }
 
-func normalizeProvinceList(in []string) []string {
-	out := make([]string, 0, len(in))
-	seen := map[string]bool{}
-	for _, item := range in {
-		name := ip2region.NormalizeProvince(item)
-		if name == "" || seen[name] {
-			continue
-		}
-		seen[name] = true
-		out = append(out, name)
+// validateGeoAccess checks the flattened country/province/city list of an
+// access rule. A rule that uses it must be an allow/deny rule, and an enabled
+// rule needs the database path: without it every geo lookup fails closed.
+func validateAccess(access model.Access, enabled bool, dbPath string) error {
+	if _, err := netutil.ParseIPList(access.IPs); err != nil {
+		return fmt.Errorf("invalid IP list: %w", err)
 	}
-	return out
-}
-
-// validateGeoAccess checks the country/province part of an access rule. A rule
-// that uses it must be an allow/deny rule, and an enabled rule needs the
-// database path: without it every geo lookup fails closed.
-func validateGeoAccess(access model.Access, enabled bool, dbPath string) error {
-	if len(access.Countries) == 0 && len(access.Provinces) == 0 {
+	if len(access.Geo) == 0 {
 		return nil
 	}
 	if access.Mode != model.AccessAllow && access.Mode != model.AccessDeny {
-		return fmt.Errorf("country/province filtering requires access mode allow or deny")
+		return fmt.Errorf("country/province/city filtering requires access mode allow or deny")
 	}
-	for _, country := range access.Countries {
-		if strings.Contains(country, "|") || utf8.RuneCountInString(country) > 32 {
-			return fmt.Errorf("invalid country %q", country)
+	for _, name := range access.Geo {
+		if strings.Contains(name, "|") || utf8.RuneCountInString(name) > 32 {
+			return fmt.Errorf("invalid geo entry %q", name)
 		}
-	}
-	for _, province := range access.Provinces {
-		if !ip2region.KnownProvince(province) {
-			return fmt.Errorf("unknown province %q", province)
+		for _, r := range name {
+			if r < 0x20 || r == 0x7f {
+				return fmt.Errorf("invalid geo entry %q", name)
+			}
 		}
 	}
 	if enabled && strings.TrimSpace(dbPath) == "" {
-		return fmt.Errorf("country/province filtering requires system.ip2regionDb to be configured")
+		return fmt.Errorf("country/province/city filtering requires an address database")
 	}
 	return nil
 }

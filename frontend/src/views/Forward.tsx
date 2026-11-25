@@ -4,13 +4,11 @@ import { api, errorText } from '../api'
 import { Ellipsis, FileText, Pencil, Trash2 } from 'lucide-react'
 import { fmtBytes, fmtTime, splitLines } from '../format'
 import { usePolling } from '../usePolling'
-import { useProvinces } from '../useProvinces'
 import {
   ConfirmModal,
   DataTable,
   FormModal,
   mergeVisibleOrder,
-  MultiSelectInput,
   NumberInput,
   Page,
   PageHeader,
@@ -53,8 +51,7 @@ type ChipColor = 'default' | 'primary' | 'success' | 'warning' | 'danger'
 interface AccessConfig {
   mode?: string
   ips?: string[]
-  countries?: string[]
-  provinces?: string[]
+  geo?: string[]
   uaMode?: string
   uas?: string[]
 }
@@ -116,8 +113,7 @@ interface RuleForm {
   maxConnsPerIP: number
   accessMode: string
   accessIps: string
-  accessCountries: string[]
-  accessProvinces: string[]
+  accessGeo: string[]
   remark: string
 }
 
@@ -132,8 +128,7 @@ const EMPTY_FORM: RuleForm = {
   maxConnsPerIP: 0,
   accessMode: 'off',
   accessIps: '',
-  accessCountries: [],
-  accessProvinces: [],
+  accessGeo: [],
   remark: '',
 }
 
@@ -231,7 +226,6 @@ function FormField({ full, error, children }: { full?: boolean; error?: string; 
 }
 
 export default function Forward() {
-  const provinces = useProvinces()
   const [rules, setRules] = useState<ForwardRule[]>([])
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<unknown>(null)
@@ -402,8 +396,7 @@ export default function Forward() {
       maxConnsPerIP: num(rule.maxConnsPerIP),
       accessMode: access.mode || 'off',
       accessIps: (Array.isArray(access.ips) ? access.ips : []).join('\n'),
-      accessCountries: Array.isArray(access.countries) ? [...access.countries] : [],
-      accessProvinces: Array.isArray(access.provinces) ? [...access.provinces] : [],
+      accessGeo: Array.isArray(access.geo) ? [...access.geo] : [],
       remark: rule.remark || '',
     })
     setErrors({})
@@ -435,8 +428,7 @@ export default function Forward() {
       access: {
         mode: form.accessMode || 'off',
         ips: splitLines(form.accessIps),
-        countries: [...form.accessCountries],
-        provinces: [...form.accessProvinces],
+        geo: [...form.accessGeo],
         // The form does not edit the User-Agent filter, so carry it over
         // unchanged. Dropping it here would silently disable a configured one.
         uaMode: originalAccess.uaMode || 'off',
@@ -883,21 +875,11 @@ export default function Forward() {
 
           <FormField full>
             <TagInput
-              label="国家/地区（ip2region）"
-              value={form.accessCountries}
-              onChange={(value) => patchForm({ accessCountries: value })}
-              placeholder="输入国家名后回车，例如 中国、美国"
-              hint="与 IP 列表取并集；需把 IP 访问控制设为白名单/黑名单，并先在「设置 → IP 地址库」配置数据库。"
-            />
-          </FormField>
-          <FormField full>
-            <MultiSelectInput
-              label="省份（ip2region）"
-              value={form.accessProvinces}
-              onChange={(value) => patchForm({ accessProvinces: value })}
-              options={provinces.options}
-              placeholder="选择省份"
-              hint={`与 IP 列表取并集；省份列表${provinces.source === 'database' ? '来自 ip2region 地址库' : '为内置列表'}，私有地址不参与地理匹配。`}
+              label="国家 / 省份 / 城市"
+              value={form.accessGeo}
+              onChange={(value) => patchForm({ accessGeo: value })}
+              placeholder="输入后回车，例如 中国、浙江、杭州"
+              hint="同一个列表，命中任意一项即匹配；与 IP 列表取并集，需先把访问策略设为白名单/黑名单并上传地址库。"
             />
           </FormField>
 

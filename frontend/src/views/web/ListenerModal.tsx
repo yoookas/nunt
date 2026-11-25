@@ -11,14 +11,19 @@ import {
   toast,
 } from '../../ui'
 import {
+  ACCESS_OPTIONS,
   CLIENT_AUTH_OPTIONS,
   TLS_OPTIONS,
   certOptions,
+  normalizeAccessMode,
   normalizeClientAuth,
   normalizeTLSMode,
+  normalizeUAMode,
   type Certificate,
+  type AccessMode,
   type ClientAuthMode,
   type TLSMode,
+  type UAMode,
   type WebListenerView,
 } from './types'
 
@@ -30,6 +35,11 @@ interface ListenerForm {
   tlsHsts: boolean
   clientAuth: ClientAuthMode
   clientCa: string
+  accessMode: AccessMode
+  accessIps: string
+  accessGeo: string[]
+  uaMode: UAMode
+  uaList: string
   remark: string
 }
 
@@ -42,6 +52,11 @@ function blankForm(): ListenerForm {
     tlsHsts: false,
     clientAuth: 'off',
     clientCa: '',
+    accessMode: 'off',
+    accessIps: '',
+    accessGeo: [],
+    uaMode: 'off',
+    uaList: '',
     remark: '',
   }
 }
@@ -76,6 +91,11 @@ export default function ListenerModal({
       tlsHsts: !!listener.tls?.hsts,
       clientAuth: normalizeClientAuth(listener.tls?.clientAuth),
       clientCa: listener.tls?.clientCa || '',
+      accessMode: normalizeAccessMode(listener.access?.mode),
+      accessIps: (Array.isArray(listener.access?.ips) ? listener.access?.ips ?? [] : []).join('\n'),
+      accessGeo: Array.isArray(listener.access?.geo) ? [...(listener.access?.geo ?? [])] : [],
+      uaMode: normalizeUAMode(listener.access?.uaMode),
+      uaList: (Array.isArray(listener.access?.uas) ? listener.access?.uas ?? [] : []).join('\n'),
       remark: listener.remark || '',
     })
   }, [open, listener])
@@ -108,6 +128,13 @@ export default function ListenerModal({
         hsts: mode !== 'off' && form.tlsHsts,
         clientAuth,
         clientCa: clientAuth === 'off' ? '' : form.clientCa.trim(),
+      },
+      access: {
+        mode: form.accessMode,
+        ips: form.accessIps.split('\n').map((item) => item.trim()).filter(Boolean),
+        geo: [...form.accessGeo],
+        uaMode: form.uaMode,
+        uas: form.uaList.split('\n').map((item) => item.trim()).filter(Boolean),
       },
       remark: form.remark.trim(),
     }
@@ -220,6 +247,59 @@ export default function ListenerModal({
               placeholder={certificates.length ? '选择已上传的证书' : '还没有可用证书，请先到「证书」页面申请或上传'}
               required
               hint="证书来自「证书」页面；指定证书模式下，该监听器下的所有域名都使用这张证书。"
+            />
+          </div>
+        ) : null}
+
+        <div className="md:col-span-2 mt-1 border-t border-border pt-3">
+          <div className="text-sm font-medium">访问过滤（监听器默认）</div>
+          <div className="mt-1 text-xs leading-6 text-muted">
+            这里配置的规则会作用于本监听器下所有「继承监听器」的路由；路由也可以改成自定义规则来覆盖它。
+          </div>
+        </div>
+        <SelectInput
+          label="访问策略"
+          value={form.accessMode}
+          onChange={(value) => patch({ accessMode: normalizeAccessMode(value) })}
+          options={ACCESS_OPTIONS}
+        />
+        <SelectInput
+          label="UA 策略"
+          value={form.uaMode}
+          onChange={(value) => patch({ uaMode: normalizeUAMode(value) })}
+          options={ACCESS_OPTIONS}
+        />
+        {form.accessMode !== 'off' ? (
+          <>
+            <div className="md:col-span-2">
+              <TextAreaInput
+                label="IP 列表"
+                value={form.accessIps}
+                onChange={(value) => patch({ accessIps: value })}
+                rows={2}
+                placeholder="每行一条，支持 CIDR，例如 192.168.1.0/24"
+                hint="与地区列表取并集"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <TagInput
+                label="国家 / 省份 / 城市"
+                value={form.accessGeo}
+                onChange={(value) => patch({ accessGeo: value })}
+                placeholder="输入后回车，例如 中国、浙江、杭州"
+                hint="同一个列表，命中任意一项即匹配；需先在「IP 地址库」上传地址库"
+              />
+            </div>
+          </>
+        ) : null}
+        {form.uaMode !== 'off' ? (
+          <div className="md:col-span-2">
+            <TextAreaInput
+              label="UA 列表"
+              value={form.uaList}
+              onChange={(value) => patch({ uaList: value })}
+              rows={2}
+              placeholder="每行一条，支持 * 通配，例如 *bot*"
             />
           </div>
         ) : null}

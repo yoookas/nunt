@@ -546,6 +546,10 @@ func (w *Web) disableListeners(ids []string) {
 func (w *Web) compileWeb(cfg *model.Config) ([]*rule, map[string]*listenerPlan, []error) {
 	plans := map[string]*listenerPlan{}
 	byListener := map[string][]*listenerPlan{}
+	listenerAccess := map[string]model.Access{}
+	for _, l := range cfg.Web.Listeners {
+		listenerAccess[l.ID] = l.Access
+	}
 	var errs []error
 	for _, l := range cfg.Web.Listeners {
 		if l.Disabled {
@@ -596,12 +600,19 @@ func (w *Web) compileWeb(cfg *model.Config) ([]*rule, map[string]*listenerPlan, 
 			errs = append(errs, fmt.Errorf("route %q: %w", displayRuleName(raw), err))
 			continue
 		}
-		filter, err := ipfilter.Compile(raw.Access, w.deps.Geo)
+		// A route with mode "inherit" uses the access rule of its listener;
+		// any other mode is the route's own rule.
+		access := raw.Access
+		if access.Mode == model.AccessInherit {
+			access = listenerAccess[raw.ListenerID]
+		}
+		filter, err := ipfilter.Compile(access, w.deps.Geo)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("route %q: %w", displayRuleName(raw), err))
 			continue
 		}
 		r.filter = filter
+		r.spec.Access = access
 
 		list := byListener[raw.ListenerID]
 		if len(list) == 0 {

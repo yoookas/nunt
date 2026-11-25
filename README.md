@@ -11,8 +11,8 @@
 
 | 模块 | 说明 |
 | --- | --- |
-| **Web 服务** | 监听器 / 路由两层：监听器负责监听地址与 TLS（关闭 / 自动证书 / 指定证书，可选客户端证书校验 mTLS），路由按「域名 + 路径」选择上游，同一端口可挂多个域名；支持 3 种路由类型：反向代理、重定向、静态托管，以及 IP/UA 黑白名单（IP 段可与 ip2region 国家/省份组合过滤）、HTTP Basic 认证、多上游负载均衡（轮询/随机/IP 哈希，连续失败的节点自动摘除 30 秒、恢复后自动回归，幂等请求失败自动换一个节点重试一次）、路径重写、自定义请求/响应头、CORS（含预检短路）、WebSocket、访问日志 |
-| **端口转发** | TCP / UDP / 同时转发，源地址 → 目标地址，支持 IPv6、源 IP 黑白名单（IP 段 + ip2region 国家/省份）、空闲超时、活跃与累计连接数、上下行流量统计、访问日志 |
+| **Web 服务** | 监听器 / 路由两层：监听器负责监听地址与 TLS（关闭 / 自动证书 / 指定证书，可选客户端证书校验 mTLS），路由按「域名 + 路径」选择上游，同一端口可挂多个域名；支持 3 种路由类型：反向代理、重定向、静态托管，以及 IP/UA 黑白名单（监听器可设默认规则，路由继承或自定义；IP 段可与 ip2region 国家/省份/城市组合过滤）、HTTP Basic 认证、多上游负载均衡（轮询/随机/IP 哈希，连续失败的节点自动摘除 30 秒、恢复后自动回归，幂等请求失败自动换一个节点重试一次）、路径重写、自定义请求/响应头、CORS（含预检短路）、WebSocket、访问日志 |
+| **端口转发** | TCP / UDP / 同时转发，源地址 → 目标地址，支持 IPv6、源 IP 黑白名单（IP 段 + ip2region 国家/省份/城市）、空闲超时、活跃与累计连接数、上下行流量统计、访问日志 |
 | **动态域名 DDNS** | 内置阿里云 DNS、腾讯云 DNS（DNSPod）、Cloudflare（API Token）、Spaceship 与「自定义回调」；支持多子域名、A/AAAA、TTL、间隔或 cron 调度、公网 IP 探测（网卡 / URL / 静态）、变化才更新 |
 | **ACME 自动证书** | 基于 `golang.org/x/crypto/acme` 自研签发流程，支持 http-01 / dns-01 / tls-alpn-01，DNS-01 复用 DDNS 的提供商；**http-01 / tls-alpn-01 复用 web 的 :80 / :443 监听**（端口被自家规则占用也能签发），自动续期（默认剩余 30 天，上限 30 天），证书热加载、无需重启；统一使用 Let's Encrypt（可在证书页切到 staging 环境调试挑战，签发的测试证书不被浏览器信任）；证书页可配置账户邮箱与默认密钥类型；支持手动上传证书；证书可备注，并可导出为 zip（证书链 + 私钥）用于备份迁移 |
 | **Coraza WAF** | 内嵌 OWASP CRS 规则集，支持检测/拦截模式、PL 等级、入站/出站阈值、规则文件勾选、自定义 SecLang 规则、请求体上限、拦截日志与在线测试；可保护管理后台本身 |
@@ -253,8 +253,8 @@ internal/logstore   访问日志落盘（JSONL、轮转、保留策略、游标�
 internal/logging    进程日志（ring buffer、SSE 订阅、按大小轮转的文件）
 internal/dnsprov    DNS 提供商（DDNS 与 ACME DNS-01 共用）
 internal/certs      证书仓库（SNI 热加载）
-internal/ip2region  IP 地理库（ip2region xdb：国家/省份）
-internal/ipfilter    访问控制过滤器（CIDR + 国家/省份）
+internal/ip2region  IP 地理库（ip2region xdb：国家/省份/城市）
+internal/ipfilter    访问控制过滤器（CIDR + 国家/省份/城市）
 internal/vfs        安全文件系统抽象（os.Root）
 internal/security   密码、会话、限流
 internal/rest       路由与 JSON 工具

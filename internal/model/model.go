@@ -38,6 +38,9 @@ const (
 	AccessOff   = "off"
 	AccessAllow = "allow"
 	AccessDeny  = "deny"
+	// AccessInherit is a web route mode: use the access rule of the listener
+	// the route belongs to.
+	AccessInherit = "inherit"
 )
 
 // Config is the root document.
@@ -159,7 +162,10 @@ type WebListener struct {
 	Name string `json:"name"`
 	// Disabled marks a listener that was stopped, for example because its
 	// port is already taken. It is skipped until the operator enables it.
-	Disabled  bool      `json:"disabled,omitempty"`
+	Disabled bool `json:"disabled,omitempty"`
+	// Access is the default filter of the routes on this listener. A route
+	// with mode "inherit" uses it; a route with its own mode overrides it.
+	Access    Access    `json:"access"`
 	Listen    []string  `json:"listen"`
 	TLS       WebTLS    `json:"tls"`
 	Remark    string    `json:"remark,omitempty"`
@@ -207,8 +213,12 @@ type WebTLS struct {
 type Access struct {
 	Mode string   `json:"mode"`
 	IPs  []string `json:"ips,omitempty"`
-	// Countries and Provinces are matched against the ip2region database and
+	// Geo lists countries, provinces or cities. Every entry is matched against
+	// the ip2region country, province and city fields, and the whole list is
 	// combined with IPs as a union under the same mode.
+	Geo []string `json:"geo,omitempty"`
+	// Countries and Provinces are the old split lists. They are read once by
+	// the normaliser, merged into Geo and never written again.
 	Countries []string `json:"countries,omitempty"`
 	Provinces []string `json:"provinces,omitempty"`
 	UAMode    string   `json:"uaMode,omitempty"`

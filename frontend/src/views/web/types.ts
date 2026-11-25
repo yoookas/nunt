@@ -7,7 +7,7 @@ import type { SelectOption } from '../../ui'
 export type RouteType = 'proxy' | 'redirect' | 'static'
 export type TLSMode = 'off' | 'auto' | 'custom'
 export type ClientAuthMode = 'off' | 'request' | 'require'
-export type AccessMode = 'off' | 'allow' | 'deny'
+export type AccessMode = 'off' | 'allow' | 'deny' | 'inherit'
 export type UAMode = 'off' | 'allow' | 'deny'
 
 export interface WebTLS {
@@ -20,6 +20,7 @@ export interface WebTLS {
 
 export interface WebListener {
   id: string
+  access?: AccessFilter
   name: string
   /** Stopped, for example because its port is taken. */
   disabled?: boolean
@@ -37,8 +38,8 @@ export interface WebListenerView extends WebListener {
 export interface AccessFilter {
   mode: AccessMode
   ips?: string[]
-  countries?: string[]
-  provinces?: string[]
+  /** Countries, provinces or cities; one flattened list. */
+  geo?: string[]
   uaMode?: UAMode
   uas?: string[]
 }
@@ -191,6 +192,11 @@ export const ACCESS_OPTIONS: SelectOption[] = [
   { value: 'deny', label: '黑名单（拒绝以下列表）' },
 ]
 
+export const ROUTE_ACCESS_OPTIONS: SelectOption[] = [
+  { value: 'inherit', label: '继承监听器' },
+  ...ACCESS_OPTIONS,
+]
+
 export const BALANCE_OPTIONS: SelectOption[] = [
   { value: 'roundrobin', label: '轮询' },
   { value: 'leastconn', label: '最少连接' },
@@ -235,9 +241,14 @@ export function normalizeClientAuth(value: unknown): ClientAuthMode {
   return 'off'
 }
 
+export function normalizeUAMode(value: unknown): UAMode {
+  const mode = normalizeAccessMode(value)
+  return mode === 'allow' || mode === 'deny' ? mode : 'off'
+}
+
 export function normalizeAccessMode(value: unknown): AccessMode {
   const mode = String(value ?? '').trim().toLowerCase()
-  if (mode === 'allow' || mode === 'deny') return mode
+  if (mode === 'allow' || mode === 'deny' || mode === 'inherit') return mode
   return 'off'
 }
 

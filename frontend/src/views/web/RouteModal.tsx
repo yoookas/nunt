@@ -2,10 +2,8 @@ import { useEffect, useState } from 'react'
 import { Button, Input, TextField } from '@heroui/react'
 import { api, errorText } from '../../api'
 import { splitLines, splitList } from '../../format'
-import { useProvinces } from '../../useProvinces'
 import {
   FormModal,
-  MultiSelectInput,
   NumberInput,
   SelectInput,
   SwitchInput,
@@ -18,12 +16,14 @@ import {
 import {
   ACCESS_OPTIONS,
   BALANCE_OPTIONS,
+  ROUTE_ACCESS_OPTIONS,
   REDIRECT_STATUS_OPTIONS,
   TYPE_OPTIONS,
   balanceValue,
   kvToText,
   listenerOptions,
   normalizeAccessMode,
+  normalizeUAMode,
   textToKV,
   type AccessMode,
   type BasicAuthUser,
@@ -54,8 +54,7 @@ interface RouteForm {
   waf: boolean
   accessMode: AccessMode
   accessIps: string
-  accessCountries: string[]
-  accessProvinces: string[]
+  accessGeo: string[]
   uaMode: UAMode
   uaList: string
   authEnable: boolean
@@ -102,8 +101,7 @@ function blankForm(): RouteForm {
     waf: false,
     accessMode: 'off',
     accessIps: '',
-    accessCountries: [],
-    accessProvinces: [],
+    accessGeo: [],
     uaMode: 'off',
     uaList: '',
     authEnable: false,
@@ -168,7 +166,6 @@ export default function RouteModal({
   onClose: () => void
   onSaved: () => void
 }) {
-  const provinces = useProvinces()
   const [form, setForm] = useState<RouteForm>(blankForm)
   const [existingAuthNames, setExistingAuthNames] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
@@ -209,9 +206,8 @@ export default function RouteModal({
       waf: !!rule.waf,
       accessMode: normalizeAccessMode(access?.mode),
       accessIps: (Array.isArray(access?.ips) ? access?.ips ?? [] : []).join('\n'),
-      accessCountries: Array.isArray(access?.countries) ? [...(access?.countries ?? [])] : [],
-      accessProvinces: Array.isArray(access?.provinces) ? [...(access?.provinces ?? [])] : [],
-      uaMode: normalizeAccessMode(access?.uaMode),
+      accessGeo: Array.isArray(access?.geo) ? [...(access?.geo ?? [])] : [],
+      uaMode: normalizeUAMode(access?.uaMode),
       uaList: (Array.isArray(access?.uas) ? access?.uas ?? [] : []).join('\n'),
       authEnable: !!auth?.enable,
       authUsers: (Array.isArray(auth?.users) ? auth?.users ?? [] : []).map((user) => ({
@@ -362,8 +358,7 @@ export default function RouteModal({
       access: {
         mode: AccessMode
         ips: string[]
-        countries: string[]
-        provinces: string[]
+        geo: string[]
         uaMode: UAMode
         uas: string[]
       }
@@ -384,8 +379,7 @@ export default function RouteModal({
       access: {
         mode: form.accessMode,
         ips: splitLines(form.accessIps),
-        countries: [...form.accessCountries],
-        provinces: [...form.accessProvinces],
+        geo: [...form.accessGeo],
         uaMode: form.uaMode,
         uas: splitLines(form.uaList),
       },
@@ -624,18 +618,17 @@ export default function RouteModal({
 
           <Section title="访问控制" />
           <SelectInput
-            label="IP 策略"
+            label="访问策略"
             value={form.accessMode}
             onChange={(value) => patch({ accessMode: normalizeAccessMode(value) })}
-            options={ACCESS_OPTIONS}
+            options={ROUTE_ACCESS_OPTIONS}
+            hint="继承监听器：使用所属监听器的规则；自定义：本条路由覆盖监听器规则"
           />
-          <SelectInput
-            label="UA 策略"
-            value={form.uaMode}
-            onChange={(value) => patch({ uaMode: normalizeAccessMode(value) })}
-            options={ACCESS_OPTIONS}
-          />
-          {form.accessMode !== 'off' ? (
+          {form.accessMode === 'inherit' ? (
+            <div className="md:col-span-2 text-xs leading-6 text-muted">
+              使用监听器「{listeners.find((l) => l.id === form.listenerId)?.name || form.listenerId || '未选择'}」的 IP / 地区 / UA 过滤规则。
+            </div>
+          ) : form.accessMode !== 'off' ? (
             <>
               <div className="md:col-span-2">
                 <TextAreaInput
@@ -644,40 +637,36 @@ export default function RouteModal({
                   onChange={(value) => patch({ accessIps: value })}
                   rows={2}
                   placeholder="每行一条，支持 CIDR，例如 192.168.1.0/24"
-                  hint="与下面的国家/省份取并集，命中任意一条即放行（白名单）或拒绝（黑名单）"
+                  hint="与下面的地区列表取并集，命中任意一条即放行（白名单）或拒绝（黑名单）"
                 />
               </div>
               <div className="md:col-span-2">
                 <TagInput
-                  label="国家/地区（ip2region）"
-                  value={form.accessCountries}
-                  onChange={(value) => patch({ accessCountries: value })}
-                  placeholder="输入国家名后回车，例如 中国、美国"
-                  hint="与 IP 列表取并集；需先在「设置 → IP 地址库」配置数据库"
+                  label="国家 / 省份 / 城市"
+                  value={form.accessGeo}
+                  onChange={(value) => patch({ accessGeo: value })}
+                  placeholder="输入后回车，例如 中国、浙江、杭州"
+                  hint="同一个列表：国家、省份、城市混写，命中任意一项即匹配；需先在「IP 地址库」上传地址库"
                 />
               </div>
-              <div className="md:col-span-2">
-                <MultiSelectInput
-                  label="省份（ip2region）"
-                  value={form.accessProvinces}
-                  onChange={(value) => patch({ accessProvinces: value })}
-                  options={provinces.options}
-                  placeholder="选择省份"
-                  hint={`省份列表${provinces.source === 'database' ? '来自 ip2region 地址库' : '为内置列表'}，私有地址不参与地理匹配`}
-                />
-              </div>
-            </>
-          ) : null}
-          {form.uaMode !== 'off' ? (
-            <div className="md:col-span-2">
-              <TextAreaInput
-                label="UA 列表"
-                value={form.uaList}
-                onChange={(value) => patch({ uaList: value })}
-                rows={2}
-                placeholder="每行一条，支持 * 通配，例如 *bot*"
+              <SelectInput
+                label="UA 策略"
+                value={form.uaMode}
+                onChange={(value) => patch({ uaMode: normalizeUAMode(value) })}
+                options={ACCESS_OPTIONS}
               />
-            </div>
+              {form.uaMode !== 'off' ? (
+                <div className="md:col-span-2">
+                  <TextAreaInput
+                    label="UA 列表"
+                    value={form.uaList}
+                    onChange={(value) => patch({ uaList: value })}
+                    rows={2}
+                    placeholder="每行一条，支持 * 通配，例如 *bot*"
+                  />
+                </div>
+              ) : null}
+            </>
           ) : null}
 
           <Section title="BasicAuth" />

@@ -517,15 +517,12 @@ func fingerprint(r model.ForwardRule) string {
 func accessFingerprint(a model.Access) string {
 	ips := append([]string{}, a.IPs...)
 	sort.Strings(ips)
-	countries := append([]string{}, a.Countries...)
-	sort.Strings(countries)
-	provinces := append([]string{}, a.Provinces...)
-	sort.Strings(provinces)
+	geo := append([]string{}, a.Geo...)
+	sort.Strings(geo)
 	return strings.Join([]string{
 		a.Mode,
 		strings.Join(ips, ","),
-		strings.Join(countries, ","),
-		strings.Join(provinces, ","),
+		strings.Join(geo, ","),
 	}, "~")
 }
 

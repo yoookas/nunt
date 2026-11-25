@@ -20,7 +20,7 @@ func geoWebRule(mode string, mutate func(*model.WebRule)) model.WebRule {
 		ID: "rule-geo", Name: "geo", Enable: true, Type: model.WebTypeProxy,
 		ListenerID: "l1", Path: "/geo",
 		Proxy:  &model.ProxyTarget{Targets: []string{"http://127.0.0.1:9000"}},
-		Access: model.Access{Mode: mode, Countries: []string{"中国"}},
+		Access: model.Access{Mode: mode, Geo: []string{"中国"}},
 	}
 	if mutate != nil {
 		mutate(&r)
@@ -30,7 +30,7 @@ func geoWebRule(mode string, mutate func(*model.WebRule)) model.WebRule {
 
 func TestGeoAccessRequiresDatabaseForEnabledRules(t *testing.T) {
 	cfg := geoConfig(geoWebRule(model.AccessAllow, nil))
-	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "ip2regionDb") {
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "address database") {
 		t.Fatalf("enabled geo rule without a database = %v", err)
 	}
 
@@ -49,11 +49,11 @@ func TestGeoAccessRequiresDatabaseForEnabledRules(t *testing.T) {
 func TestGeoAccessValidation(t *testing.T) {
 	cases := map[string]model.WebRule{
 		"off mode": geoWebRule(model.AccessOff, nil),
-		"unknown province": geoWebRule(model.AccessAllow, func(r *model.WebRule) {
-			r.Access.Provinces = []string{"火星"}
+		"pipe in entry": geoWebRule(model.AccessAllow, func(r *model.WebRule) {
+			r.Access.Geo = []string{"中国|美国"}
 		}),
-		"pipe in country": geoWebRule(model.AccessAllow, func(r *model.WebRule) {
-			r.Access.Countries = []string{"中国|美国"}
+		"invalid cidr": geoWebRule(model.AccessAllow, func(r *model.WebRule) {
+			r.Access.IPs = []string{"192.168.1.0/33"}
 		}),
 	}
 	for name, rule := range cases {
@@ -67,19 +67,40 @@ func TestGeoAccessValidation(t *testing.T) {
 	}
 }
 
-func TestNormalizeGeoAccess(t *testing.T) {
+func TestNormalizeAccessFlattensLegacyLists(t *testing.T) {
 	access := model.Access{
 		Mode:      model.AccessAllow,
+		Geo:       []string{" 杭州 "},
 		Countries: []string{" 中国 ", "中国", "", "美国"},
 		Provinces: []string{"浙江省", "浙江", " 北京市 ", "火星"},
 	}
-	normalizeGeoAccess(&access)
-	if got := strings.Join(access.Countries, ","); got != "中国,美国" {
-		t.Fatalf("countries = %q", got)
+	normalizeAccess(&access, true)
+	// Known provinces collapse to the short form, legacy lists are merged and
+	// cleared, duplicates disappear and a city stays as typed.
+	want := "杭州,中国,美国,浙江,北京,火星"
+	if got := strings.Join(access.Geo, ","); got != want {
+		t.Fatalf("geo = %q, want %q", got, want)
 	}
-	// Unknown provinces are kept for Validate to reject; known ones collapse
-	// to the short form.
-	if got := strings.Join(access.Provinces, ","); got != "浙江,北京,火星" {
-		t.Fatalf("provinces = %q", got)
+	if len(access.Countries) != 0 || len(access.Provinces) != 0 {
+		t.Fatalf("legacy lists must be cleared: %+v", access)
+	}
+}
+
+func TestNormalizeAccessInherit(t *testing.T) {
+	access := model.Access{
+		Mode: model.AccessInherit,
+		IPs:  []string{"10.0.0.0/8"},
+		Geo:  []string{"中国"},
+		UAs:  []string{"*bot*"},
+	}
+	normalizeAccess(&access, true)
+	if access.Mode != model.AccessInherit || len(access.IPs) != 0 || len(access.Geo) != 0 || len(access.UAs) != 0 {
+		t.Fatalf("an inherited rule must not carry its own lists: %+v", access)
+	}
+	// Forward rules have no listener to inherit from.
+	forward := model.Access{Mode: model.AccessInherit}
+	normalizeAccess(&forward, false)
+	if forward.Mode != model.AccessOff {
+		t.Fatalf("forward inherit = %q, want off", forward.Mode)
 	}
 }
