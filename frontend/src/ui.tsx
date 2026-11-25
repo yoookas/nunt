@@ -1,5 +1,22 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import {
   Alert,
   AlertDialog,
   Button,
@@ -26,7 +43,7 @@ import {
   Typography,
   toast,
 } from '@heroui/react'
-import { ChevronDown, ChevronLeft, ChevronRight, Minus, Plus, X } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, GripVertical, Minus, Plus, X } from 'lucide-react'
 
 export { toast }
 
@@ -66,6 +83,29 @@ export function PageHeader({
       ) : null}
     </header>
   )
+}
+
+/**
+ * mergeVisibleOrder keeps the positions of the visible items and fills them
+ * with the new visible order, leaving items hidden by a filter where they are.
+ */
+export function mergeVisibleOrder<T>(
+  all: T[],
+  getId: (item: T) => string,
+  reorderedVisible: string[],
+): T[] {
+  const visible = new Set(reorderedVisible)
+  const byId = new Map(all.map((item) => [getId(item), item]))
+  const slots: number[] = []
+  all.forEach((item, index) => {
+    if (visible.has(getId(item))) slots.push(index)
+  })
+  const out = [...all]
+  slots.forEach((slot, index) => {
+    const item = byId.get(reorderedVisible[index])
+    if (item !== undefined) out[slot] = item
+  })
+  return out
 }
 
 export function Section({
@@ -180,6 +220,108 @@ export interface Column<T> {
   className?: string
 }
 
+/**
+ * SortableList wraps anything whose children are SortableItem elements. The
+ * ids must match the rendered items; onReorder receives the new order after a
+ * drop.
+ */
+export function SortableList({
+  ids,
+  onReorder,
+  children,
+}: {
+  ids: string[]
+  onReorder: (next: string[]) => void
+  children: ReactNode
+}) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+  const onDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const from = ids.indexOf(String(active.id))
+    const to = ids.indexOf(String(over.id))
+    if (from < 0 || to < 0) return
+    onReorder(arrayMove(ids, from, to))
+  }
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+        {children}
+      </SortableContext>
+    </DndContext>
+  )
+}
+
+/** SortableTableRow is SortableItem for a HeroUI Table row. */
+function SortableTableRow({ id, children }: { id: string; children: ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  return (
+    <Table.Row
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.6 : undefined,
+      }}
+    >
+      <Table.Cell className="w-8">
+        <Button
+          isIconOnly
+          size="sm"
+          variant="ghost"
+          aria-label="拖动排序"
+          className="cursor-grab touch-none active:cursor-grabbing"
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical size={14} />
+        </Button>
+      </Table.Cell>
+      {children}
+    </Table.Row>
+  )
+}
+
+/** SortableItem renders its children with a drag handle passed as argument. */
+export function SortableItem({
+  id,
+  handleLabel,
+  children,
+}: {
+  id: string
+  handleLabel: string
+  children: (handle: ReactNode) => ReactNode
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.6 : undefined,
+      }}
+    >
+      {children(
+        <Button
+          isIconOnly
+          size="sm"
+          variant="ghost"
+          aria-label={handleLabel}
+          className="cursor-grab touch-none active:cursor-grabbing"
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical size={14} />
+        </Button>,
+      )}
+    </div>
+  )
+}
+
 export function DataTable<T>({
   items,
   columns,
@@ -188,6 +330,8 @@ export function DataTable<T>({
   ariaLabel = '数据表',
   loading,
   variant = 'secondary',
+  sortable = false,
+  onReorder,
 }: {
   items: T[]
   columns: Column<T>[]
@@ -197,6 +341,9 @@ export function DataTable<T>({
   loading?: boolean
   /** "secondary" is flat and belongs inside a panel; "primary" is a card. */
   variant?: 'primary' | 'secondary'
+  /** Rows get a drag handle and can be reordered by hand. */
+  sortable?: boolean
+  onReorder?: (next: string[]) => void
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [overflow, setOverflow] = useState(false)
@@ -243,6 +390,46 @@ export function DataTable<T>({
     )
   }
 
+  const ids = items.map((row) => rowKey(row))
+  const draggable = sortable && onReorder !== undefined
+  const table = (
+    <Table variant={variant}>
+      <Table.Content aria-label={ariaLabel}>
+        <Table.Header>
+          {draggable ? (
+            <Table.Column className="w-8">
+              <span className="sr-only">排序</span>
+            </Table.Column>
+          ) : null}
+          {columns.map((column, index) => (
+            <Table.Column key={column.key} isRowHeader={index === 0} className={column.className}>
+              {column.title}
+            </Table.Column>
+          ))}
+        </Table.Header>
+        <Table.Body>
+          {items.map((row) => {
+            const key = rowKey(row)
+            const cells = columns.map((column) => (
+              <Table.Cell key={column.key} className={column.className}>
+                {column.render(row)}
+              </Table.Cell>
+            ))
+            return draggable ? (
+              <SortableTableRow key={key} id={key}>
+                {cells}
+              </SortableTableRow>
+            ) : (
+              <Table.Row key={key} id={key}>
+                {cells}
+              </Table.Row>
+            )
+          })}
+        </Table.Body>
+      </Table.Content>
+    </Table>
+  )
+
   return (
     <div className="relative">
       <div
@@ -254,28 +441,13 @@ export function DataTable<T>({
         aria-label={`${ariaLabel}（可横向滚动）`}
       >
         <div className="min-w-[600px] md:min-w-0">
-          <Table variant={variant}>
-            <Table.Content aria-label={ariaLabel}>
-              <Table.Header>
-                {columns.map((column, index) => (
-                  <Table.Column key={column.key} isRowHeader={index === 0} className={column.className}>
-                    {column.title}
-                  </Table.Column>
-                ))}
-              </Table.Header>
-              <Table.Body>
-                {items.map((row) => (
-                  <Table.Row key={rowKey(row)} id={rowKey(row)}>
-                    {columns.map((column) => (
-                      <Table.Cell key={column.key} className={column.className}>
-                        {column.render(row)}
-                      </Table.Cell>
-                    ))}
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table.Content>
-          </Table>
+          {draggable ? (
+            <SortableList ids={ids} onReorder={onReorder}>
+              {table}
+            </SortableList>
+          ) : (
+            table
+          )}
         </div>
       </div>
 

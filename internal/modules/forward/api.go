@@ -2,6 +2,7 @@ package forward
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ func (f *Forward) registerAPI(mux *rest.Mux) {
 	g.Put("/rules/{id}", f.handleUpdateRule)
 	g.Delete("/rules/{id}", f.handleDeleteRule)
 	g.Post("/rules/{id}/toggle", f.handleToggleRule)
+	g.Post("/rules/order", f.handleReorderRules)
 	g.Post("/reload", f.handleReload)
 	g.Get("/logs", f.handleLogs)
 }
@@ -107,7 +109,7 @@ func (f *Forward) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 				return errors.New("a rule with this id already exists")
 			}
 		}
-		c.Forward.Rules = append(c.Forward.Rules, rule)
+		c.Forward.Rules = append([]model.ForwardRule{rule}, c.Forward.Rules...)
 		return nil
 	}); err != nil {
 		rest.Fail(w, http.StatusBadRequest, "cannot save the rule: %s", err)
@@ -115,6 +117,49 @@ func (f *Forward) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 	}
 	f.Reload(f.deps.Cfg.Snapshot())
 	rest.JSON(w, http.StatusCreated, rule)
+}
+
+// handleReorderRules stores the dragged order of the forward rules. Each rule
+// owns its listen address, so the order is presentational.
+func (f *Forward) handleReorderRules(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if err := rest.Decode(w, r, &body); err != nil {
+		rest.Fail(w, http.StatusBadRequest, "%s", err.Error())
+		return
+	}
+	if err := f.deps.Cfg.Update(func(c *model.Config) error {
+		have := make([]string, 0, len(c.Forward.Rules))
+		byID := make(map[string]model.ForwardRule, len(c.Forward.Rules))
+		for _, rule := range c.Forward.Rules {
+			have = append(have, rule.ID)
+			byID[rule.ID] = rule
+		}
+		if len(body.IDs) != len(have) {
+			return fmt.Errorf("the order must name every rule: got %d ids for %d rules", len(body.IDs), len(have))
+		}
+		seen := make(map[string]bool, len(have))
+		ordered := make([]model.ForwardRule, 0, len(body.IDs))
+		for _, id := range body.IDs {
+			rule, ok := byID[id]
+			if !ok {
+				return fmt.Errorf("unknown rule id %q", id)
+			}
+			if seen[id] {
+				return fmt.Errorf("duplicate rule id %q", id)
+			}
+			seen[id] = true
+			ordered = append(ordered, rule)
+		}
+		c.Forward.Rules = ordered
+		return nil
+	}); err != nil {
+		rest.Fail(w, http.StatusBadRequest, "cannot reorder the rules: %s", err)
+		return
+	}
+	f.Reload(f.deps.Cfg.Snapshot())
+	rest.NoContent(w)
 }
 
 func (f *Forward) handleUpdateRule(w http.ResponseWriter, r *http.Request) {

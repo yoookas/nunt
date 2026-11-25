@@ -6,6 +6,9 @@ import {
   ConfirmModal,
   DataTable,
   Page,
+  SortableItem,
+  SortableList,
+  mergeVisibleOrder,
   PageHeader,
   Panel,
   StatusChip,
@@ -180,6 +183,30 @@ export default function Web() {
     }
   }
 
+  const reorderListeners = async (nextIds: string[]) => {
+    const byId = new Map(listeners.map((listener) => [listener.id, listener]))
+    const next = nextIds.map((id) => byId.get(id)).filter((item): item is WebListenerView => !!item)
+    if (next.length !== listeners.length) return
+    setListeners(next)
+    try {
+      await api.post('/api/v1/web/listeners/order', { ids: nextIds })
+    } catch (err) {
+      toast.danger(errorText(err))
+      await loadListeners()
+    }
+  }
+
+  const reorderRules = async (nextVisibleIds: string[]) => {
+    const next = mergeVisibleOrder(rules, (rule) => rule.id, nextVisibleIds)
+    setRules(next)
+    try {
+      await api.post('/api/v1/web/rules/order', { ids: next.map((rule) => rule.id) })
+    } catch (err) {
+      toast.danger(errorText(err))
+      await loadRules()
+    }
+  }
+
   const toggleRule = async (rule: WebRule, enabled: boolean) => {
     if (busyRuleId) return
     const previous = rule.enable
@@ -314,7 +341,7 @@ export default function Web() {
               <span className="mono shrink-0">{row.path || '/'}</span>
               <span className="truncate">{row.name || row.id}</span>
               {selectedListenerId === 'all' ? (
-                <span className="truncate rounded-full bg-default px-1.5 py-px text-[10px]">
+                <span className="max-w-24 truncate rounded-full bg-default px-1.5 py-px text-[10px]">
                   {listenerName(listeners, row.listenerId)}
                 </span>
               ) : null}
@@ -332,7 +359,7 @@ export default function Web() {
     {
       key: 'target',
       title: '上游',
-      className: 'w-56',
+      className: 'w-48',
       render: (row) => (
         <span className="mono block max-w-56 truncate text-xs text-muted" title={targetText(row)}>
           {targetText(row)}
@@ -342,7 +369,7 @@ export default function Web() {
     {
       key: 'security',
       title: '安全',
-      className: 'w-40',
+      className: 'w-36',
       render: (row) => {
         const mode = tlsModeOf(listenerOf(row.listenerId))
         return (
@@ -446,11 +473,19 @@ export default function Web() {
           {/* A flat list instead of cards inside a card: the panel border and
               dividers do the separating, so each row is one click target plus
               two icon actions. */}
-          <div className="divide-y divide-border">
+          <SortableList ids={listeners.map((listener) => listener.id)} onReorder={(ids) => void reorderListeners(ids)}>
+            <div className="divide-y divide-border">
             {listeners.map((listener) => {
               const mode = tlsModeOf(listener)
               return (
-                <div key={listener.id} className="flex items-center gap-1 px-3 py-2.5">
+                <SortableItem
+                  key={listener.id}
+                  id={listener.id}
+                  handleLabel={`拖动排序监听器 ${listener.name || listener.id}`}
+                >
+                  {(handle) => (
+                <div className="flex items-center gap-1 px-2 py-2.5">
+                  {handle}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
                       <span className="truncate text-sm font-medium">{listener.name || listener.id}</span>
@@ -498,12 +533,15 @@ export default function Web() {
                     <Trash2 size={14} />
                   </Button>
                 </div>
+                  )}
+                </SortableItem>
               )
             })}
             {!listeners.length && !listenerLoading ? (
               <div className="px-4 py-8 text-center text-sm text-muted">还没有监听器</div>
             ) : null}
-          </div>
+            </div>
+          </SortableList>
         </Panel>
 
         <section className="min-w-0">
@@ -555,6 +593,8 @@ export default function Web() {
             rowKey={(row) => row.id}
             ariaLabel="Web 路由"
             variant="primary"
+            sortable
+            onReorder={(ids) => void reorderRules(ids)}
             empty={loading ? '加载中…' : routeEmptyText}
           />
         </section>

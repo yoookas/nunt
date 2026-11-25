@@ -1236,3 +1236,23 @@ func TestLogBufferRingAndFilter(t *testing.T) {
 		t.Fatalf("after resize %d entries", len(rows))
 	}
 }
+
+// A reorder must name every item exactly once; anything else would drop or
+// duplicate configuration entries.
+func TestIdsInOrder(t *testing.T) {
+	have := []string{"a", "b", "c"}
+	if err := idsInOrder([]string{"c", "a", "b"}, have); err != nil {
+		t.Fatalf("a permutation must pass: %v", err)
+	}
+	cases := map[string][]string{
+		"missing":   {"a", "b"},
+		"extra":     {"a", "b", "c", "d"},
+		"duplicate": {"a", "a", "b"},
+		"unknown":   {"a", "b", "z"},
+	}
+	for name, ids := range cases {
+		if err := idsInOrder(ids, have); err == nil {
+			t.Fatalf("%s: expected an error for %v", name, ids)
+		}
+	}
+}

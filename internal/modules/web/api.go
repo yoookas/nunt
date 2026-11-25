@@ -32,12 +32,14 @@ func (w *Web) registerAPI(mux *rest.Mux) {
 	g.Put("/listeners/{id}", w.handleUpdateListener)
 	g.Delete("/listeners/{id}", w.handleDeleteListener)
 	g.Post("/listeners/{id}/toggle", w.handleToggleListener)
+	g.Post("/listeners/order", w.handleReorderListeners)
 
 	g.Get("/rules", w.handleListRules)
 	g.Post("/rules", w.handleCreateRule)
 	g.Put("/rules/{id}", w.handleUpdateRule)
 	g.Delete("/rules/{id}", w.handleDeleteRule)
 	g.Post("/rules/{id}/toggle", w.handleToggleRule)
+	g.Post("/rules/order", w.handleReorderRules)
 	g.Get("/logs", w.handleLogs)
 	g.Post("/reload", w.handleReload)
 }
@@ -132,6 +134,106 @@ func (w *Web) handleToggleListener(rw http.ResponseWriter, req *http.Request) {
 	rest.Fail(rw, http.StatusNotFound, "listener not found")
 }
 
+// reorderRequest is the body of every order endpoint: the complete id list in
+// the wanted order.
+type reorderRequest struct {
+	IDs []string `json:"ids"`
+}
+
+// idsInOrder checks that want is a permutation of have: same length, no
+// duplicates, no unknown or missing ids. A reorder must never drop or invent an
+// item.
+func idsInOrder(want, have []string) error {
+	if len(want) != len(have) {
+		return fmt.Errorf("the order must name every item: got %d ids for %d items", len(want), len(have))
+	}
+	seen := make(map[string]bool, len(have))
+	for _, id := range have {
+		seen[id] = true
+	}
+	used := make(map[string]bool, len(want))
+	for _, id := range want {
+		if !seen[id] {
+			return fmt.Errorf("unknown id %q", id)
+		}
+		if used[id] {
+			return fmt.Errorf("duplicate id %q", id)
+		}
+		used[id] = true
+	}
+	return nil
+}
+
+// handleReorderListeners stores the dragged order of the listener list. The
+// order is display only for listeners, but it is kept in the configuration so
+// every console opens the same list.
+func (w *Web) handleReorderListeners(rw http.ResponseWriter, req *http.Request) {
+	if !requireAdmin(rw, req) {
+		return
+	}
+	var body reorderRequest
+	if err := rest.Decode(rw, req, &body); err != nil {
+		rest.Fail(rw, http.StatusBadRequest, "%s", err.Error())
+		return
+	}
+	if err := w.saveConfig(func(c *model.Config) error {
+		have := make([]string, 0, len(c.Web.Listeners))
+		byID := make(map[string]model.WebListener, len(c.Web.Listeners))
+		for _, l := range c.Web.Listeners {
+			have = append(have, l.ID)
+			byID[l.ID] = l
+		}
+		if err := idsInOrder(body.IDs, have); err != nil {
+			return err
+		}
+		ordered := make([]model.WebListener, 0, len(body.IDs))
+		for _, id := range body.IDs {
+			ordered = append(ordered, byID[id])
+		}
+		c.Web.Listeners = ordered
+		return nil
+	}); err != nil {
+		rest.Fail(rw, http.StatusBadRequest, "cannot reorder the listeners: %s", err)
+		return
+	}
+	rest.NoContent(rw)
+}
+
+// handleReorderRules stores the dragged order of the routes. The order is part
+// of the matching rules: among routes with the same path length and priority,
+// the earlier one wins (see betterRule).
+func (w *Web) handleReorderRules(rw http.ResponseWriter, req *http.Request) {
+	if !requireAdmin(rw, req) {
+		return
+	}
+	var body reorderRequest
+	if err := rest.Decode(rw, req, &body); err != nil {
+		rest.Fail(rw, http.StatusBadRequest, "%s", err.Error())
+		return
+	}
+	if err := w.saveConfig(func(c *model.Config) error {
+		have := make([]string, 0, len(c.Web.Rules))
+		byID := make(map[string]model.WebRule, len(c.Web.Rules))
+		for _, r := range c.Web.Rules {
+			have = append(have, r.ID)
+			byID[r.ID] = r
+		}
+		if err := idsInOrder(body.IDs, have); err != nil {
+			return err
+		}
+		ordered := make([]model.WebRule, 0, len(body.IDs))
+		for _, id := range body.IDs {
+			ordered = append(ordered, byID[id])
+		}
+		c.Web.Rules = ordered
+		return nil
+	}); err != nil {
+		rest.Fail(rw, http.StatusBadRequest, "cannot reorder the routes: %s", err)
+		return
+	}
+	rest.NoContent(rw)
+}
+
 // prepareListener normalises a listener received from the API.
 func prepareListener(l *model.WebListener) error {
 	l.Name = strings.TrimSpace(l.Name)
@@ -174,7 +276,7 @@ func (w *Web) handleCreateListener(rw http.ResponseWriter, req *http.Request) {
 	body.CreatedAt = now
 	body.UpdatedAt = now
 	if err := w.saveConfig(func(c *model.Config) error {
-		c.Web.Listeners = append(c.Web.Listeners, body)
+		c.Web.Listeners = append([]model.WebListener{body}, c.Web.Listeners...)
 		return nil
 	}); err != nil {
 		rest.Fail(rw, http.StatusBadRequest, "cannot save the listener: %s", err)
@@ -382,7 +484,7 @@ func (w *Web) handleCreateRule(rw http.ResponseWriter, req *http.Request) {
 	body.CreatedAt = now
 	body.UpdatedAt = now
 	if err := w.saveRule(func(c *model.Config) error {
-		c.Web.Rules = append(c.Web.Rules, body)
+		c.Web.Rules = append([]model.WebRule{body}, c.Web.Rules...)
 		return nil
 	}); err != nil {
 		rest.Fail(rw, http.StatusBadRequest, "cannot save rule: %s", err)

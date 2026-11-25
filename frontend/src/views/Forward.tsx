@@ -8,6 +8,7 @@ import {
   ConfirmModal,
   DataTable,
   FormModal,
+  mergeVisibleOrder,
   MultiSelectInput,
   NumberInput,
   Page,
@@ -359,6 +360,17 @@ export default function Forward() {
       return [rule.name, rule.srcAddr, rule.dstAddr, rule.remark].join(' ').toLowerCase().includes(q)
     })
   }, [rules, protoFilter, keyword])
+
+  const reorderRules = async (nextVisibleIds: string[]) => {
+    const next = mergeVisibleOrder(rules, (rule) => String(rule.id), nextVisibleIds)
+    setRules(next)
+    try {
+      await api.post('/api/v1/forward/rules/order', { ids: next.map((rule) => String(rule.id)) })
+    } catch (err) {
+      toast.danger(errorText(err))
+      await loadRules()
+    }
+  }
 
   const patchForm = (patch: Partial<RuleForm>) => setForm((prev) => ({ ...prev, ...patch }))
 
@@ -744,6 +756,8 @@ export default function Forward() {
             columns={columns}
             rowKey={(row) => String(row.id)}
             ariaLabel="转发规则"
+            sortable
+            onReorder={(ids) => void reorderRules(ids)}
             empty={loading ? '加载中…' : rules.length ? '没有符合筛选条件的规则' : '还没有端口转发规则'}
           />
         </Panel>
