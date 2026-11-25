@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -38,7 +41,7 @@ func (s *Server) registerSystem() {
 
 	g.Get("/ip2region", s.handleGetIP2Region)
 	g.Get("/ip2region/provinces", s.handleIP2RegionProvinces)
-	g.Put("/ip2region", s.handleUpdateIP2Region)
+	g.Post("/ip2region/upload", s.handleUploadIP2Region)
 	g.Post("/ip2region/reload", s.handleReloadIP2Region)
 	g.Post("/ip2region/lookup", s.handleIP2RegionLookup)
 }
@@ -174,6 +177,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// no longer edited by the system form. The update below replaces the whole
 	// SystemConfig, so an omitted field would silently wipe the database path.
 	req.IP2RegionDB = s.opts.Cfg.Snapshot().System.IP2RegionDB
+	req.IP2RegionV6DB = s.opts.Cfg.Snapshot().System.IP2RegionV6DB
 
 	// The listener moves first and the file is written only after the new
 	// address is bound: when the port is occupied, the process lacks the
@@ -502,7 +506,8 @@ func isMasked(v string) bool {
 
 // ip2regionStatus is the JSON view shared by the endpoints.
 type ip2regionStatus struct {
-	Status ip2region.Status `json:"status"`
+	V4 ip2region.Status `json:"v4"`
+	V6 ip2region.Status `json:"v6"`
 	// Provinces lists the provinces that the picker may offer. Source is
 	// "database" when they were enumerated from the loaded xdb and "builtin"
 	// when the built-in list is used as a fallback.
@@ -513,7 +518,7 @@ type ip2regionStatus struct {
 func (s *Server) ip2regionStatus() ip2regionStatus {
 	out := ip2regionStatus{Provinces: ip2region.Provinces(), Source: "builtin"}
 	if s.opts.Geo != nil {
-		out.Status = s.opts.Geo.Status()
+		out.V4, out.V6 = s.opts.Geo.Statuses()
 		if provinces, ok := s.opts.Geo.ProvincesFromDatabase(); ok && len(provinces) > 0 {
 			out.Provinces = provinces
 			out.Source = "database"
@@ -533,40 +538,98 @@ func (s *Server) handleIP2RegionProvinces(w http.ResponseWriter, r *http.Request
 	rest.OK(w, map[string]any{"provinces": status.Provinces, "source": status.Source})
 }
 
-// handleUpdateIP2Region validates the new database before saving it, so a
-// broken path never ends up in the configuration.
-func (s *Server) handleUpdateIP2Region(w http.ResponseWriter, r *http.Request) {
+// maxIP2RegionUpload caps the uploaded xdb file. The IPv6 database is the
+// largest of the two and stays well under this limit.
+const maxIP2RegionUpload = 256 << 20
+
+// handleUploadIP2Region stores an uploaded database in the data directory,
+// validates it, switches the matching family to it and reloads the service.
+// The version is taken from the file itself, never from the caller.
+func (s *Server) handleUploadIP2Region(w http.ResponseWriter, r *http.Request) {
 	if !requireAdmin(w, r) {
 		return
 	}
-	var req struct {
-		Path string `json:"path"`
-	}
-	if !jsonBody(w, r, &req) {
+	if s.opts.Geo == nil {
+		rest.Fail(w, http.StatusInternalServerError, "IP 地址库服务不可用")
 		return
 	}
-	path := strings.TrimSpace(req.Path)
-	if path != "" {
-		if s.opts.Geo == nil {
-			rest.Fail(w, http.StatusInternalServerError, "IP 地址库服务不可用")
-			return
+	if strings.TrimSpace(s.opts.DataDir) == "" {
+		rest.Fail(w, http.StatusInternalServerError, "数据目录不可用，无法保存地址库")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxIP2RegionUpload)
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		rest.Fail(w, http.StatusBadRequest, "无法读取上传内容（上限 %d MiB）：%s", maxIP2RegionUpload>>20, err)
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		rest.Fail(w, http.StatusBadRequest, "请求里没有 file 字段：%s", err)
+		return
+	}
+	defer func() { _ = file.Close() }()
+
+	tmp, err := os.CreateTemp(s.opts.DataDir, "ip2region-upload-*.xdb")
+	if err != nil {
+		rest.Fail(w, http.StatusInternalServerError, "无法写入临时文件：%s", err)
+		return
+	}
+	tmpPath := tmp.Name()
+	keepTemp := false
+	defer func() {
+		if !keepTemp {
+			_ = os.Remove(tmpPath)
 		}
-		if _, err := s.opts.Geo.Probe(path); err != nil {
-			rest.Fail(w, http.StatusBadRequest, "无法加载该地址库：%s", err)
-			return
-		}
+	}()
+	size, copyErr := io.Copy(tmp, file)
+	closeErr := tmp.Close()
+	if copyErr != nil || closeErr != nil {
+		rest.Fail(w, http.StatusBadRequest, "无法保存上传内容：%v", errors.Join(copyErr, closeErr))
+		return
+	}
+
+	status, err := s.opts.Geo.Probe(tmpPath)
+	if err != nil {
+		rest.Fail(w, http.StatusBadRequest, "不是有效的 ip2region xdb 地址库：%s", err)
+		return
+	}
+	if status.IPVersion != 4 && status.IPVersion != 6 {
+		rest.Fail(w, http.StatusBadRequest, "无法识别的地址库版本")
+		return
+	}
+	final := filepath.Join(s.opts.DataDir, fmt.Sprintf("ip2region_v%d.xdb", status.IPVersion))
+	if err := os.Rename(tmpPath, final); err != nil {
+		rest.Fail(w, http.StatusInternalServerError, "无法保存地址库：%s", err)
+		return
+	}
+	keepTemp = true
+	_ = os.Chmod(final, 0o600)
+
+	snap := s.opts.Cfg.Snapshot()
+	paths := ip2region.Paths{V4: snap.System.IP2RegionDB, V6: snap.System.IP2RegionV6DB}
+	isV6 := status.IPVersion == 6
+	if isV6 {
+		paths.V6 = final
+	} else {
+		paths.V4 = final
 	}
 	if err := s.opts.Cfg.Update(func(c *model.Config) error {
-		c.System.IP2RegionDB = path
+		if isV6 {
+			c.System.IP2RegionV6DB = final
+		} else {
+			c.System.IP2RegionDB = final
+		}
 		return nil
 	}); err != nil {
-		rest.Fail(w, http.StatusBadRequest, "无法保存地址库路径：%s", err)
+		rest.Fail(w, http.StatusInternalServerError, "无法保存地址库配置：%s", err)
 		return
 	}
-	s.audit(r, "system.ip2region", "path", path)
-	if s.opts.Reload != nil {
-		s.opts.Reload()
+	if err := s.opts.Geo.Configure(paths); err != nil {
+		rest.Fail(w, http.StatusInternalServerError, "已保存但重新加载失败：%s", err)
+		return
 	}
+	s.audit(r, "system.ip2region.upload",
+		"version", status.IPVersion, "file", header.Filename, "bytes", size)
 	rest.OK(w, s.ip2regionStatus())
 }
 

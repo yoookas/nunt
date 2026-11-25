@@ -106,9 +106,11 @@ type SystemConfig struct {
 	LoginLockMin  int    `json:"loginLockMinutes"`
 	Theme         string `json:"theme"`
 	BaseURL       string `json:"baseUrl,omitempty"`
-	// IP2RegionDB is the path of the ip2region xdb database used by the
+	// IP2RegionDB is the path of the IPv4 ip2region xdb database used by the
 	// country/province access filters.
 	IP2RegionDB string `json:"ip2regionDb,omitempty"`
+	// IP2RegionV6DB is the equivalent database for IPv6 addresses.
+	IP2RegionV6DB string `json:"ip2regionV6Db,omitempty"`
 }
 
 // User is the single administrator account. There is no user name: the

@@ -57,10 +57,10 @@ func TestNormalizeProvince(t *testing.T) {
 
 func TestEmptyService(t *testing.T) {
 	s := New()
-	if err := s.Configure(""); err != nil {
+	if err := s.Configure(Paths{}); err != nil {
 		t.Fatalf("empty configure: %v", err)
 	}
-	if s.Status().Loaded {
+	if v4, v6 := s.Statuses(); v4.Loaded || v6.Loaded {
 		t.Fatal("an empty service reports a loaded database")
 	}
 	if _, err := s.Lookup(net.ParseIP("1.1.1.1")); err != ErrUnavailable {
@@ -78,11 +78,11 @@ func TestConfigureRejectsBadFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New()
-	if err := s.Configure(bad); err == nil {
+	if err := s.Configure(Paths{V4: bad}); err == nil {
 		t.Fatal("a non xdb file must be rejected")
 	}
-	if status := s.Status(); status.Loaded || status.Error == "" {
-		t.Fatalf("status = %+v", status)
+	if v4, _ := s.Statuses(); v4.Loaded || v4.Error == "" {
+		t.Fatalf("status = %+v", v4)
 	}
 	if _, err := s.Probe(filepath.Join(dir, "missing.xdb")); err == nil {
 		t.Fatal("a missing file must be rejected")
@@ -111,11 +111,11 @@ func writeEmptyXDB(t *testing.T) string {
 func TestConcurrentLookups(t *testing.T) {
 	path := writeEmptyXDB(t)
 	s := New()
-	if err := s.Configure(path); err != nil {
+	if err := s.Configure(Paths{V4: path}); err != nil {
 		t.Fatalf("configure: %v", err)
 	}
-	if status := s.Status(); !status.Loaded || status.IPVersion != 4 {
-		t.Fatalf("status = %+v", status)
+	if v4, _ := s.Statuses(); !v4.Loaded || v4.IPVersion != 4 {
+		t.Fatalf("status = %+v", v4)
 	}
 	var wg sync.WaitGroup
 	errs := make(chan error, 64)
@@ -171,11 +171,74 @@ func TestProvincesFromDatabase(t *testing.T) {
 	if _, ok := s.ProvincesFromDatabase(); ok {
 		t.Fatal("an empty service reports a database")
 	}
-	if err := s.Configure(writeProvinceXDB(t)); err != nil {
+	if err := s.Configure(Paths{V4: writeProvinceXDB(t)}); err != nil {
 		t.Fatalf("configure: %v", err)
 	}
 	provinces, ok := s.ProvincesFromDatabase()
 	if !ok || len(provinces) != 1 || provinces[0] != "浙江" {
 		t.Fatalf("provinces = %v, ok = %v", provinces, ok)
+	}
+}
+
+// A database for one address family must not be installed for the other one.
+func TestConfigureRejectsTheWrongFamily(t *testing.T) {
+	s := New()
+	if err := s.Configure(Paths{V6: writeEmptyXDB(t)}); err == nil {
+		t.Fatal("an IPv4 database must not be accepted as the IPv6 database")
+	}
+	if v4, v6 := s.Statuses(); v4.Loaded || v6.Loaded {
+		t.Fatal("nothing should be loaded after a rejected file")
+	}
+}
+
+// writeRegionXDBv6 writes a minimal IPv6 database with one segment covering
+// [lo, hi] whose region is the given string.
+func writeRegionXDBv6(t *testing.T, region string, lo, hi net.IP) string {
+	t.Helper()
+	const headerInfo = 256
+	const vectorIndex = 256 * 256 * 8
+	segOff := headerInfo + vectorIndex
+	data := make([]byte, segOff+38+len(region))
+	data[0] = 2  // version
+	data[2] = 1  // index policy
+	data[16] = 6 // IPv6
+	data[18] = 4 // runtime pointer bytes
+	binary.LittleEndian.PutUint32(data[8:], uint32(segOff))
+	binary.LittleEndian.PutUint32(data[12:], uint32(segOff))
+	idx := int(lo[0])*256*8 + int(lo[1])*8
+	binary.LittleEndian.PutUint32(data[headerInfo+idx:], uint32(segOff))
+	binary.LittleEndian.PutUint32(data[headerInfo+idx+4:], uint32(segOff))
+	copy(data[segOff:], lo.To16())
+	copy(data[segOff+16:], hi.To16())
+	binary.LittleEndian.PutUint16(data[segOff+32:], uint16(len(region)))
+	binary.LittleEndian.PutUint32(data[segOff+34:], uint32(segOff+38))
+	copy(data[segOff+38:], region)
+	path := filepath.Join(t.TempDir(), "v6.xdb")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write v6 xdb: %v", err)
+	}
+	return path
+}
+
+func TestIPv6DatabaseIsUsedForIPv6Only(t *testing.T) {
+	path := writeRegionXDBv6(t, "中国|0|浙江省|杭州市|电信",
+		net.ParseIP("2400:3200::"), net.ParseIP("2400:3200::ffff"))
+	s := New()
+	if err := s.Configure(Paths{V6: path}); err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	v4, v6 := s.Statuses()
+	if v4.Loaded || !v6.Loaded || v6.IPVersion != 6 {
+		t.Fatalf("status v4=%+v v6=%+v", v4, v6)
+	}
+	rec, err := s.Lookup(net.ParseIP("2400:3200::1"))
+	if err != nil {
+		t.Fatalf("v6 lookup: %v", err)
+	}
+	if rec.Province != "浙江省" || rec.Country != "中国" {
+		t.Fatalf("v6 record = %+v", rec)
+	}
+	if _, err := s.Lookup(net.ParseIP("1.1.1.1")); err != ErrUnavailable {
+		t.Fatalf("v4 lookup without a v4 database = %v", err)
 	}
 }

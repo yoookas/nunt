@@ -498,88 +498,69 @@ export default function Forward() {
 
   const columns: Column<ForwardRule>[] = [
     {
-      key: 'name',
-      title: '名称',
+      key: 'rule',
+      title: '规则',
       render: (row) => (
-        <div className="min-w-32">
-          <div className="font-medium break-words">{row.name || row.id}</div>
-          {row.remark ? <div className="text-xs break-words text-muted">{row.remark}</div> : null}
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-sm font-medium">{row.name || row.id}</span>
+            <StatusChip color={protoColor(row.protocol)}>
+              {PROTOCOL_LABEL[row.protocol] || row.protocol || '-'}
+            </StatusChip>
+          </div>
+          <div
+            className="mt-0.5 truncate font-mono text-xs text-muted"
+            title={`${row.srcAddr || '-'} → ${row.dstAddr || '-'}`}
+          >
+            {row.srcAddr || '-'} → {row.dstAddr || '-'}
+          </div>
         </div>
-      ),
-    },
-    {
-      key: 'protocol',
-      title: '协议',
-      render: (row) => <StatusChip color={protoColor(row.protocol)}>{PROTOCOL_LABEL[row.protocol] || row.protocol || '-'}</StatusChip>,
-    },
-    {
-      key: 'addr',
-      title: '源 / 目标',
-      render: (row) => (
-        <div className="min-w-44 font-mono text-xs">
-          <div className="break-all">{row.srcAddr || '-'}</div>
-          <div className="break-all text-muted">→ {row.dstAddr || '-'}</div>
-        </div>
-      ),
-    },
-    {
-      key: 'access',
-      title: '访问控制',
-      render: (row) => (
-        <span title={accessTip(row)}>
-          <StatusChip color={accessColor(row)}>{accessLabel(row)}</StatusChip>
-        </span>
       ),
     },
     {
       key: 'limits',
-      title: '并发上限',
+      title: '限制',
+      className: 'w-44',
+      render: (row) => {
+        const rejected = num(row.rejectedRuleLimit) + num(row.rejectedIpLimit)
+        return (
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1">
+              <span title={accessTip(row)}>
+                <StatusChip color={accessColor(row)}>{accessLabel(row)}</StatusChip>
+              </span>
+              <span className="text-xs text-muted">超时 {fmtTimeout(row.timeoutSec)}</span>
+            </div>
+            <div
+              className="mt-0.5 text-xs text-muted"
+              title={`规则上限拒绝 ${num(row.rejectedRuleLimit)} 次，单 IP 上限拒绝 ${num(row.rejectedIpLimit)} 次`}
+            >
+              并发 {fmtLimit(row.connLimit)}/{fmtLimit(row.connLimitPerIp)}
+              {rejected > 0 ? ` · 拒绝 ${rejected}` : ''}
+            </div>
+          </div>
+        )
+      },
+    },
+    {
+      key: 'stats',
+      title: '统计',
+      className: 'w-40',
       render: (row) => (
-        <div className="whitespace-nowrap text-xs">
-          <div>总 {fmtLimit(row.connLimit)}</div>
-          <div className="text-muted">单 IP {fmtLimit(row.connLimitPerIp)}</div>
+        <div className="text-xs tabular-nums">
+          <div>
+            活跃 {num(row.activeConns)} · 累计 {num(row.totalConns)}
+          </div>
+          <div className="mt-0.5 text-muted">
+            ↑ {fmtBytes(row.upBytes)} · ↓ {fmtBytes(row.downBytes)}
+          </div>
         </div>
-      ),
-    },
-    {
-      key: 'timeout',
-      title: '超时',
-      render: (row) => <span className="whitespace-nowrap text-xs">{fmtTimeout(row.timeoutSec)}</span>,
-    },
-    {
-      key: 'connections',
-      title: '连接（活跃 / 累计）',
-      render: (row) => (
-        <span className="whitespace-nowrap text-xs tabular-nums">
-          {num(row.activeConns)} / {num(row.totalConns)}
-        </span>
-      ),
-    },
-    {
-      key: 'traffic',
-      title: '流量（上行 / 下行）',
-      render: (row) => (
-        <div className="whitespace-nowrap text-xs tabular-nums">
-          <div>↑ {fmtBytes(row.upBytes)}</div>
-          <div className="text-muted">↓ {fmtBytes(row.downBytes)}</div>
-        </div>
-      ),
-    },
-    {
-      key: 'rejected',
-      title: '限流拒绝',
-      render: (row) => (
-        <span
-          className="whitespace-nowrap text-xs tabular-nums"
-          title={`规则上限拒绝 ${num(row.rejectedRuleLimit)} 次，单 IP 上限拒绝 ${num(row.rejectedIpLimit)} 次`}
-        >
-          {num(row.rejectedRuleLimit) + num(row.rejectedIpLimit)}
-        </span>
       ),
     },
     {
       key: 'status',
       title: '状态',
+      className: 'w-28',
       render: (row) => (
         <div className="flex items-center gap-2 whitespace-nowrap">
           <Switch

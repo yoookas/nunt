@@ -50,10 +50,40 @@ type Status struct {
 // counter, so each lookup borrows its own instance instead of serialising on a
 // process wide lock.
 type Service struct {
-	mu     sync.Mutex
-	data   atomic.Pointer[dataset]
-	status Status
-	mtime  time.Time
+	mu sync.Mutex
+	// One dataset per address family. Lookups pick by the address they were
+	// given; a v4 database never answers a v6 query and vice versa.
+	v4     atomic.Pointer[dataset]
+	v6     atomic.Pointer[dataset]
+	status [2]Status
+	mtime  [2]time.Time
+}
+
+// Family indexes used by the status and mtime arrays.
+const (
+	family4 = 0
+	family6 = 1
+)
+
+// Paths are the database files to load. An empty path disables that family.
+type Paths struct {
+	V4 string
+	V6 string
+}
+
+func (s *Service) store(family int, d *dataset) {
+	if family == family6 {
+		s.v6.Store(d)
+		return
+	}
+	s.v4.Store(d)
+}
+
+func (s *Service) loadPtr(family int) *dataset {
+	if family == family6 {
+		return s.v6.Load()
+	}
+	return s.v4.Load()
 }
 
 // dataset is one loaded database, its searcher pool and the provinces that
@@ -94,51 +124,61 @@ func (d *dataset) search(ip []byte) (string, error) {
 // New creates an empty service; call Configure to load a database.
 func New() *Service { return &Service{} }
 
-// Configure loads the database at path. An empty path unloads it. Reloading
-// the same, unchanged file is a no-op.
-func (s *Service) Configure(path string) error {
+// Configure loads both databases. An empty path unloads that family, and a
+// file that did not change since the last load is skipped. A failure on one
+// family does not prevent the other one from loading.
+func (s *Service) Configure(paths Paths) error {
+	err4 := s.configureFamily(family4, paths.V4)
+	err6 := s.configureFamily(family6, paths.V6)
+	if err4 != nil || err6 != nil {
+		return errors.Join(err4, err6)
+	}
+	return nil
+}
+
+func (s *Service) configureFamily(family int, path string) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
-		s.data.Store(nil)
+		s.store(family, nil)
 		s.mu.Lock()
-		s.status = Status{}
-		s.mtime = time.Time{}
+		s.status[family] = Status{}
+		s.mtime[family] = time.Time{}
 		s.mu.Unlock()
 		return nil
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		s.setError(path, err)
+		s.setError(family, path, err)
 		return fmt.Errorf("ip2region database %s: %w", path, err)
 	}
 	s.mu.Lock()
-	same := s.data.Load() != nil && s.status.Path == path && s.mtime.Equal(info.ModTime())
+	same := s.loadPtr(family) != nil && s.status[family].Path == path && s.mtime[family].Equal(info.ModTime())
 	s.mu.Unlock()
 	if same {
 		return nil
 	}
-	data, status, err := load(path, info)
+	data, status, err := load(family, path, info)
 	if err != nil {
-		s.setError(path, err)
+		s.setError(family, path, err)
 		return err
 	}
-	s.data.Store(data)
+	s.store(family, data)
 	s.mu.Lock()
-	s.status = status
-	s.mtime = info.ModTime()
+	s.status[family] = status
+	s.mtime[family] = info.ModTime()
 	s.mu.Unlock()
 	return nil
 }
 
-// Reload rereads the configured file.
+// Reload rereads the configured files.
 func (s *Service) Reload() error {
 	s.mu.Lock()
-	path := s.status.Path
+	paths := Paths{V4: s.status[family4].Path, V6: s.status[family6].Path}
 	s.mu.Unlock()
-	if path == "" {
+	if paths.V4 == "" && paths.V6 == "" {
 		return ErrUnavailable
 	}
-	return s.Configure(path)
+	return s.Configure(paths)
 }
 
 // Probe loads a database without installing it, so a new path can be validated
@@ -152,7 +192,7 @@ func (s *Service) Probe(path string) (Status, error) {
 	if err != nil {
 		return Status{Path: path, Error: err.Error()}, err
 	}
-	_, status, err := load(path, info)
+	_, status, err := load(-1, path, info)
 	if err != nil {
 		status.Error = err.Error()
 		return status, err
@@ -160,18 +200,31 @@ func (s *Service) Probe(path string) (Status, error) {
 	return status, nil
 }
 
-// Lookup resolves the record of one address. IPv6 and private addresses have
-// no row in the common IPv4 database; they return an empty record.
+// Lookup resolves the record of one address. Each family uses its own
+// database: a v6 database is only consulted for v6 addresses, and when no
+// database is configured for a family the lookup answers as before (an error
+// for v4, an empty record for v6).
 func (s *Service) Lookup(ip net.IP) (Record, error) {
-	v4 := ip.To4()
-	if v4 == nil {
+	if v4 := ip.To4(); v4 != nil {
+		data := s.v4.Load()
+		if data == nil {
+			return Record{}, ErrUnavailable
+		}
+		raw, err := data.search([]byte(v4))
+		if err != nil {
+			return Record{}, err
+		}
+		return ParseRegion(raw), nil
+	}
+	v6 := ip.To16()
+	if v6 == nil {
 		return Record{}, nil
 	}
-	data := s.data.Load()
+	data := s.v6.Load()
 	if data == nil {
-		return Record{}, ErrUnavailable
+		return Record{}, nil
 	}
-	raw, err := data.search([]byte(v4))
+	raw, err := data.search([]byte(v6))
 	if err != nil {
 		return Record{}, err
 	}
@@ -181,28 +234,29 @@ func (s *Service) Lookup(ip net.IP) (Record, error) {
 // ProvincesFromDatabase returns the provinces that occur in the loaded
 // database. The second result is false when no database is loaded.
 func (s *Service) ProvincesFromDatabase() ([]string, bool) {
-	data := s.data.Load()
+	data := s.v4.Load()
 	if data == nil {
 		return nil, false
 	}
 	return append([]string{}, data.provinces...), true
 }
 
-// Status reports the current database.
-func (s *Service) Status() Status {
+// Statuses reports the IPv4 and IPv6 databases in that order.
+func (s *Service) Statuses() (Status, Status) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.status
+	return s.status[family4], s.status[family6]
 }
 
-func (s *Service) setError(path string, err error) {
-	s.data.Store(nil)
+func (s *Service) setError(family int, path string, err error) {
+	s.store(family, nil)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.status = Status{Path: path, Error: err.Error()}
+	s.status[family] = Status{Path: path, Error: err.Error()}
+	s.mtime[family] = time.Time{}
 }
 
-func load(path string, info os.FileInfo) (*dataset, Status, error) {
+func load(family int, path string, info os.FileInfo) (*dataset, Status, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, Status{Path: path}, fmt.Errorf("read: %w", err)
@@ -217,7 +271,18 @@ func load(path string, info os.FileInfo) (*dataset, Status, error) {
 	} else if header.IPVersion != xdb.IPv4VersionNo {
 		return nil, Status{Path: path}, fmt.Errorf("unsupported ip version %d", header.IPVersion)
 	}
-	provinces := collectProvinces(data, header, version)
+	if family == family6 && version != xdb.IPv6 {
+		return nil, Status{Path: path}, errors.New("这是 IPv4 地址库，不能作为 IPv6 库使用")
+	}
+	if family == family4 && version != xdb.IPv4 {
+		return nil, Status{Path: path}, errors.New("这是 IPv6 地址库，不能作为 IPv4 库使用")
+	}
+	provinces := []string(nil)
+	if family == family4 {
+		// The v6 database has far more segments; the province picker is built
+		// from the v4 file and falls back to the built-in list without it.
+		provinces = collectProvinces(data, header, version)
+	}
 	loaded, err := newDataset(version, data, provinces)
 	if err != nil {
 		return nil, Status{Path: path}, fmt.Errorf("open: %w", err)

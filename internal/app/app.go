@@ -116,7 +116,10 @@ func New(opts Options) (*App, error) {
 	a.certs = certStore
 	a.sessions = security.NewSessionStore()
 	a.geo = ip2region.New()
-	if err := a.geo.Configure(cfg.Snapshot().System.IP2RegionDB); err != nil {
+	if err := a.geo.Configure(ip2region.Paths{
+		V4: cfg.Snapshot().System.IP2RegionDB,
+		V6: cfg.Snapshot().System.IP2RegionV6DB,
+	}); err != nil {
 		logger.Warn("ip2region：无法加载地址库", "error", err)
 	}
 
@@ -223,7 +226,10 @@ func (a *App) Registry() *module.Registry { return a.registry }
 // configured first so newly compiled rules see it.
 func (a *App) Reload() {
 	if a.geo != nil {
-		if err := a.geo.Configure(a.cfg.Snapshot().System.IP2RegionDB); err != nil {
+		if err := a.geo.Configure(ip2region.Paths{
+			V4: a.cfg.Snapshot().System.IP2RegionDB,
+			V6: a.cfg.Snapshot().System.IP2RegionV6DB,
+		}); err != nil {
 			a.log.Logger().Warn("ip2region：无法重新加载地址库", "error", err)
 		}
 	}

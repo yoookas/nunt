@@ -84,6 +84,35 @@ async function request<T = any>(
   return data as T
 }
 
+async function upload<T = any>(path: string, file: File): Promise<T> {
+  const form = new FormData()
+  form.append('file', file)
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (csrfToken) headers['X-CSRF-Token'] = csrfToken
+  let response: Response
+  try {
+    response = await fetch(path, { method: 'POST', headers, body: form, credentials: 'same-origin' })
+  } catch {
+    throw new ApiError('无法连接服务器，请检查网络或服务状态', 'network', 0)
+  }
+  const text = await response.text()
+  let data: any = null
+  if (text) {
+    try {
+      data = JSON.parse(text)
+    } catch {
+      data = null
+    }
+  }
+  if (!response.ok) {
+    const message = data?.error?.message || response.statusText || `HTTP ${response.status}`
+    const error = new ApiError(message, data?.error?.code || '', response.status)
+    if (response.status === 401) window.dispatchEvent(new CustomEvent('nunt:unauthorized'))
+    throw error
+  }
+  return data as T
+}
+
 export const api = {
   get: <T = any>(path: string, params?: Record<string, unknown>, options?: RequestOptions) =>
     request<T>('GET', path + buildQuery(params), undefined, options),
@@ -93,6 +122,7 @@ export const api = {
     request<T>('PUT', path, body ?? {}, options),
   del: <T = any>(path: string, options?: RequestOptions) =>
     request<T>('DELETE', path, undefined, options),
+  upload,
 }
 
 export function errorText(err: unknown): string {
