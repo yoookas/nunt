@@ -251,8 +251,8 @@ func normalizeLogs(l *model.LogConfig) {
 	if l.Access.MaxFileMB <= 0 {
 		l.Access.MaxFileMB = 64
 	}
-	if l.Access.MaxFileMB > 1024 {
-		l.Access.MaxFileMB = 1024
+	if l.Access.MaxFileMB > 4096 {
+		l.Access.MaxFileMB = 4096
 	}
 	if l.App.MaxFileMB <= 0 {
 		l.App.MaxFileMB = 8

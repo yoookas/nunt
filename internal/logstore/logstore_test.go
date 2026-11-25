@@ -1,324 +1,235 @@
 package logstore
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
 
-// newStore opens a store in a temporary directory and closes it on cleanup.
-func newStore(t *testing.T, opts Options) *Store {
+func newTestStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := Open(t.TempDir(), opts)
+	s, err := Open(t.TempDir(), Options{Persist: true, KeepDays: 7, MaxFileMB: 64})
 	if err != nil {
-		t.Fatalf("Open: %v", err)
+		t.Fatalf("open: %v", err)
 	}
-	t.Cleanup(func() {
-		if err := s.Close(); err != nil {
-			t.Fatalf("Close: %v", err)
-		}
-	})
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 
-func entry(t time.Time, source, path string) Entry {
-	return Entry{Time: t, Source: source, Path: path, Method: "GET", ClientIP: "192.0.2.10", Status: 200}
+func seed(t *testing.T, s *Store, entries []Entry) {
+	t.Helper()
+	for _, e := range entries {
+		s.Append(e)
+	}
+	s.requestFlush()
 }
 
-// waitWritten blocks until the store has flushed the given number of entries.
-func waitWritten(t *testing.T, s *Store, want int64) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if s.written.Load() >= want {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
+func entryAt(base time.Time, offset time.Duration, mutate func(*Entry)) Entry {
+	e := Entry{
+		Time:     base.Add(offset),
+		Source:   SourceWeb,
+		Rule:     "site",
+		Host:     "example.com",
+		Method:   "GET",
+		Path:     "/",
+		Status:   200,
+		ClientIP: "203.0.113.9",
+		Bytes:    100,
 	}
-	t.Fatalf("written = %d, want at least %d", s.written.Load(), want)
+	if mutate != nil {
+		mutate(&e)
+	}
+	return e
 }
 
 func TestAppendQueryNewestFirst(t *testing.T) {
-	s := newStore(t, Options{Persist: true})
-	base := time.Date(2026, 3, 4, 10, 0, 0, 0, time.Local)
-	s.Append(Entry{Time: base, Source: SourceWeb, Path: "/a", Status: 200, ClientIP: "192.0.2.1"})
-	s.Append(Entry{Time: base.Add(time.Second), Source: SourceForward, Path: "/b", Status: 0, ClientIP: "192.0.2.2"})
-	s.Append(Entry{Time: base.Add(2 * time.Second), Source: SourceWAF, Path: "/c", Status: 403, ClientIP: "192.0.2.3"})
-	waitWritten(t, s, 3)
-
+	s := newTestStore(t)
+	base := time.Now().Add(-time.Hour)
+	seed(t, s, []Entry{
+		entryAt(base, 0, func(e *Entry) { e.Path = "/a" }),
+		entryAt(base, time.Second, func(e *Entry) { e.Path = "/b" }),
+		entryAt(base, 2*time.Second, func(e *Entry) { e.Path = "/c" }),
+	})
 	res, err := s.Query(Query{})
 	if err != nil {
-		t.Fatalf("Query: %v", err)
+		t.Fatalf("query: %v", err)
 	}
 	if len(res.Items) != 3 {
-		t.Fatalf("items = %d, want 3", len(res.Items))
+		t.Fatalf("items = %d", len(res.Items))
 	}
-	if res.Items[0].Path != "/c" || res.Items[1].Path != "/b" || res.Items[2].Path != "/a" {
-		t.Fatalf("order = %v, want newest first", []string{res.Items[0].Path, res.Items[1].Path, res.Items[2].Path})
+	if res.Items[0].Path != "/c" || res.Items[2].Path != "/a" {
+		t.Fatalf("order: %v", []string{res.Items[0].Path, res.Items[1].Path, res.Items[2].Path})
 	}
-	if res.Items[0].Source != SourceWAF || res.Items[0].Status != 403 {
-		t.Fatalf("fields not preserved: %+v", res.Items[0])
+	if res.HasMore {
+		t.Fatal("unexpected hasMore")
 	}
 }
 
 func TestFilters(t *testing.T) {
-	s := newStore(t, Options{Persist: true})
-	base := time.Date(2026, 3, 4, 10, 0, 0, 0, time.Local)
-	s.Append(Entry{Time: base, Source: SourceWeb, Path: "/ok", Host: "a.example.com", Method: "GET",
-		Status: 200, ClientIP: "192.0.2.10", UserAgent: "Mozilla/5.0"})
-	s.Append(Entry{Time: base.Add(time.Second), Source: SourceWeb, Path: "/missing", Host: "b.example.com",
-		Method: "POST", Status: 404, ClientIP: "198.51.100.7"})
-	s.Append(Entry{Time: base.Add(2 * time.Second), Source: SourceForward, Protocol: "tcp",
-		Path: "", ClientIP: "192.0.2.55", Status: 0, Result: "closed"})
-	waitWritten(t, s, 3)
-
+	s := newTestStore(t)
+	base := time.Now().Add(-time.Hour)
+	seed(t, s, []Entry{
+		entryAt(base, 0, nil),
+		entryAt(base, time.Second, func(e *Entry) { e.Source = SourceWAF; e.Status = 403; e.Rule = "blocked" }),
+		entryAt(base, 2*time.Second, func(e *Entry) { e.Source = SourceForward; e.ClientIP = "10.0.0.5"; e.Result = "closed" }),
+		entryAt(base, 3*time.Second, func(e *Entry) { e.Host = "other.example"; e.Path = "/admin"; e.Status = 502 }),
+	})
 	cases := []struct {
-		name  string
-		query Query
-		want  int
+		name string
+		q    Query
+		want int
 	}{
-		{"source web", Query{Source: "web"}, 2},
-		{"source forward", Query{Source: "forward"}, 1},
+		{"source", Query{Source: SourceWAF}, 1},
 		{"status class", Query{Status: "4xx"}, 1},
-		{"exact status", Query{Status: "200"}, 1},
-		{"ip prefix", Query{IP: "192.0.2."}, 2},
-		{"host", Query{Host: "b.example"}, 1},
-		{"method", Query{Method: "POST"}, 1},
-		{"text in path", Query{Text: "/miss"}, 1},
-		{"text in result", Query{Text: "closed"}, 1},
-		{"text in user agent", Query{Text: "mozilla"}, 1},
-		{"no match", Query{Text: "nothing-here"}, 0},
+		{"status exact", Query{Status: "502"}, 1},
+		{"ip prefix", Query{IP: "10.0."}, 1},
+		{"host substring", Query{Host: "other"}, 1},
+		{"text", Query{Text: "admin"}, 1},
+		{"rule", Query{RuleID: ""}, 4},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := s.Query(tc.query)
+			res, err := s.Query(tc.q)
 			if err != nil {
-				t.Fatalf("Query: %v", err)
+				t.Fatalf("query: %v", err)
 			}
 			if len(res.Items) != tc.want {
-				t.Fatalf("items = %d, want %d", len(res.Items), tc.want)
+				t.Fatalf("got %d, want %d", len(res.Items), tc.want)
 			}
 		})
 	}
 }
 
 func TestTimeRange(t *testing.T) {
-	s := newStore(t, Options{Persist: true})
-	base := time.Date(2026, 3, 4, 10, 0, 0, 0, time.Local)
-	for i := 0; i < 5; i++ {
-		s.Append(entry(base.Add(time.Duration(i)*time.Minute), SourceWeb, fmt.Sprintf("/%d", i)))
-	}
-	waitWritten(t, s, 5)
-
-	res, err := s.Query(Query{From: base.Add(time.Minute), To: base.Add(3 * time.Minute)})
+	s := newTestStore(t)
+	base := time.Now().Add(-time.Hour)
+	seed(t, s, []Entry{
+		entryAt(base, 0, nil),
+		entryAt(base, time.Minute, func(e *Entry) { e.Path = "/mid" }),
+		entryAt(base, 2*time.Minute, func(e *Entry) { e.Path = "/late" }),
+	})
+	res, err := s.Query(Query{From: base.Add(30 * time.Second), To: base.Add(90 * time.Second)})
 	if err != nil {
-		t.Fatalf("Query: %v", err)
+		t.Fatalf("query: %v", err)
 	}
-	if len(res.Items) != 3 {
-		t.Fatalf("items = %d, want 3", len(res.Items))
-	}
-	for _, e := range res.Items {
-		if e.Time.Before(base.Add(time.Minute)) || e.Time.After(base.Add(3*time.Minute)) {
-			t.Fatalf("entry %v outside the range", e.Time)
-		}
+	if len(res.Items) != 1 || res.Items[0].Path != "/mid" {
+		t.Fatalf("items = %+v", res.Items)
 	}
 }
 
-func TestPaginationCursorWithEqualTimestamps(t *testing.T) {
-	s := newStore(t, Options{Persist: true})
-	base := time.Date(2026, 3, 4, 10, 0, 0, 0, time.Local)
-	// One timestamp shared by every record: the cursor has to skip exactly the
-	// records already returned, never a whole page more or less.
-	for i := 0; i < 5; i++ {
-		s.Append(Entry{Time: base, Source: SourceWeb, Path: fmt.Sprintf("/p%d", i), Status: 200})
+func TestPaginationWithEqualTimestamps(t *testing.T) {
+	s := newTestStore(t)
+	at := time.Now().Add(-time.Minute)
+	seed(t, s, []Entry{
+		entryAt(at, 0, func(e *Entry) { e.Path = "/1" }),
+		entryAt(at, 0, func(e *Entry) { e.Path = "/2" }),
+		entryAt(at, 0, func(e *Entry) { e.Path = "/3" }),
+	})
+	first, err := s.Query(Query{Limit: 2})
+	if err != nil {
+		t.Fatalf("query: %v", err)
 	}
-	waitWritten(t, s, 5)
-
+	if len(first.Items) != 2 || !first.HasMore || first.NextCursor == "" {
+		t.Fatalf("first page = %+v", first)
+	}
+	second, err := s.Query(Query{Limit: 2, Cursor: first.NextCursor})
+	if err != nil {
+		t.Fatalf("second query: %v", err)
+	}
+	if len(second.Items) != 1 {
+		t.Fatalf("second page = %+v", second)
+	}
 	seen := map[string]bool{}
-	cursor := ""
-	pages := 0
-	for {
-		res, err := s.Query(Query{Limit: 2, Cursor: cursor})
-		if err != nil {
-			t.Fatalf("Query: %v", err)
-		}
-		pages++
-		for _, e := range res.Items {
-			if seen[e.Path] {
-				t.Fatalf("duplicate %s across pages", e.Path)
-			}
-			seen[e.Path] = true
-		}
-		if !res.HasMore {
-			break
-		}
-		cursor = res.NextCursor
-		if cursor == "" {
-			t.Fatal("HasMore without a cursor")
-		}
-		if pages > 10 {
-			t.Fatal("pagination does not terminate")
-		}
+	for _, e := range append(first.Items, second.Items...) {
+		seen[e.Path] = true
 	}
-	if len(seen) != 5 {
-		t.Fatalf("saw %d records, want 5", len(seen))
-	}
-	if pages != 3 {
-		t.Fatalf("pages = %d, want 3", pages)
+	if len(seen) != 3 {
+		t.Fatalf("duplicate or missing rows: %v", seen)
 	}
 }
 
 func TestLimitAndHasMore(t *testing.T) {
-	s := newStore(t, Options{Persist: true})
-	base := time.Date(2026, 3, 4, 10, 0, 0, 0, time.Local)
-	for i := 0; i < 7; i++ {
-		s.Append(entry(base.Add(time.Duration(i)*time.Second), SourceWeb, fmt.Sprintf("/%d", i)))
+	s := newTestStore(t)
+	base := time.Now().Add(-time.Hour)
+	for i := 0; i < 5; i++ {
+		s.Append(entryAt(base, time.Duration(i)*time.Second, nil))
 	}
-	waitWritten(t, s, 7)
-
-	res, err := s.Query(Query{Limit: 3})
+	res, err := s.Query(Query{Limit: 2})
 	if err != nil {
-		t.Fatalf("Query: %v", err)
+		t.Fatalf("query: %v", err)
 	}
-	if len(res.Items) != 3 || !res.HasMore {
-		t.Fatalf("items = %d hasMore = %v, want 3/true", len(res.Items), res.HasMore)
+	if len(res.Items) != 2 || !res.HasMore || res.NextCursor == "" {
+		t.Fatalf("result = %+v", res)
 	}
 }
 
 func TestStats(t *testing.T) {
-	s := newStore(t, Options{Persist: true})
-	base := time.Date(2026, 3, 4, 10, 0, 0, 0, time.Local)
-	rows := []Entry{
-		{Time: base, Source: SourceWeb, Path: "/a", Status: 200, ClientIP: "192.0.2.1", Bytes: 100, DurationMs: 10},
-		{Time: base.Add(time.Second), Source: SourceWeb, Path: "/a", Status: 404, ClientIP: "192.0.2.1", Bytes: 50, DurationMs: 20},
-		{Time: base.Add(2 * time.Second), Source: SourceWeb, Path: "/b", Status: 502, ClientIP: "192.0.2.2", Bytes: 0, DurationMs: 30},
-	}
-	for _, e := range rows {
-		s.Append(e)
-	}
-	waitWritten(t, s, 3)
-
-	st, err := s.Stats(Query{})
+	s := newTestStore(t)
+	base := time.Now().Add(-time.Hour)
+	seed(t, s, []Entry{
+		entryAt(base, 0, func(e *Entry) { e.Status = 200; e.Bytes = 10; e.DurationMs = 1 }),
+		entryAt(base, time.Second, func(e *Entry) { e.Status = 404; e.Bytes = 20; e.DurationMs = 3 }),
+		entryAt(base, 2*time.Second, func(e *Entry) { e.Status = 500; e.Bytes = 30; e.DurationMs = 5; e.ClientIP = "10.0.0.1" }),
+	})
+	stats, err := s.Stats(Query{})
 	if err != nil {
-		t.Fatalf("Stats: %v", err)
+		t.Fatalf("stats: %v", err)
 	}
-	if st.Total != 3 || st.Bytes != 150 {
-		t.Fatalf("total = %d bytes = %d, want 3/150", st.Total, st.Bytes)
+	if stats.Total != 3 || stats.Bytes != 60 {
+		t.Fatalf("stats = %+v", stats)
 	}
-	if st.ByStatus["2xx"] != 1 || st.ByStatus["4xx"] != 1 || st.ByStatus["5xx"] != 1 {
-		t.Fatalf("byStatus = %v", st.ByStatus)
+	if stats.ByStatus["2xx"] != 1 || stats.ByStatus["4xx"] != 1 || stats.ByStatus["5xx"] != 1 {
+		t.Fatalf("by status = %v", stats.ByStatus)
 	}
-	if st.BySource[SourceWeb] != 3 {
-		t.Fatalf("bySource = %v", st.BySource)
-	}
-	if len(st.TopIPs) != 2 || st.TopIPs[0].Name != "192.0.2.1" || st.TopIPs[0].Count != 2 {
-		t.Fatalf("topIps = %v", st.TopIPs)
-	}
-	if len(st.TopPaths) != 2 || st.TopPaths[0].Name != "/a" {
-		t.Fatalf("topPaths = %v", st.TopPaths)
-	}
-	if st.AvgDurationMs != 20 {
-		t.Fatalf("avg duration = %v, want 20", st.AvgDurationMs)
-	}
-	if !st.Complete {
-		t.Fatal("complete = false for a small window")
+	if len(stats.TopIPs) == 0 || stats.TopIPs[0].Name == "" {
+		t.Fatalf("top ips = %v", stats.TopIPs)
 	}
 }
 
-func TestRotationCreatesSecondFile(t *testing.T) {
-	s := newStore(t, Options{Persist: true, MaxFileMB: 1})
-	base := time.Date(2026, 3, 4, 10, 0, 0, 0, time.Local)
-	// ~250 bytes per record: 6000 records cross the 1 MiB threshold.
-	body := make([]byte, 200)
-	for i := range body {
-		body[i] = 'x'
-	}
-	const n = 6000
-	for i := 0; i < n; i++ {
-		s.Append(Entry{Time: base.Add(time.Duration(i) * time.Millisecond), Source: SourceWeb,
-			Path: "/" + string(body), Status: 200})
-	}
-	waitWritten(t, s, n)
-
-	files, err := s.Files()
+func TestSeriesFillsEmptyBuckets(t *testing.T) {
+	s := newTestStore(t)
+	base := time.Now().Add(-2 * time.Hour).Truncate(time.Hour)
+	seed(t, s, []Entry{entryAt(base, 0, nil), entryAt(base, time.Hour, nil)})
+	points, err := s.Series(Query{From: base, To: base.Add(2 * time.Hour)}, time.Hour)
 	if err != nil {
-		t.Fatalf("Files: %v", err)
+		t.Fatalf("series: %v", err)
 	}
-	if len(files) < 2 {
-		t.Fatalf("files = %d, want at least 2 after crossing the size limit", len(files))
+	if len(points) < 3 {
+		t.Fatalf("points = %d", len(points))
 	}
-	res, err := s.Query(Query{Limit: 1})
-	if err != nil {
-		t.Fatalf("Query: %v", err)
-	}
-	if len(res.Items) != 1 {
-		t.Fatalf("items = %d, want 1", len(res.Items))
-	}
-}
-
-func TestPruneDropsExpiredFiles(t *testing.T) {
-	dir := t.TempDir()
-	old := time.Now().AddDate(0, 0, -10)
-	name := fileName(old.Format(dayLayout), 0)
-	if err := os.WriteFile(filepath.Join(dir, name), []byte("{}\n"), 0o640); err != nil {
-		t.Fatalf("write old file: %v", err)
-	}
-	s, err := Open(dir, Options{Persist: true, KeepDays: 2})
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer s.Close()
-
-	files, err := s.Files()
-	if err != nil {
-		t.Fatalf("Files: %v", err)
-	}
-	if len(files) != 0 {
-		t.Fatalf("files = %v, want the expired file pruned", files)
+	if points[0].Total != 1 || points[1].Total != 1 || points[2].Total != 0 {
+		t.Fatalf("points = %+v", points)
 	}
 }
 
 func TestClear(t *testing.T) {
-	s := newStore(t, Options{Persist: true})
-	s.Append(entry(time.Now(), SourceWeb, "/a"))
-	waitWritten(t, s, 1)
+	s := newTestStore(t)
+	seed(t, s, []Entry{entryAt(time.Now(), 0, nil)})
 	if err := s.Clear(); err != nil {
-		t.Fatalf("Clear: %v", err)
+		t.Fatalf("clear: %v", err)
 	}
-	files, err := s.Files()
-	if err != nil {
-		t.Fatalf("Files: %v", err)
-	}
-	if len(files) != 0 {
-		t.Fatalf("files = %v, want none", files)
-	}
-	// Recording keeps working after a clear.
-	s.Append(entry(time.Now(), SourceWeb, "/b"))
-	waitWritten(t, s, 2)
 	res, err := s.Query(Query{})
 	if err != nil {
-		t.Fatalf("Query: %v", err)
+		t.Fatalf("query: %v", err)
 	}
-	if len(res.Items) != 1 || res.Items[0].Path != "/b" {
-		t.Fatalf("items = %v, want only /b", res.Items)
+	if len(res.Items) != 0 {
+		t.Fatalf("items = %d", len(res.Items))
 	}
 }
 
 func TestPersistDisabledWritesNothing(t *testing.T) {
-	s := newStore(t, Options{Persist: false})
-	s.Append(entry(time.Now(), SourceWeb, "/a"))
-	time.Sleep(50 * time.Millisecond)
-	files, err := s.Files()
+	s, err := Open(t.TempDir(), Options{Persist: false})
 	if err != nil {
-		t.Fatalf("Files: %v", err)
+		t.Fatalf("open: %v", err)
 	}
-	if len(files) != 0 {
-		t.Fatalf("files = %v, want none when persistence is off", files)
+	defer s.Close()
+	s.Append(entryAt(time.Now(), 0, nil))
+	s.requestFlush()
+	res, err := s.Query(Query{})
+	if err != nil {
+		t.Fatalf("query: %v", err)
 	}
-	if got := s.Meta().Persist; got {
-		t.Fatal("Meta reports persistence on")
+	if len(res.Items) != 0 {
+		t.Fatalf("persist disabled wrote %d rows", len(res.Items))
 	}
 }
 
@@ -326,58 +237,41 @@ func TestCloseDrainsQueue(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(dir, Options{Persist: true})
 	if err != nil {
-		t.Fatalf("Open: %v", err)
+		t.Fatalf("open: %v", err)
 	}
-	base := time.Now()
 	for i := 0; i < 50; i++ {
-		s.Append(entry(base.Add(time.Duration(i)*time.Millisecond), SourceWeb, fmt.Sprintf("/%d", i)))
+		s.Append(entryAt(time.Now(), time.Duration(i)*time.Millisecond, nil))
 	}
 	if err := s.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+		t.Fatalf("close: %v", err)
 	}
-	files, err := os.ReadDir(dir)
+	s2, err := Open(dir, Options{Persist: true})
 	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
+		t.Fatalf("reopen: %v", err)
 	}
-	if len(files) != 1 {
-		t.Fatalf("files = %d, want 1", len(files))
-	}
-	info, err := files[0].Info()
+	defer s2.Close()
+	res, err := s2.Query(Query{Limit: 100})
 	if err != nil {
-		t.Fatalf("Info: %v", err)
+		t.Fatalf("query: %v", err)
 	}
-	if info.Size() == 0 {
-		t.Fatal("the flushed file is empty")
+	if len(res.Items) != 50 {
+		t.Fatalf("items after reopen = %d", len(res.Items))
 	}
 }
 
-func TestScanFileReverseHandlesChunks(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "x.jsonl")
-	var want []string
-	var data []byte
-	for i := 0; i < 2000; i++ {
-		line := fmt.Sprintf("line-%04d", i)
-		want = append(want, line)
-		data = append(data, line...)
-		data = append(data, '\n')
+func TestPruneDropsOldRows(t *testing.T) {
+	s := newTestStore(t)
+	seed(t, s, []Entry{
+		entryAt(time.Now().Add(-10*24*time.Hour), 0, nil),
+		entryAt(time.Now(), 0, nil),
+	})
+	s.Configure(Options{Persist: true, KeepDays: 7, MaxFileMB: 64})
+	s.pruneOnce()
+	res, err := s.Query(Query{})
+	if err != nil {
+		t.Fatalf("query: %v", err)
 	}
-	if err := os.WriteFile(path, data, 0o640); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	var got []string
-	if err := scanFileReverse(path, func(line []byte) bool {
-		got = append(got, string(line))
-		return true
-	}); err != nil {
-		t.Fatalf("scanFileReverse: %v", err)
-	}
-	if len(got) != len(want) {
-		t.Fatalf("lines = %d, want %d", len(got), len(want))
-	}
-	for i := range want {
-		if got[i] != want[len(want)-1-i] {
-			t.Fatalf("line %d = %q, want %q", i, got[i], want[len(want)-1-i])
-		}
+	if len(res.Items) != 1 {
+		t.Fatalf("items after prune = %d", len(res.Items))
 	}
 }

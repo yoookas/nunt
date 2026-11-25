@@ -7,6 +7,7 @@ package waf
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -384,6 +385,24 @@ func (w *WAF) inspect(st requestState, ruleName string, rw http.ResponseWriter, 
 	return f.served, perr
 }
 
+func tlsVersion(r *http.Request) string {
+	if r.TLS == nil {
+		return ""
+	}
+	switch r.TLS.Version {
+	case tls.VersionTLS10:
+		return "1.0"
+	case tls.VersionTLS11:
+		return "1.1"
+	case tls.VersionTLS12:
+		return "1.2"
+	case tls.VersionTLS13:
+		return "1.3"
+	default:
+		return ""
+	}
+}
+
 func requestURI(r *http.Request) string {
 	if r.URL == nil {
 		return "/"
@@ -410,15 +429,18 @@ func splitHostPort(addr string) (string, int) {
 // record stores the events of one blocked (or detected) request.
 func (w *WAF) record(out outcome, ruleName string, r *http.Request, clientIP, action string) {
 	base := Event{
-		Time:     time.Now(),
-		ClientIP: clientIP,
-		Method:   r.Method,
-		Host:     truncate(r.Host, 255),
-		URI:      truncate(requestURI(r), maxURILen),
-		Rule:     ruleName,
-		Action:   action,
-		Status:   out.Status,
-		TxID:     out.TxID,
+		Time:      time.Now(),
+		ClientIP:  clientIP,
+		Method:    r.Method,
+		Host:      truncate(r.Host, 255),
+		URI:       truncate(requestURI(r), maxURILen),
+		Rule:      ruleName,
+		Action:    action,
+		Status:    out.Status,
+		TxID:      out.TxID,
+		RequestID: r.Header.Get("X-Request-ID"),
+		Proto:     r.Proto,
+		TLS:       tlsVersion(r),
 	}
 	ids := make([]int, 0, len(out.Matched))
 	for _, hit := range out.Matched {
@@ -466,6 +488,9 @@ func (w *WAF) persistEvent(ev Event) {
 		Result:    ev.Action,
 		WAFRuleID: ev.RuleID,
 		Message:   ev.Message,
+		RequestID: ev.RequestID,
+		Proto:     ev.Proto,
+		TLS:       ev.TLS,
 	})
 }
 

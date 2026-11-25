@@ -162,8 +162,8 @@ func TestAccessLogClear(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("clear = %d %s", rec.Code, rec.Body.String())
 	}
-	if files, _ := env.logs.Files(); len(files) != 0 {
-		t.Fatalf("files after clear = %v", files)
+	if stats, err := env.logs.Stats(logstore.Query{}); err != nil || stats.Total != 0 {
+		t.Fatalf("records after clear = %+v, err = %v", stats, err)
 	}
 
 	// A delete without the CSRF token is refused.

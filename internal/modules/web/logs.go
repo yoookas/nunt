@@ -2,6 +2,7 @@ package web
 
 import (
 	"bufio"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
@@ -29,7 +30,19 @@ type AccessEntry struct {
 	ClientIP   string    `json:"clientIp"`
 	UserAgent  string    `json:"userAgent"`
 	Upstream   string    `json:"upstream,omitempty"`
-	Bytes      int64     `json:"bytes"`
+	// UpstreamStatus and Attempts describe the proxy exchange; BytesIn is the
+	// declared request body and BytesOut the response bytes.
+	UpstreamStatus int   `json:"upstreamStatus,omitempty"`
+	Attempts       int   `json:"attempts,omitempty"`
+	Bytes          int64 `json:"bytes"`
+	BytesIn        int64 `json:"bytesIn,omitempty"`
+	BytesOut       int64 `json:"bytesOut,omitempty"`
+	// Protocol is the HTTP version, TLS the negotiated TLS version.
+	Protocol  string `json:"proto,omitempty"`
+	TLS       string `json:"tls,omitempty"`
+	RequestID string `json:"requestId,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 // logBuffer is a fixed size ring buffer of access log entries.
@@ -214,27 +227,42 @@ func (w *Web) logAccess(r *rule, req *http.Request, rec *accessRecorder, start t
 	if status == 0 {
 		status = http.StatusOK
 	}
+	reason, errText, upstreamStatus, attempts := noteFrom(req.Context()).snapshot()
+	bytesIn := req.ContentLength
+	if bytesIn < 0 {
+		bytesIn = 0
+	}
 	entry := AccessEntry{
-		Time:       start,
-		RuleID:     r.id,
-		Rule:       r.name,
-		Listen:     requestListenAddr(req),
-		Host:       req.Host,
-		Method:     req.Method,
-		Path:       req.URL.RequestURI(),
-		Status:     status,
-		Duration:   elapsed.Round(time.Millisecond).String(),
-		DurationMs: elapsed.Milliseconds(),
-		ClientIP:   clientIPString(req, w.trustProxy(w.cfg)),
-		UserAgent:  req.UserAgent(),
-		Upstream:   upstreamFrom(req.Context()),
-		Bytes:      rec.bytes,
+		Time:           start,
+		RuleID:         r.id,
+		Rule:           r.name,
+		Listen:         requestListenAddr(req),
+		Host:           req.Host,
+		Method:         req.Method,
+		Path:           req.URL.RequestURI(),
+		Status:         status,
+		Duration:       elapsed.Round(time.Millisecond).String(),
+		DurationMs:     elapsed.Milliseconds(),
+		ClientIP:       clientIPString(req, w.trustProxy(w.cfg)),
+		UserAgent:      req.UserAgent(),
+		Upstream:       upstreamFrom(req.Context()),
+		UpstreamStatus: upstreamStatus,
+		Attempts:       attempts,
+		Bytes:          rec.bytes,
+		BytesIn:        bytesIn,
+		BytesOut:       rec.bytes,
+		Protocol:       req.Proto,
+		TLS:            tlsVersionLabel(req),
+		RequestID:      requestIDFrom(req.Context()),
+		Reason:         reason,
+		Error:          errText,
 	}
 	w.logs.add(entry)
 	w.persist(entry)
 	if status >= 500 {
-		w.logger().Warn("web：请求失败", "rule", r.name, "method", req.Method, "path", entry.Path,
-			"status", status, "client", entry.ClientIP)
+		w.logger().Warn("web：请求失败", "rule", r.name, "requestId", entry.RequestID,
+			"method", req.Method, "path", entry.Path, "status", status,
+			"client", entry.ClientIP, "error", entry.Error)
 	}
 }
 
@@ -245,20 +273,29 @@ func (w *Web) persist(e AccessEntry) {
 		return
 	}
 	w.deps.Logs.Append(logstore.Entry{
-		Time:       e.Time,
-		Source:     logstore.SourceWeb,
-		RuleID:     e.RuleID,
-		Rule:       e.Rule,
-		Listen:     e.Listen,
-		Host:       e.Host,
-		Method:     e.Method,
-		Path:       e.Path,
-		Status:     e.Status,
-		ClientIP:   e.ClientIP,
-		UserAgent:  e.UserAgent,
-		Upstream:   e.Upstream,
-		DurationMs: e.DurationMs,
-		Bytes:      e.Bytes,
+		Time:           e.Time,
+		Source:         logstore.SourceWeb,
+		RuleID:         e.RuleID,
+		Rule:           e.Rule,
+		Listen:         e.Listen,
+		Host:           e.Host,
+		Method:         e.Method,
+		Path:           e.Path,
+		Status:         e.Status,
+		ClientIP:       e.ClientIP,
+		UserAgent:      e.UserAgent,
+		Upstream:       e.Upstream,
+		UpstreamStatus: e.UpstreamStatus,
+		Attempts:       e.Attempts,
+		DurationMs:     e.DurationMs,
+		Bytes:          e.Bytes,
+		BytesIn:        e.BytesIn,
+		BytesOut:       e.BytesOut,
+		Proto:          e.Protocol,
+		TLS:            e.TLS,
+		RequestID:      e.RequestID,
+		Reason:         e.Reason,
+		Error:          e.Error,
 	})
 }
 
@@ -268,4 +305,23 @@ func (w *Web) Logs(ruleID string, limit int) []AccessEntry {
 		limit = defaultLogKeep
 	}
 	return w.logs.list(ruleID, limit)
+}
+
+// tlsVersionLabel renders the negotiated TLS version of a request.
+func tlsVersionLabel(req *http.Request) string {
+	if req.TLS == nil {
+		return ""
+	}
+	switch req.TLS.Version {
+	case tls.VersionTLS10:
+		return "1.0"
+	case tls.VersionTLS11:
+		return "1.1"
+	case tls.VersionTLS12:
+		return "1.2"
+	case tls.VersionTLS13:
+		return "1.3"
+	default:
+		return ""
+	}
 }

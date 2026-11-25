@@ -397,6 +397,7 @@ func (w *Web) proxySite(r *rule, cfg *model.Config) (*webSite, error) {
 		req = req.WithContext(withUpstream(req.Context(), up.target))
 
 		rec := &accessRecorder{ResponseWriter: rw}
+		noteFrom(req.Context()).setAttempts(1)
 		proxyFor(w, r, up, target).ServeHTTP(rec, req)
 		// 502/503/504 mean the upstream was unreachable or refused to serve;
 		// anything else is a real answer and closes the circuit again.
@@ -564,6 +565,7 @@ func buildProxy(w *Web, r *rule, up upstream, target *model.ProxyTarget) *httput
 			}
 		},
 		ModifyResponse: func(resp *http.Response) error {
+			noteFrom(resp.Request.Context()).setUpstreamStatus(resp.StatusCode)
 			// A 101 response is the protocol switch itself: stripping the
 			// hop-by-hop headers here would remove Upgrade/Connection and make
 			// the reverse proxy reject its own backend ("backend tried to
@@ -579,6 +581,7 @@ func buildProxy(w *Web, r *rule, up upstream, target *model.ProxyTarget) *httput
 			return nil
 		},
 		ErrorHandler: func(rw http.ResponseWriter, req *http.Request, err error) {
+			noteFrom(req.Context()).setError(err)
 			if bodyLimitHit(req, err) {
 				// The configured cap stopped the upload: the upstream never saw
 				// the request and the refusal is already counted.
@@ -593,6 +596,7 @@ func buildProxy(w *Web, r *rule, up upstream, target *model.ProxyTarget) *httput
 					if attempt := attemptFrom(req.Context()); attempt != nil {
 						attempt.target = next.target
 					}
+					noteFrom(req.Context()).setAttempts(2)
 					w.logger().Warn("web：换一个上游重试", "rule", r.name,
 						"failed", up.target, "next", next.target, "error", err)
 					bal.begin(next.target)

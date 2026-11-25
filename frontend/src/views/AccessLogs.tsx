@@ -39,6 +39,13 @@ interface Entry {
   bytesIn?: number
   bytesOut?: number
   protocol?: string
+  proto?: string
+  tls?: string
+  requestId?: string
+  upstreamStatus?: number
+  attempts?: number
+  reason?: string
+  error?: string
   result?: string
   wafRuleId?: number
   message?: string
@@ -328,12 +335,20 @@ export default function AccessLogs() {
     {
       key: 'result',
       title: '状态 / 结果',
-      render: (row) =>
-        row.status ? (
-          <StatusChip color={statusColor(row.status)}>{row.status}</StatusChip>
-        ) : (
-          <span className="text-xs text-muted">{row.result || '-'}</span>
-        ),
+      render: (row) => (
+        <div className="min-w-0">
+          {row.status ? (
+            <StatusChip color={statusColor(row.status)}>{row.status}</StatusChip>
+          ) : (
+            <span className="text-xs text-muted">{row.result || '-'}</span>
+          )}
+          {row.reason || row.error ? (
+            <div className="mt-0.5 max-w-48 truncate text-[11px] text-warning" title={row.error || row.reason}>
+              {row.reason || row.error}
+            </div>
+          ) : null}
+        </div>
+      ),
     },
     {
       key: 'client',
@@ -348,7 +363,23 @@ export default function AccessLogs() {
     {
       key: 'bytes',
       title: '大小',
-      render: (row) => <span className="text-xs text-muted">{row.bytes ? fmtBytes(row.bytes) : '-'}</span>,
+      render: (row) => (
+        <span
+          className="text-xs text-muted"
+          title={row.bytesIn || row.bytesOut ? `请求 ${fmtBytes(row.bytesIn ?? 0)} · 响应 ${fmtBytes(row.bytesOut ?? 0)}` : undefined}
+        >
+          {row.bytes ? fmtBytes(row.bytes) : '-'}
+        </span>
+      ),
+    },
+    {
+      key: 'requestId',
+      title: '请求 ID',
+      render: (row) => (
+        <span className="mono text-[11px] text-muted" title={row.requestId}>
+          {row.requestId ? row.requestId.slice(0, 8) : '-'}
+        </span>
+      ),
     },
   ]
 
@@ -361,7 +392,7 @@ export default function AccessLogs() {
       ) : null}
 
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        <StatCard label="匹配记录" value={(stats?.total ?? 0).toLocaleString()} hint={`扫描 ${stats?.scanned ?? 0} 条`} />
+        <StatCard label="匹配记录" value={(stats?.total ?? 0).toLocaleString()} hint={`匹配 ${stats?.scanned ?? 0} 条`} />
         <StatCard label="失败请求" value={failure.toLocaleString()} hint={`占比 ${failureRate}%（4xx + 5xx）`} />
         <StatCard label="流量合计" value={fmtBytes(stats?.bytes ?? 0)} hint={`平均耗时 ${Math.round(stats?.avgDurationMs ?? 0)} ms`} />
         <StatCard
@@ -432,9 +463,6 @@ export default function AccessLogs() {
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
               <span>
                 已显示 {rows.length} 条
-                {stats && stats.files ? ` · 命中 ${stats.files} 个日志文件` : ''}
-                {truncated ? ' · 已达到单次扫描上限，缩小时间范围可看到更多' : ''}
-                {stats && !stats.complete ? ' · 统计基于部分记录' : ''}
               </span>
               {hasMore ? (
                 <Button variant="secondary" isDisabled={more} onPress={() => void load('more')}>
@@ -446,7 +474,7 @@ export default function AccessLogs() {
         )}
       </Panel>
 
-      <Panel title="存储状态" description="访问日志文件的位置、保留策略与写入计数">
+      <Panel title="存储状态" description="访问日志数据库的位置、保留策略与写入计数">
         <div className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <div className="text-xs text-muted">目录</div>
@@ -455,7 +483,7 @@ export default function AccessLogs() {
           <div>
             <div className="text-xs text-muted">保留</div>
             <div className="text-sm">
-              {meta ? `${meta.keepDays} 天 · 单文件 ${meta.maxFileMb} MB` : '-'}
+              {meta ? `${meta.keepDays} 天 · 数据库上限 ${meta.maxFileMb} MB` : '-'}
             </div>
           </div>
           <div>
@@ -465,7 +493,7 @@ export default function AccessLogs() {
             </div>
           </div>
           <div>
-            <div className="text-xs text-muted">文件 / 占用</div>
+            <div className="text-xs text-muted">数据库 / 占用</div>
             <div className="text-sm">
               {meta?.files?.length ?? 0} 个 · {fmtBytes(meta?.totalBytes ?? 0)}
             </div>

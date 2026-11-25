@@ -1,6 +1,8 @@
 package forward
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"sync"
@@ -26,6 +28,8 @@ type accessEntry struct {
 	BytesIn  int64         `json:"bytesIn"`
 	BytesOut int64         `json:"bytesOut"`
 	Packets  uint64        `json:"packets,omitempty"`
+	// RequestID ties this connection to its persisted record.
+	RequestID string `json:"requestId,omitempty"`
 }
 
 // accessLogger keeps the most recent entries in a bounded ring. It is always
@@ -95,6 +99,10 @@ func (f *Forward) persist(e accessEntry) {
 	if f.deps == nil || f.deps.Logs == nil || !f.access.enabledNow() {
 		return
 	}
+	requestID := e.RequestID
+	if requestID == "" {
+		requestID = newConnectionID()
+	}
 	f.deps.Logs.Append(logstore.Entry{
 		Time:       e.Time,
 		Source:     logstore.SourceForward,
@@ -108,7 +116,17 @@ func (f *Forward) persist(e accessEntry) {
 		Bytes:      e.BytesIn + e.BytesOut,
 		BytesIn:    e.BytesIn,
 		BytesOut:   e.BytesOut,
+		RequestID:  requestID,
 	})
+}
+
+// newConnectionID creates the correlation id of one forward connection.
+func newConnectionID() string {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(buf[:])
 }
 
 // bareHost strips the port of a "host:port" peer address so the stored client

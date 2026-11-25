@@ -216,8 +216,9 @@ func (s *Server) handleAccessLogExport(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF})
 
 	cw := csv.NewWriter(w)
-	_ = cw.Write([]string{"时间", "来源", "站点/规则", "协议", "监听", "域名", "方法", "路径",
-		"状态", "结果", "客户端 IP", "上游/目标", "耗时(ms)", "字节", "User-Agent", "消息"})
+	_ = cw.Write([]string{"时间", "来源", "请求 ID", "站点/规则", "协议", "TLS", "监听", "域名",
+		"方法", "路径", "状态", "上游状态", "尝试次数", "结果", "拒绝原因", "错误", "客户端 IP",
+		"上游/目标", "耗时(ms)", "请求字节", "响应字节", "总字节", "User-Agent", "消息"})
 
 	written := 0
 	for page := 0; page < exportRowLimit/logstore.MaxLimit+1; page++ {
@@ -230,18 +231,26 @@ func (s *Server) handleAccessLogExport(w http.ResponseWriter, r *http.Request) {
 			_ = cw.Write([]string{
 				e.Time.Format("2006-01-02 15:04:05"),
 				e.Source,
+				e.RequestID,
 				e.Rule,
-				e.Protocol,
+				e.Proto,
+				e.TLS,
 				e.Listen,
 				e.Host,
 				e.Method,
 				e.Path,
 				statusCell(e.Status),
+				optionalInt(e.UpstreamStatus),
+				optionalInt(e.Attempts),
 				e.Result,
+				e.Reason,
+				e.Error,
 				e.ClientIP,
 				e.Upstream,
 				durationCell(e.DurationMs),
-				strconv.FormatInt(e.Bytes, 10),
+				optionalInt64(e.BytesIn),
+				optionalInt64(e.BytesOut),
+				optionalInt64(e.Bytes),
 				e.UserAgent,
 				e.Message,
 			})
@@ -263,6 +272,20 @@ func statusCell(status int) string {
 		return ""
 	}
 	return strconv.Itoa(status)
+}
+
+func optionalInt(value int) string {
+	if value <= 0 {
+		return ""
+	}
+	return strconv.Itoa(value)
+}
+
+func optionalInt64(value int64) string {
+	if value <= 0 {
+		return ""
+	}
+	return strconv.FormatInt(value, 10)
 }
 
 func durationCell(ms int64) string {

@@ -27,13 +27,16 @@ type Event struct {
 	Host     string    `json:"host,omitempty"`
 	URI      string    `json:"uri,omitempty"`
 	// Rule is the web rule (site) that was protected.
-	Rule     string   `json:"rule,omitempty"`
-	Action   string   `json:"action"`
-	Status   int      `json:"status,omitempty"`
-	Severity string   `json:"severity,omitempty"`
-	Tags     []string `json:"tags,omitempty"`
-	RuleIDs  []int    `json:"ruleIds,omitempty"`
-	TxID     string   `json:"txId,omitempty"`
+	Rule      string   `json:"rule,omitempty"`
+	Action    string   `json:"action"`
+	Status    int      `json:"status,omitempty"`
+	Severity  string   `json:"severity,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
+	RuleIDs   []int    `json:"ruleIds,omitempty"`
+	TxID      string   `json:"txId,omitempty"`
+	RequestID string   `json:"requestId,omitempty"`
+	Proto     string   `json:"proto,omitempty"`
+	TLS       string   `json:"tls,omitempty"`
 }
 
 // ruleCount is one entry of the "top rules" list.

@@ -205,6 +205,16 @@ func (rt *router) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		req.URL.RawPath = ""
 	}
 
+	// Every request gets an id that ties the access record, the WAF event and
+	// the process log together; handlers enrich the note with the reason of a
+	// refusal or the upstream outcome.
+	reqCtx, requestID, _ := withRequestInfo(req.Context())
+	req = req.WithContext(reqCtx)
+	if requestID != "" {
+		req.Header.Set("X-Request-ID", requestID)
+		rw.Header().Set("X-Request-ID", requestID)
+	}
+
 	// An ACME http-01 challenge is answered before routing: it belongs to no
 	// rule, and the CA only accepts it on port 80, which this listener may own.
 	if strings.HasPrefix(req.URL.Path, acmeChallengePath) {

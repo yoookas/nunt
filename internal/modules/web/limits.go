@@ -143,6 +143,7 @@ func (w *Web) rateLimitHandler(r *rule, next http.Handler) http.Handler {
 			wait = 1
 		}
 		w.noteRateLimited(r, req, client)
+		noteFrom(req.Context()).setReason("rate-limit")
 		rw.Header().Set("Retry-After", strconv.Itoa(wait))
 		http.Error(rw, rateLimitMessage, http.StatusTooManyRequests)
 	})
@@ -237,6 +238,7 @@ func (w *Web) capRequestBody(rw http.ResponseWriter, r *rule, req *http.Request)
 		return true
 	}
 	if req.ContentLength > limit {
+		noteFrom(req.Context()).setReason("body-limit")
 		w.noteBodyRejected(r, req, limit)
 		http.Error(rw, bodyLimitMessage, http.StatusRequestEntityTooLarge)
 		return false

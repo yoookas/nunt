@@ -440,7 +440,7 @@ export default function Settings() {
   const saveLogs = async () => {
     const rules: [number, number, number, string][] = [
       [logForm.keepDays, 1, 365, '访问日志保留天数需要在 1–365 之间'],
-      [logForm.maxFileMb, 1, 1024, '访问日志单文件上限需要在 1–1024 MB 之间'],
+      [logForm.maxFileMb, 1, 1024, '访问日志数据库上限需要在 1–4096 MB 之间'],
       [logForm.appMaxFileMb, 1, 1024, '运行日志单文件上限需要在 1–1024 MB 之间'],
       [logForm.appKeepFiles, 1, 10, '运行日志保留份数需要在 1–10 之间'],
     ]
@@ -923,7 +923,7 @@ export default function Settings() {
                   label="写入磁盘"
                   value={logForm.persist}
                   onChange={(value) => setLogForm((prev) => ({ ...prev, persist: value }))}
-                  hint="关闭后只保留内存缓冲，重启即丢失；已有文件不会被删除。"
+                  hint="关闭后只保留内存缓冲，重启即丢失；已写入数据库的记录不会被删除。"
                 />
                 <NumberInput
                   label="保留天数"
@@ -931,19 +931,19 @@ export default function Settings() {
                   onChange={(value) => setLogForm((prev) => ({ ...prev, keepDays: value }))}
                   min={1}
                   max={365}
-                  hint="超期的日志文件会在启动时与每小时清理一次。"
+                  hint="超过保留期的记录会在启动时与每小时清理一次。"
                 />
                 <NumberInput
-                  label="单文件上限（MB）"
+                  label="数据库上限（MB）"
                   value={logForm.maxFileMb}
                   onChange={(value) => setLogForm((prev) => ({ ...prev, maxFileMb: value }))}
                   min={1}
-                  max={1024}
-                  hint="超过后当天会滚动到新的序号文件。"
+                  max={4096}
+                  hint="超过后按时间删除最旧的记录。"
                 />
               </div>
               <div className="border-t border-border px-4 py-3 text-xs leading-6 text-muted">
-                记录会同时进入各模块的内存缓冲（页面右上角的实时弹窗）与磁盘。可在「日志 → 访问日志」中按来源、状态、IP 与关键字检索并导出 CSV。
+                记录会同时进入各模块的内存缓冲（页面右上角的实时弹窗）与 SQLite 数据库。可在「日志 → 访问日志」中按来源、状态、IP 与关键字检索并导出 CSV。
               </div>
             </Panel>
 

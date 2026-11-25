@@ -29,11 +29,13 @@ func (w *Web) accessHandler(r *rule, next http.Handler) http.Handler {
 		ip := netutil.ClientIP(req, trustProxy)
 		allowed, reason := r.filter.Allowed(ip)
 		if !allowed {
+			noteFrom(req.Context()).setReason("ip:" + reason)
 			w.logger().Warn("web：客户端被 IP 过滤拒绝", "rule", r.name, "mode", r.spec.Access.Mode, "ip", ipString(ip), "reason", reason)
 			http.Error(rw, "forbidden", http.StatusForbidden)
 			return
 		}
 		if !netutil.UAAllowed(r.spec.Access.UAMode, r.spec.Access.UAs, req.UserAgent()) {
+			noteFrom(req.Context()).setReason("ua")
 			w.logger().Warn("web：客户端被 User-Agent 过滤拒绝", "rule", r.name, "mode", r.spec.Access.UAMode, "ua", req.UserAgent())
 			http.Error(rw, "forbidden", http.StatusForbidden)
 			return
@@ -60,6 +62,7 @@ func (w *Web) basicAuthHandler(r *rule, next http.Handler) http.Handler {
 			next.ServeHTTP(rw, req)
 			return
 		}
+		noteFrom(req.Context()).setReason("basic-auth")
 		w.logger().Warn("web：基本认证失败", "rule", r.name, "user", username,
 			"ip", clientIPString(req, w.trustProxy(w.cfg)))
 		realm := r.spec.Name

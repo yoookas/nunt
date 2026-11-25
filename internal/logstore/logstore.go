@@ -1,24 +1,25 @@
-// Package logstore keeps the access log of the edge service on disk.
+// Package logstore keeps the access log of the edge service in SQLite.
 //
 // Web requests, port forward connections and WAF interceptions are appended to
-// newline delimited JSON files, one file per day (plus sequence suffixes when a
-// day outgrows the size limit). Old files are pruned by age. The writer path is
-// non blocking: entries go through a bounded queue and the request path is never
-// waiting for the disk; when the queue is full the entry is dropped and counted.
+// one table, filtered by source when read. The writer path is non blocking:
+// entries go through a bounded queue and are committed in batches; when the
+// queue is full the entry is dropped and counted. The SQLite file lives next to
+// the old JSONL files, which are left untouched.
 package logstore
 
 import (
-	"bufio"
-	"encoding/json"
+	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 // Entry sources.
@@ -28,36 +29,20 @@ const (
 	SourceWAF     = "waf"
 )
 
-// File layout. The day and the sequence suffix are part of the name so that a
-// directory listing is already ordered.
+// Defaults and bounds.
 const (
-	filePrefix = "access-"
-	fileSuffix = ".jsonl"
-	dayLayout  = "2006-01-02"
-)
-
-// Defaults and bounds of the writer.
-const (
-	// DefaultKeepDays is how long access records are kept when the
-	// configuration does not say otherwise.
-	DefaultKeepDays = 7
-	// DefaultMaxFileMB is the size at which a day rolls over to a new file.
+	DefaultKeepDays  = 7
 	DefaultMaxFileMB = 64
-	// MaxKeepDays and MaxFileMB are the upper bounds accepted from the
-	// configuration; they keep a typo from filling the disk.
-	MaxKeepDays = 365
-	MaxFileMB   = 1024
+	MaxKeepDays      = 365
+	MaxFileMB        = 4096
 
 	queueDepth    = 8192
+	batchSize     = 500
 	flushInterval = time.Second
 	pruneInterval = time.Hour
-	// maxLineBytes bounds the memory a single malformed line can allocate
-	// while reading backwards.
-	maxLineBytes = 1 << 20
 )
 
-// Entry is one access log record. It is a superset of the fields the three
-// producers fill in; source specific fields are omitted when empty.
+// Entry is one access log record shared by the three producers.
 type Entry struct {
 	Time     time.Time `json:"time"`
 	Source   string    `json:"source"`
@@ -72,19 +57,30 @@ type Entry struct {
 	// UserAgent is stored for web and WAF records.
 	UserAgent string `json:"userAgent,omitempty"`
 	// Upstream is the proxy target of a web record or the destination of a
-	// forward record.
-	Upstream string `json:"upstream,omitempty"`
+	// forward record; UpstreamStatus and Attempts describe the proxy exchange.
+	Upstream       string `json:"upstream,omitempty"`
+	UpstreamStatus int    `json:"upstreamStatus,omitempty"`
+	Attempts       int    `json:"attempts,omitempty"`
 	// DurationMs is the wall clock time the request or connection took.
 	DurationMs int64 `json:"durationMs,omitempty"`
-	// Bytes is the total bytes moved; BytesIn/BytesOut split it for forwards.
+	// Bytes is the total bytes moved; BytesIn/BytesOut split it for forwards
+	// and for web records (request body / response body).
 	Bytes    int64 `json:"bytes,omitempty"`
 	BytesIn  int64 `json:"bytesIn,omitempty"`
 	BytesOut int64 `json:"bytesOut,omitempty"`
-	// Protocol is tcp or udp for forward records.
+	// Protocol is tcp or udp for forward records, the HTTP version for web.
 	Protocol string `json:"protocol,omitempty"`
+	// Proto and TLS describe the web request (HTTP/1.1, TLS 1.3, ...).
+	Proto string `json:"proto,omitempty"`
+	TLS   string `json:"tls,omitempty"`
+	// RequestID ties one request across the web, WAF and process logs.
+	RequestID string `json:"requestId,omitempty"`
 	// Result is the forward outcome (closed, denied, failed: ...) or the WAF
-	// action (blocked, detected).
+	// action; Reason names the filter that refused the request and Error the
+	// proxy failure.
 	Result string `json:"result,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	Error  string `json:"error,omitempty"`
 	// WAFRuleID and Message describe a WAF verdict.
 	WAFRuleID int    `json:"wafRuleId,omitempty"`
 	Message   string `json:"message,omitempty"`
@@ -92,14 +88,14 @@ type Entry struct {
 
 // Options controls persistence and retention.
 type Options struct {
-	// Persist turns writing to disk on. Querying an existing directory still
-	// works when it is off.
-	Persist   bool `json:"persist"`
-	KeepDays  int  `json:"keepDays"`
-	MaxFileMB int  `json:"maxFileMb"`
+	Persist bool `json:"persist"`
+	// KeepDays is the age at which records are deleted.
+	KeepDays int `json:"keepDays"`
+	// MaxFileMB caps the database size; the oldest rows are deleted when the
+	// file grows past it.
+	MaxFileMB int `json:"maxFileMb"`
 }
 
-// normalize repairs the zero and out of range values of Options.
 func (o Options) normalize() Options {
 	if o.KeepDays <= 0 {
 		o.KeepDays = DefaultKeepDays
@@ -116,12 +112,9 @@ func (o Options) normalize() Options {
 	return o
 }
 
-func (o Options) maxBytes() int64 { return int64(o.MaxFileMB) << 20 }
-
-// File describes one stored log file.
+// File describes the database file for the storage panel.
 type File struct {
 	Name    string    `json:"name"`
-	Day     string    `json:"day"`
 	Size    int64     `json:"size"`
 	ModTime time.Time `json:"modTime"`
 }
@@ -137,36 +130,32 @@ type Meta struct {
 	Dropped    int64  `json:"dropped"`
 	TotalBytes int64  `json:"totalBytes"`
 	Files      []File `json:"files"`
+	LastError  string `json:"lastError,omitempty"`
 }
 
-// Store appends records to disk and answers queries over the stored files.
+// Store appends records to SQLite and answers queries over them.
 type Store struct {
-	dir string
+	dir    string
+	dbPath string
+	db     *sql.DB
 
 	mu   sync.RWMutex
 	opts Options
 
 	queue chan Entry
+	flush chan chan struct{}
 	done  chan struct{}
 	once  sync.Once
 	wg    sync.WaitGroup
 
-	// opMu serialises file mutations between the writer goroutine and
-	// Clear/Prune/Query's flush. The writer state below is guarded by it.
-	opMu    sync.Mutex
-	file    *os.File
-	buf     *bufio.Writer
-	day     string
-	seq     int
-	size    int64
-	closed  bool
-	lastErr error
-
-	dropped atomic.Int64
 	written atomic.Int64
+	dropped atomic.Int64
+
+	errMu   sync.Mutex
+	lastErr string
 }
 
-// Open creates the log directory if needed and starts the writer goroutine.
+// Open opens (or creates) the database under dir and starts the writer.
 func Open(dir string, opts Options) (*Store, error) {
 	if strings.TrimSpace(dir) == "" {
 		return nil, errors.New("logstore: a directory is required")
@@ -174,17 +163,99 @@ func Open(dir string, opts Options) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("create access log directory %s: %w", dir, err)
 	}
-	s := &Store{dir: dir, queue: make(chan Entry, queueDepth), done: make(chan struct{})}
+	dbPath := filepath.Join(dir, "access.db")
+	fresh := false
+	if _, err := os.Stat(dbPath); errors.Is(err, os.ErrNotExist) {
+		fresh = true
+	}
+
+	u := url.URL{Scheme: "file", Path: dbPath}
+	q := u.Query()
+	q.Add("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", "journal_mode(DELETE)")
+	q.Add("_pragma", "synchronous(NORMAL)")
+	u.RawQuery = q.Encode()
+
+	db, err := sql.Open("sqlite", u.String())
+	if err != nil {
+		return nil, fmt.Errorf("open access database: %w", err)
+	}
+	db.SetMaxOpenConns(4)
+	if fresh {
+		// Incremental vacuum keeps deleting old rows from rewriting the file.
+		if _, err := db.Exec("PRAGMA auto_vacuum=INCREMENTAL"); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("configure access database: %w", err)
+		}
+	}
+	if err := migrate(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := os.Chmod(dbPath, 0o640); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("chmod access database: %w", err)
+	}
+
+	s := &Store{
+		dir:    dir,
+		dbPath: dbPath,
+		db:     db,
+		queue:  make(chan Entry, queueDepth),
+		flush:  make(chan chan struct{}),
+		done:   make(chan struct{}),
+	}
 	s.opts = opts.normalize()
-	// Prune before serving so a long outage does not keep expired files until
-	// the first hourly tick.
 	s.prune()
 	s.wg.Add(1)
 	go s.loop()
 	return s, nil
 }
 
-// Dir returns the directory holding the log files.
+func migrate(db *sql.DB) error {
+	const schema = `
+CREATE TABLE IF NOT EXISTS access_log (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	ts INTEGER NOT NULL,
+	source TEXT NOT NULL DEFAULT '',
+	rule_id TEXT NOT NULL DEFAULT '',
+	rule TEXT NOT NULL DEFAULT '',
+	listen TEXT NOT NULL DEFAULT '',
+	host TEXT NOT NULL DEFAULT '',
+	method TEXT NOT NULL DEFAULT '',
+	path TEXT NOT NULL DEFAULT '',
+	status INTEGER NOT NULL DEFAULT 0,
+	client_ip TEXT NOT NULL DEFAULT '',
+	user_agent TEXT NOT NULL DEFAULT '',
+	upstream TEXT NOT NULL DEFAULT '',
+	upstream_status INTEGER NOT NULL DEFAULT 0,
+	attempts INTEGER NOT NULL DEFAULT 0,
+	duration_ms INTEGER NOT NULL DEFAULT 0,
+	bytes INTEGER NOT NULL DEFAULT 0,
+	bytes_in INTEGER NOT NULL DEFAULT 0,
+	bytes_out INTEGER NOT NULL DEFAULT 0,
+	proto TEXT NOT NULL DEFAULT '',
+	tls TEXT NOT NULL DEFAULT '',
+	request_id TEXT NOT NULL DEFAULT '',
+	result TEXT NOT NULL DEFAULT '',
+	reason TEXT NOT NULL DEFAULT '',
+	error TEXT NOT NULL DEFAULT '',
+	waf_rule_id INTEGER NOT NULL DEFAULT 0,
+	message TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_access_ts ON access_log(ts DESC);
+CREATE INDEX IF NOT EXISTS idx_access_source_ts ON access_log(source, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_access_status_ts ON access_log(status, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_access_rule_ts ON access_log(rule_id, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_access_client_ts ON access_log(client_ip, ts DESC);
+`
+	if _, err := db.Exec(schema); err != nil {
+		return fmt.Errorf("create access log schema: %w", err)
+	}
+	return nil
+}
+
+// Dir returns the directory holding the database.
 func (s *Store) Dir() string { return s.dir }
 
 // Options returns the effective options.
@@ -194,24 +265,24 @@ func (s *Store) Options() Options {
 	return s.opts
 }
 
-// Configure applies new options at runtime. Retention is enforced immediately.
+// Configure applies new options at runtime and enforces retention.
 func (s *Store) Configure(opts Options) {
 	opts = opts.normalize()
 	s.mu.Lock()
 	s.opts = opts
 	s.mu.Unlock()
-	s.prune()
+	// Enforce the new retention now; the hourly loop already runs once.
+	s.pruneOnce()
 }
 
-// Enabled reports whether entries are written to disk.
+// Enabled reports whether entries are written to the database.
 func (s *Store) Enabled() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.opts.Persist
 }
 
-// Append queues one record. It never blocks the caller: when the queue is full
-// the record is dropped and counted, which is visible through Meta.
+// Append queues one record without blocking the caller.
 func (s *Store) Append(e Entry) {
 	if e.Time.IsZero() {
 		e.Time = time.Now()
@@ -229,46 +300,28 @@ func (s *Store) Append(e Entry) {
 	}
 }
 
-// Close drains the queue, flushes the buffer and closes the file.
+// Close drains the queue and closes the database.
 func (s *Store) Close() error {
 	s.once.Do(func() { close(s.done) })
 	s.wg.Wait()
-	s.opMu.Lock()
-	defer s.opMu.Unlock()
-	s.closed = true
-	s.closeFileLocked()
-	return s.lastErr
+	return s.db.Close()
 }
 
-// Clear removes every stored file. Recording resumes with the next entry.
+// Clear removes every record.
 func (s *Store) Clear() error {
-	s.opMu.Lock()
-	defer s.opMu.Unlock()
-	s.closeFileLocked()
-	entries, err := os.ReadDir(s.dir)
-	if err != nil {
-		return fmt.Errorf("read access log directory: %w", err)
+	s.requestFlush()
+	if _, err := s.db.Exec("DELETE FROM access_log"); err != nil {
+		return fmt.Errorf("clear access log: %w", err)
 	}
-	var failed int
-	for _, de := range entries {
-		if de.IsDir() || !isAccessFile(de.Name()) {
-			continue
-		}
-		if err := os.Remove(filepath.Join(s.dir, de.Name())); err != nil {
-			failed++
-		}
-	}
-	s.day, s.seq, s.size = "", 0, 0
-	if failed > 0 {
-		return fmt.Errorf("remove %d access log files: %w", failed, err)
+	if _, err := s.db.Exec("PRAGMA incremental_vacuum"); err != nil {
+		return fmt.Errorf("vacuum access log: %w", err)
 	}
 	return nil
 }
 
-// Meta reports the writer state and the stored files.
+// Meta reports the writer state and the database file.
 func (s *Store) Meta() Meta {
 	opts := s.Options()
-	files, _ := s.Files()
 	m := Meta{
 		Dir:       s.dir,
 		Persist:   opts.Persist,
@@ -277,251 +330,168 @@ func (s *Store) Meta() Meta {
 		Queued:    len(s.queue),
 		Written:   s.written.Load(),
 		Dropped:   s.dropped.Load(),
-		Files:     files,
+		Files:     []File{},
 	}
-	for _, f := range files {
-		m.TotalBytes += f.Size
+	if info, err := os.Stat(s.dbPath); err == nil {
+		m.TotalBytes = info.Size()
+		m.Files = append(m.Files, File{Name: filepath.Base(s.dbPath), Size: info.Size(), ModTime: info.ModTime()})
 	}
+	s.errMu.Lock()
+	m.LastError = s.lastErr
+	s.errMu.Unlock()
 	return m
 }
 
-// Files lists the stored files, oldest first.
+// Files lists the database file.
 func (s *Store) Files() ([]File, error) {
-	entries, err := os.ReadDir(s.dir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return []File{}, nil
-		}
-		return nil, fmt.Errorf("read access log directory: %w", err)
-	}
-	out := make([]File, 0, len(entries))
-	for _, de := range entries {
-		if de.IsDir() || !isAccessFile(de.Name()) {
-			continue
-		}
-		info, err := de.Info()
-		if err != nil {
-			continue
-		}
-		out = append(out, File{
-			Name:    de.Name(),
-			Day:     dayOf(de.Name()),
-			Size:    info.Size(),
-			ModTime: info.ModTime(),
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
+	return s.Meta().Files, nil
 }
 
-// prune deletes files that fell out of the retention window.
-func (s *Store) prune() {
-	keep := s.Options().KeepDays
-	cutoff := time.Now().AddDate(0, 0, -(keep - 1))
-	cutoffDay := time.Date(cutoff.Year(), cutoff.Month(), cutoff.Day(), 0, 0, 0, 0, time.Local)
-
-	s.opMu.Lock()
-	defer s.opMu.Unlock()
-	entries, err := os.ReadDir(s.dir)
-	if err != nil {
+func (s *Store) setError(err error) {
+	if err == nil {
 		return
 	}
-	for _, de := range entries {
-		if de.IsDir() || !isAccessFile(de.Name()) {
-			continue
-		}
-		day, err := time.ParseInLocation(dayLayout, dayOf(de.Name()), time.Local)
-		if err != nil {
-			continue
-		}
-		// Never delete the file currently being written.
-		if de.Name() == s.currentName() {
-			continue
-		}
-		if day.Before(cutoffDay) {
-			_ = os.Remove(filepath.Join(s.dir, de.Name()))
-		}
-	}
+	s.errMu.Lock()
+	s.lastErr = err.Error()
+	s.errMu.Unlock()
 }
-
-// ---------------------------------------------------------------------------
-// writer
-// ---------------------------------------------------------------------------
 
 func (s *Store) loop() {
 	defer s.wg.Done()
-	flushTick := time.NewTicker(flushInterval)
-	defer flushTick.Stop()
-	pruneTick := time.NewTicker(pruneInterval)
-	defer pruneTick.Stop()
-
+	batch := make([]Entry, 0, batchSize)
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		if err := s.write(batch); err != nil {
+			s.setError(err)
+		} else {
+			s.written.Add(int64(len(batch)))
+		}
+		batch = batch[:0]
+	}
+	drain := func(limit int) {
+		for len(batch) < limit {
+			select {
+			case e := <-s.queue:
+				batch = append(batch, e)
+			default:
+				return
+			}
+		}
+	}
+	ticker := time.NewTicker(flushInterval)
+	defer ticker.Stop()
 	for {
 		select {
-		case e := <-s.queue:
-			s.batch(e)
-		case <-flushTick.C:
-			s.flush()
-		case <-pruneTick.C:
-			s.prune()
 		case <-s.done:
-			s.drain()
+			drain(queueDepth)
+			flush()
 			return
-		}
-	}
-}
-
-// batch writes first and then up to 63 more queued entries under one lock, so
-// a burst costs one lock acquisition instead of one per record.
-func (s *Store) batch(first Entry) {
-	s.opMu.Lock()
-	defer s.opMu.Unlock()
-	s.writeLocked(first)
-	for i := 0; i < 63; i++ {
-		select {
 		case e := <-s.queue:
-			s.writeLocked(e)
-		default:
-			return
+			batch = append(batch, e)
+			if len(batch) >= batchSize {
+				flush()
+			}
+		case ch := <-s.flush:
+			drain(batchSize * 4)
+			flush()
+			close(ch)
+		case <-ticker.C:
+			flush()
 		}
 	}
 }
 
-// drain writes everything still queued on shutdown.
-func (s *Store) drain() {
-	s.opMu.Lock()
-	defer s.opMu.Unlock()
-	for {
-		select {
-		case e := <-s.queue:
-			s.writeLocked(e)
-		default:
-			s.closeFileLocked()
-			return
-		}
-	}
-}
-
-// flush pushes the buffered bytes to the file.
-func (s *Store) flush() {
-	s.opMu.Lock()
-	defer s.opMu.Unlock()
-	s.flushLocked()
-}
-
-func (s *Store) flushLocked() {
-	if s.buf == nil {
-		return
-	}
-	if err := s.buf.Flush(); err != nil {
-		s.lastErr = err
-	}
-}
-
-func (s *Store) writeLocked(e Entry) {
-	if s.closed {
-		return
-	}
-	if !s.ensureFileLocked(e.Time) {
-		return
-	}
-	line, err := json.Marshal(e)
+func (s *Store) write(entries []Entry) error {
+	tx, err := s.db.Begin()
 	if err != nil {
-		return
+		return fmt.Errorf("begin access log transaction: %w", err)
 	}
-	line = append(line, '\n')
-	n, err := s.buf.Write(line)
+	stmt, err := tx.Prepare(`INSERT INTO access_log (
+		ts, source, rule_id, rule, listen, host, method, path, status, client_ip,
+		user_agent, upstream, upstream_status, attempts, duration_ms, bytes,
+		bytes_in, bytes_out, proto, tls, request_id, result, reason, error, waf_rule_id, message
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
-		s.lastErr = err
-		return
+		_ = tx.Rollback()
+		return fmt.Errorf("prepare access log insert: %w", err)
 	}
-	s.size += int64(n)
-	s.written.Add(1)
-	if s.size >= s.maxBytes() {
-		// Roll over eagerly so the next record starts a fresh file instead of
-		// writing one oversized record into the current one.
-		s.flushLocked()
-		s.closeFileLocked()
-	}
-}
-
-// ensureFileLocked opens (or reopens) the file that should receive an entry
-// with the given time.
-func (s *Store) ensureFileLocked(t time.Time) bool {
-	day := t.Local().Format(dayLayout)
-	if s.file != nil && s.day == day && s.size < s.maxBytes() {
-		return true
-	}
-	s.closeFileLocked()
-
-	for seq := 0; seq < 1000; seq++ {
-		path := filepath.Join(s.dir, fileName(day, seq))
-		info, err := os.Stat(path)
-		if err == nil && info.Size() >= s.maxBytes() {
-			continue
-		}
-		flags := os.O_CREATE | os.O_WRONLY | os.O_APPEND
-		f, err := os.OpenFile(path, flags, 0o640)
+	for _, e := range entries {
+		_, err = stmt.Exec(
+			e.Time.UnixMilli(), e.Source, e.RuleID, e.Rule, e.Listen, e.Host, e.Method, e.Path,
+			e.Status, e.ClientIP, e.UserAgent, e.Upstream, e.UpstreamStatus, e.Attempts,
+			e.DurationMs, e.Bytes, e.BytesIn, e.BytesOut, e.Proto, e.TLS, e.RequestID,
+			e.Result, e.Reason, e.Error, e.WAFRuleID, e.Message,
+		)
 		if err != nil {
-			s.lastErr = err
-			return false
+			_ = stmt.Close()
+			_ = tx.Rollback()
+			return fmt.Errorf("insert access log: %w", err)
 		}
-		size := int64(0)
-		if info != nil {
-			size = info.Size()
-		}
-		s.file = f
-		s.buf = bufio.NewWriterSize(f, 64<<10)
-		s.day = day
-		s.seq = seq
-		s.size = size
-		return true
 	}
-	s.lastErr = fmt.Errorf("logstore: no free file name for %s", day)
-	return false
+	if err := stmt.Close(); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("close access log statement: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit access log: %w", err)
+	}
+	return nil
 }
 
-func (s *Store) closeFileLocked() {
-	if s.file == nil {
+// requestFlush asks the writer to commit whatever is queued, so a query sees
+// the newest records. It never blocks the caller for long.
+func (s *Store) requestFlush() {
+	ch := make(chan struct{})
+	select {
+	case s.flush <- ch:
+		select {
+		case <-ch:
+		case <-time.After(3 * time.Second):
+		}
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func (s *Store) prune() {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.pruneOnce()
+		ticker := time.NewTicker(pruneInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.done:
+				return
+			case <-ticker.C:
+				s.pruneOnce()
+			}
+		}
+	}()
+}
+
+func (s *Store) pruneOnce() {
+	opts := s.Options()
+	cutoff := time.Now().Add(-time.Duration(opts.KeepDays) * 24 * time.Hour).UnixMilli()
+	if _, err := s.db.Exec("DELETE FROM access_log WHERE ts < ?", cutoff); err != nil {
+		s.setError(err)
 		return
 	}
-	s.flushLocked()
-	if err := s.file.Close(); err != nil && s.lastErr == nil {
-		s.lastErr = err
+	capBytes := int64(opts.MaxFileMB) << 20
+	for i := 0; i < 20; i++ {
+		info, err := os.Stat(s.dbPath)
+		if err != nil || info.Size() <= capBytes {
+			break
+		}
+		if _, err := s.db.Exec("DELETE FROM access_log WHERE id IN (SELECT id FROM access_log ORDER BY ts ASC LIMIT 5000)"); err != nil {
+			s.setError(err)
+			break
+		}
+		if _, err := s.db.Exec("PRAGMA incremental_vacuum(2000)"); err != nil {
+			s.setError(err)
+			break
+		}
 	}
-	s.file = nil
-	s.buf = nil
-}
-
-func (s *Store) currentName() string {
-	if s.file == nil || s.day == "" {
-		return ""
-	}
-	return fileName(s.day, s.seq)
-}
-
-func (s *Store) maxBytes() int64 { return s.Options().maxBytes() }
-
-// ---------------------------------------------------------------------------
-// file naming
-// ---------------------------------------------------------------------------
-
-func fileName(day string, seq int) string {
-	if seq <= 0 {
-		return filePrefix + day + fileSuffix
-	}
-	return fmt.Sprintf("%s%s.%03d%s", filePrefix, day, seq, fileSuffix)
-}
-
-func isAccessFile(name string) bool {
-	return strings.HasPrefix(name, filePrefix) && strings.HasSuffix(name, fileSuffix)
-}
-
-// dayOf returns the day encoded in a file name, or "" when it has none.
-func dayOf(name string) string {
-	rest := strings.TrimPrefix(name, filePrefix)
-	rest = strings.TrimSuffix(rest, fileSuffix)
-	if len(rest) < len(dayLayout) {
-		return ""
-	}
-	return rest[:len(dayLayout)]
 }
