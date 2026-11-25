@@ -6,6 +6,8 @@ import (
 	"encoding/pem"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -186,6 +188,7 @@ func Normalize(c *model.Config) {
 		}
 	}
 	c.System.IP2RegionDB = strings.TrimSpace(c.System.IP2RegionDB)
+	c.System.IP2RegionV6DB = strings.TrimSpace(c.System.IP2RegionV6DB)
 
 	if c.Backup.IntervalHours <= 0 {
 		c.Backup.IntervalHours = 24
@@ -282,6 +285,12 @@ func Validate(c *model.Config) error {
 	// persist it instead of locking the administrator out later.
 	if u := c.Users[0]; u.TOTP.Enabled && strings.TrimSpace(u.TOTP.Secret) == "" {
 		return fmt.Errorf("TOTP is enabled without a secret")
+	}
+	if err := validateDatabasePath("IPv4", c.System.IP2RegionDB); err != nil {
+		return err
+	}
+	if err := validateDatabasePath("IPv6", c.System.IP2RegionV6DB); err != nil {
+		return err
 	}
 	listeners, err := validateWebListeners(c.Web.Listeners)
 	if err != nil {
@@ -541,4 +550,27 @@ func displayName(name, id string) string {
 		return name
 	}
 	return id
+}
+
+// validateDatabasePath keeps a hand-edited or imported configuration from
+// pointing the address database at a device or FIFO: os.ReadFile on /dev/zero
+// never ends and the service could not start again.
+func validateDatabasePath(label, p string) error {
+	if p == "" {
+		return nil
+	}
+	if !filepath.IsAbs(p) {
+		return fmt.Errorf("the %s address database path must be absolute: %s", label, p)
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("the %s address database path cannot be inspected: %w", label, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("the %s address database path must be a regular file: %s", label, p)
+	}
+	return nil
 }

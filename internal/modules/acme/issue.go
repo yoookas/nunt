@@ -153,6 +153,12 @@ func (a *ACME) issue(ctx context.Context, req request) (result Result, err error
 			return result, fmt.Errorf("read authorization %s: %w", authzURL, err)
 		}
 		authorizations = append(authorizations, authz)
+		// The CA must only authorise names this job asked for. Otherwise a
+		// dishonest CA could use the operator's DNS credentials as an oracle
+		// for a zone outside the job.
+		if authz.Identifier.Type != "dns" || !authorizationCovers(req.domains, authz.Identifier.Value) {
+			return result, fmt.Errorf("the ca returned an authorization for %q, which is not one of the requested domains", authz.Identifier.Value)
+		}
 		if authz.Status == acme.StatusValid {
 			continue
 		}
@@ -269,6 +275,21 @@ func (a *ACME) provisionChallenge(ctx context.Context, client *acme.Client, req 
 		return nil, nil, err
 	}
 	return chal, cleanup, nil
+}
+
+// authorizationCovers reports whether an authorization identifier belongs to
+// the requested domain set. A wildcard order is authorised under its base name,
+// which is why "*.example.com" also accepts "example.com".
+func authorizationCovers(domains []string, identifier string) bool {
+	for _, d := range domains {
+		if d == identifier {
+			return true
+		}
+		if strings.HasPrefix(d, "*.") && d[2:] == identifier {
+			return true
+		}
+	}
+	return false
 }
 
 // deactivateAuthorizations releases the pending authorizations of a failed

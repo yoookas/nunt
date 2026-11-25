@@ -242,12 +242,6 @@ func (d *DDNS) handleProviderTest(w http.ResponseWriter, r *http.Request) {
 	// wrote 192.0.2.1 over the existing record and deleted it afterwards, which
 	// left the name without an address until the scheduler noticed (up to 24h).
 	// Validating the credentials and constructing the provider is read-only.
-	_ = provider
-	recordType := req.Type
-	if recordType == "" {
-		recordType = "A"
-	}
-	_ = recordType
 	rest.OK(w, map[string]any{
 		"status":   "ok",
 		"provider": provider.Name(),
