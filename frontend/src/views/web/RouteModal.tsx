@@ -646,7 +646,7 @@ export default function RouteModal({
                   value={form.accessGeo}
                   onChange={(value) => patch({ accessGeo: value })}
                   placeholder="输入后回车，例如 中国、浙江、杭州"
-                  hint="同一个列表：国家、省份、城市混写，命中任意一项即匹配；需先在「IP 地址库」上传地址库"
+                  hint="同一个列表：国家、省份、城市混写，命中任意一项即匹配；私有/回环地址没有地区数据；服务在反向代理后面时需开启信任代理"
                 />
               </div>
               <SelectInput

@@ -284,15 +284,46 @@ func load(family int, path string, info os.FileInfo) (*dataset, Status, error) {
 func ParseRegion(raw string) Record {
 	out := Record{Raw: raw}
 	parts := strings.Split(raw, "|")
+	if len(parts) == 0 {
+		return out
+	}
+	// The current official v4/v6 databases store
+	// country|province|city|isp|country-code, while older databases store
+	// country|region|province|city|isp. The ISO code in the last field is the
+	// discriminator; reserved ranges end in "0" and match neither layout, so
+	// they fall through to the legacy mapping and are emptied below.
+	if len(parts) >= 5 && isCountryCode(parts[4]) {
+		out.Country = cleanField(parts[0])
+		out.Province = cleanField(parts[1])
+		out.City = cleanField(parts[2])
+		out.ISP = cleanField(parts[3])
+		return out
+	}
 	fields := []*string{&out.Country, &out.Region, &out.Province, &out.City, &out.ISP}
 	for i := 0; i < len(fields) && i < len(parts); i++ {
-		value := strings.TrimSpace(parts[i])
-		if value == "0" {
-			value = ""
-		}
-		*fields[i] = value
+		*fields[i] = cleanField(parts[i])
 	}
 	return out
+}
+
+// cleanField normalises a database field: padding is removed, the "0"
+// placeholders become empty, and the reserved-range marker does too so a
+// private address never matches a country/province/city entry.
+func cleanField(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "0" || strings.EqualFold(value, "Reserved") {
+		return ""
+	}
+	return value
+}
+
+// isCountryCode reports whether the value looks like the ISO country code of
+// the current database layout (CN, AU, GB, ...).
+func isCountryCode(value string) bool {
+	value = strings.TrimSpace(value)
+	return len(value) == 2 &&
+		value[0] >= 'A' && value[0] <= 'Z' &&
+		value[1] >= 'A' && value[1] <= 'Z'
 }
 
 var provinceNames = []string{

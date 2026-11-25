@@ -879,7 +879,7 @@ export default function Forward() {
               value={form.accessGeo}
               onChange={(value) => patchForm({ accessGeo: value })}
               placeholder="输入后回车，例如 中国、浙江、杭州"
-              hint="同一个列表，命中任意一项即匹配；与 IP 列表取并集，需先把访问策略设为白名单/黑名单并上传地址库。"
+              hint="同一个列表，命中任意一项即匹配；与 IP 列表取并集；私有/回环地址没有地区数据。"
             />
           </FormField>
 

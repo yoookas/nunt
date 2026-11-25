@@ -107,3 +107,17 @@ func TestFilterGeoMatchesCountryProvinceOrCity(t *testing.T) {
 		}
 	}
 }
+
+// An address without geography (private/loopback) reports why instead of a
+// bare "no-match".
+func TestFilterGeoNoDataReason(t *testing.T) {
+	empty := fakeGeo{record: ip2region.Record{}}
+	f, err := Compile(model.Access{Mode: model.AccessAllow, Geo: []string{"中国"}}, empty)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	ok, reason := f.Allowed(net.ParseIP("127.0.0.1"))
+	if ok || reason != "geo-no-data" {
+		t.Fatalf("allowed=%v reason=%q", ok, reason)
+	}
+}

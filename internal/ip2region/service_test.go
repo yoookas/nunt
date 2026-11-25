@@ -18,6 +18,11 @@ func TestParseRegion(t *testing.T) {
 		{"0|0|0|0|0", Record{Raw: "0|0|0|0|0"}},
 		{"", Record{}},
 		{"美国|0|加利福尼亚州|洛杉矶|0", Record{Country: "美国", Province: "加利福尼亚州", City: "洛杉矶", Raw: "美国|0|加利福尼亚州|洛杉矶|0"}},
+		// Current official layout: country|province|city|isp|ISO code.
+		{"中国|江苏省|南京市|南京新锋信息|CN", Record{Country: "中国", Province: "江苏省", City: "南京市", ISP: "南京新锋信息", Raw: "中国|江苏省|南京市|南京新锋信息|CN"}},
+		{"Australia|Queensland|Brisbane|0|AU", Record{Country: "Australia", Province: "Queensland", City: "Brisbane", Raw: "Australia|Queensland|Brisbane|0|AU"}},
+		// Reserved ranges have no geography at all.
+		{"Reserved|Reserved|Reserved|0|0", Record{Raw: "Reserved|Reserved|Reserved|0|0"}},
 	}
 	for _, tc := range cases {
 		if got := ParseRegion(tc.raw); got != tc.want {

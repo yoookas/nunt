@@ -55,7 +55,10 @@ func (f *Filter) Allowed(ip net.IP) (bool, string) {
 		if matched {
 			return true, reason
 		}
-		return false, "no-match"
+		if reason == "" {
+			reason = "no-match"
+		}
+		return false, reason
 	}
 	if matched {
 		return false, reason
@@ -81,6 +84,11 @@ func (f *Filter) match(ip net.IP) (bool, string, error) {
 	record, err := f.lookup.Lookup(ip)
 	if err != nil {
 		return false, "geo-error", err
+	}
+	// Private, loopback and reserved addresses have no geography in the
+	// common databases; say so instead of a bare "no-match" in the log.
+	if record.Country == "" && record.Province == "" && record.City == "" {
+		return false, "geo-no-data", nil
 	}
 	for _, want := range f.names {
 		if matchGeoName(want, record) {
