@@ -79,68 +79,55 @@ export default function LogsModal({
     {
       key: 'time',
       title: '时间',
-      className: 'w-44',
+      className: 'w-40',
       render: (row) => <span className="whitespace-nowrap text-xs">{fmtTime(row.time)}</span>,
     },
     {
       key: 'clientIp',
       title: '客户端',
-      className: 'w-36',
+      className: 'w-32',
       render: (row) => <span className="mono whitespace-nowrap text-xs">{row.clientIp || '-'}</span>,
     },
     {
-      key: 'method',
-      title: '方法',
-      className: 'w-16',
-      render: (row) => <span className="text-xs">{row.method || '-'}</span>,
-    },
-    {
-      key: 'path',
-      title: '路径',
-      className: 'w-56',
+      key: 'request',
+      title: '请求',
       render: (row) => (
-        <span className="mono block max-w-xs truncate text-xs" title={row.path}>
-          {row.path || '-'}
-        </span>
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="mono shrink-0 text-xs">{row.method || '-'}</span>
+            <span className="mono truncate text-xs" title={row.path}>
+              {row.path || '-'}
+            </span>
+          </div>
+          <div className="mt-0.5 truncate text-xs text-muted" title={row.userAgent}>
+            {row.userAgent || '-'}
+          </div>
+        </div>
       ),
     },
     {
-      key: 'status',
-      title: '状态',
-      className: 'w-20',
+      key: 'result',
+      title: '结果',
+      className: 'w-40',
       render: (row) => (
-        <StatusChip color={statusColor(row.status)}>{row.status || '-'}</StatusChip>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 whitespace-nowrap">
+            <StatusChip color={statusColor(row.status)}>{row.status || '-'}</StatusChip>
+            <span className="text-xs">
+              {row.duration || (row.durationMs != null ? `${row.durationMs} ms` : '-')}
+            </span>
+          </div>
+          <div className="mt-0.5 text-xs text-muted">{fmtBytes(row.bytes)}</div>
+        </div>
       ),
-    },
-    {
-      key: 'duration',
-      title: '耗时',
-      className: 'w-20',
-      render: (row) => (
-        <span className="whitespace-nowrap text-xs">
-          {row.duration || (row.durationMs != null ? `${row.durationMs} ms` : '-')}
-        </span>
-      ),
-    },
-    {
-      key: 'bytes',
-      title: '大小',
-      className: 'w-20',
-      render: (row) => <span className="whitespace-nowrap text-xs">{fmtBytes(row.bytes)}</span>,
     },
     {
       key: 'upstream',
       title: '上游',
-      className: 'w-44',
-      render: (row) => <span className="mono whitespace-nowrap text-xs">{row.upstream || '-'}</span>,
-    },
-    {
-      key: 'ua',
-      title: 'User-Agent',
-      className: 'w-64',
+      className: 'w-40',
       render: (row) => (
-        <span className="block max-w-xs truncate text-xs text-muted" title={row.userAgent}>
-          {row.userAgent || '-'}
+        <span className="mono block truncate text-xs" title={row.upstream}>
+          {row.upstream || '-'}
         </span>
       ),
     },
@@ -174,6 +161,8 @@ export default function LogsModal({
             columns={columns}
             rowKey={(row) => row._key}
             ariaLabel="访问日志"
+            tableClassName="table-fixed"
+            minWidthClass="min-w-[820px]"
             empty={loading ? '加载中…' : '暂无访问日志（可能未开启访问日志记录）'}
           />
         <div className="text-xs text-muted">
