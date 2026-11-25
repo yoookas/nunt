@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Switch } from '@heroui/react'
-import { FileText, Pencil, Trash2 } from 'lucide-react'
+import { Button, Dropdown, Switch } from '@heroui/react'
+import { Ellipsis, FileText, Pencil, Trash2 } from 'lucide-react'
 import { api, errorText } from '../api'
 import {
   ConfirmModal,
@@ -366,19 +366,37 @@ export default function Web() {
     {
       key: 'actions',
       title: '操作',
-      className: 'w-28',
+      className: 'w-16',
       render: (row) => (
-        <div className="flex items-center gap-0.5 whitespace-nowrap">
-          <Button isIconOnly size="sm" variant="ghost" aria-label={`查看路由日志 ${row.name || row.id}`} onPress={() => setLogsRule(row)}>
-            <FileText size={14} />
-          </Button>
-          <Button isIconOnly size="sm" variant="ghost" aria-label={`编辑路由 ${row.name || row.id}`} onPress={() => openEditRule(row)}>
-            <Pencil size={14} />
-          </Button>
-          <Button isIconOnly size="sm" variant="ghost" aria-label={`删除路由 ${row.name || row.id}`} onPress={() => setDeleteRule(row)}>
-            <Trash2 size={14} />
-          </Button>
-        </div>
+        <Dropdown>
+          <Dropdown.Trigger>
+            <Button isIconOnly size="sm" variant="ghost" aria-label={`路由操作 ${row.name || row.id}`}>
+              <Ellipsis size={16} />
+            </Button>
+          </Dropdown.Trigger>
+          <Dropdown.Popover>
+            <Dropdown.Menu
+              onAction={(key) => {
+                if (key === 'logs') setLogsRule(row)
+                if (key === 'edit') openEditRule(row)
+                if (key === 'delete') setDeleteRule(row)
+              }}
+            >
+              <Dropdown.Item id="logs" textValue="查看访问日志">
+                <FileText size={14} className="mr-2 inline" />
+                查看访问日志
+              </Dropdown.Item>
+              <Dropdown.Item id="edit" textValue="编辑路由">
+                <Pencil size={14} className="mr-2 inline" />
+                编辑路由
+              </Dropdown.Item>
+              <Dropdown.Item id="delete" textValue="删除路由">
+                <Trash2 size={14} className="mr-2 inline" />
+                删除路由
+              </Dropdown.Item>
+            </Dropdown.Menu>
+          </Dropdown.Popover>
+        </Dropdown>
       ),
     },
   )
@@ -488,11 +506,9 @@ export default function Web() {
           </div>
         </Panel>
 
-        <Panel
-          title="路由"
-          className="min-w-0"
-          flush
-          extra={
+        <section className="min-w-0">
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+            <div className="text-sm font-semibold sm:text-base">路由</div>
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
               <ToolbarSelect
                 label="监听器筛选"
@@ -522,8 +538,7 @@ export default function Web() {
                 共 {rules.length} 条 · 显示 {filteredRules.length} 条
               </span>
             </div>
-          }
-        >
+          </div>
 
           {routeError ? (
             <div className="flex items-center gap-2 border-y border-border px-4 py-2 text-sm text-danger">
@@ -535,13 +550,14 @@ export default function Web() {
           ) : null}
 
           <DataTable
-              items={filteredRules}
-              columns={routeColumns}
-              rowKey={(row) => row.id}
-              ariaLabel="Web 路由"
-              empty={loading ? '加载中…' : routeEmptyText}
-            />
-        </Panel>
+            items={filteredRules}
+            columns={routeColumns}
+            rowKey={(row) => row.id}
+            ariaLabel="Web 路由"
+            variant="primary"
+            empty={loading ? '加载中…' : routeEmptyText}
+          />
+        </section>
       </div>
 
       <ListenerModal
