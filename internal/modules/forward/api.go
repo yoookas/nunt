@@ -95,6 +95,8 @@ func (f *Forward) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	withRuleIDs(&rule)
+	// A new rule is never created as auto-disabled.
+	rule.Disabled = false
 	if err := validateRule(rule); err != nil {
 		rest.Fail(w, http.StatusBadRequest, "%s", err.Error())
 		return
@@ -116,6 +118,14 @@ func (f *Forward) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.Reload(f.deps.Cfg.Snapshot())
+	// Return the stored rule: Reload may have disabled it when the port is
+	// already taken.
+	for _, stored := range f.deps.Cfg.Snapshot().Forward.Rules {
+		if stored.ID == rule.ID {
+			rule = stored
+			break
+		}
+	}
 	rest.JSON(w, http.StatusCreated, rule)
 }
 
@@ -184,6 +194,9 @@ func (f *Forward) handleUpdateRule(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			rule.CreatedAt = c.Forward.Rules[i].CreatedAt
+			// Saving the form re-attempts the bind: the rule starts enabled
+			// only if its port is free, otherwise Reload disables it again.
+			rule.Disabled = false
 			c.Forward.Rules[i] = rule
 			stored = rule
 			found = true
@@ -230,21 +243,29 @@ func (f *Forward) handleToggleRule(w http.ResponseWriter, r *http.Request) {
 		rest.Fail(w, http.StatusBadRequest, "%s", err.Error())
 		return
 	}
-	var updated model.ForwardRule
 	found := false
+	enabling := false
 	err = f.deps.Cfg.Update(func(c *model.Config) error {
 		for i := range c.Forward.Rules {
 			if c.Forward.Rules[i].ID != id {
 				continue
 			}
-			next := !c.Forward.Rules[i].Enable
+			found = true
+			// A rule is on only when it is enabled and not auto-disabled.
+			on := c.Forward.Rules[i].Enable && !c.Forward.Rules[i].Disabled
+			next := !on
 			if ok {
 				next = requested
 			}
-			c.Forward.Rules[i].Enable = next
+			enabling = next
+			if next {
+				c.Forward.Rules[i].Enable = true
+				c.Forward.Rules[i].Disabled = false
+			} else {
+				c.Forward.Rules[i].Enable = false
+				c.Forward.Rules[i].Disabled = false
+			}
 			c.Forward.Rules[i].UpdatedAt = time.Now()
-			updated = c.Forward.Rules[i]
-			found = true
 			return nil
 		}
 		return errors.New("rule not found")
@@ -257,8 +278,23 @@ func (f *Forward) handleToggleRule(w http.ResponseWriter, r *http.Request) {
 		rest.Fail(w, status, "cannot toggle the rule: %s", err)
 		return
 	}
+
 	f.Reload(f.deps.Cfg.Snapshot())
-	rest.OK(w, updated)
+
+	var current model.ForwardRule
+	for _, r := range f.deps.Cfg.Snapshot().Forward.Rules {
+		if r.ID == id {
+			current = r
+			break
+		}
+	}
+	// Enabling only succeeds when the bind worked; Reload disables the rule
+	// again when the port is still taken.
+	if enabling && current.Disabled {
+		rest.Fail(w, http.StatusConflict, "端口仍被占用，规则保持停用；请释放端口后再试")
+		return
+	}
+	rest.OK(w, current)
 }
 
 func (f *Forward) handleReload(w http.ResponseWriter, r *http.Request) {

@@ -63,6 +63,7 @@ interface ForwardRule {
   id: string
   name: string
   enable: boolean
+  disabled?: boolean
   protocol: string
   srcAddr: string
   dstAddr: string
@@ -346,7 +347,7 @@ export default function Forward() {
       out.down += num(rule.downBytes)
       out.rejectedRule += num(rule.rejectedRuleLimit)
       out.rejectedIp += num(rule.rejectedIpLimit)
-      if (rule.enable) out.enabled += 1
+      if (rule.enable && !rule.disabled) out.enabled += 1
       if (rule.listening) out.listening += 1
     }
     out.rejected = out.rejectedRule + out.rejectedIp
@@ -463,7 +464,8 @@ export default function Forward() {
   }
 
   const toggleRule = async (rule: ForwardRule, value: boolean) => {
-    const next = typeof value === 'boolean' ? value : !rule.enable
+    const on = rule.enable && !rule.disabled
+    const next = typeof value === 'boolean' ? value : !on
     const id = String(rule.id || '')
     setBusyId(id)
     try {
@@ -560,12 +562,12 @@ export default function Forward() {
     {
       key: 'status',
       title: '状态',
-      className: 'w-28',
+      className: 'w-36',
       render: (row) => (
         <div className="flex items-center gap-2 whitespace-nowrap">
           <Switch
             aria-label={`${row.name || row.id} 启停`}
-            isSelected={!!row.enable}
+            isSelected={!!row.enable && !row.disabled}
             isDisabled={busyId === String(row.id || '')}
             onChange={(value) => void toggleRule(row, value)}
           >
@@ -575,7 +577,9 @@ export default function Forward() {
               </Switch.Control>
             </Switch.Content>
           </Switch>
-          <span className="text-xs text-muted">{row.enable ? '启用' : '停用'}</span>
+          <span className="text-xs text-muted">
+            {row.disabled ? '端口被占用' : row.enable ? '启用' : '停用'}
+          </span>
         </div>
       ),
     },

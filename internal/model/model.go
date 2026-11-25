@@ -293,9 +293,13 @@ type ForwardConfig struct {
 
 // ForwardRule forwards TCP/UDP traffic from SrcAddr to DstAddr.
 type ForwardRule struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Enable     bool   `json:"enable"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Enable bool   `json:"enable"`
+	// Disabled marks a rule that was switched off automatically because its
+	// source address could not be bound (another process owns the port). The
+	// switch turns it back on, which retries the bind.
+	Disabled   bool   `json:"disabled,omitempty"`
 	Protocol   string `json:"protocol"`
 	SrcAddr    string `json:"srcAddr"`
 	DstAddr    string `json:"dstAddr"`

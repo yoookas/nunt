@@ -143,7 +143,7 @@ func (f *Forward) Reload(cfg *model.Config) {
 
 	desired := map[string]model.ForwardRule{}
 	for _, r := range cfg.Forward.Rules {
-		if !r.Enable {
+		if !r.Enable || r.Disabled {
 			continue
 		}
 		if _, err := netutil.NormalizeListen(r.SrcAddr); err != nil {
@@ -199,16 +199,59 @@ func (f *Forward) Reload(cfg *model.Config) {
 	for _, p := range obsolete {
 		p.close()
 	}
+	var failed []string
 	for _, p := range fresh {
 		if err := p.start(); err != nil {
-			// A busy port must never take the whole module down; the rule is
-			// reported as not listening both in the log and in the status.
-			f.log.Error("转发：规则启动失败",
+			// A busy port must never take the whole module down. Like a web
+			// listener, the rule is switched off and persisted as disabled so
+			// a reload does not retry the bind on every config change.
+			f.log.Error("转发：规则启动失败，已自动停用",
 				"rule", ruleLabel(p.rule), "protocol", p.proto,
 				"src", p.rule.SrcAddr, "dst", p.rule.DstAddr, "error", err)
+			f.mu.Lock()
+			victims := f.proxies[p.rule.ID]
+			delete(f.proxies, p.rule.ID)
+			f.mu.Unlock()
+			for _, v := range victims {
+				v.close()
+			}
+			failed = append(failed, p.rule.ID)
 		}
 	}
+	if len(failed) > 0 {
+		f.disableRules(failed)
+	}
 	f.SetDetail(f.detail())
+}
+
+// disableRules persists the auto-disable of rules whose source address could
+// not be bound, so the switch shows off until the operator turns it back on.
+func (f *Forward) disableRules(ids []string) {
+	if len(ids) == 0 || f.deps == nil || f.deps.Cfg == nil {
+		return
+	}
+	wanted := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		wanted[id] = true
+	}
+	now := time.Now()
+	if err := f.deps.Cfg.Update(func(c *model.Config) error {
+		for i := range c.Forward.Rules {
+			if !wanted[c.Forward.Rules[i].ID] {
+				continue
+			}
+			c.Forward.Rules[i].Disabled = true
+			c.Forward.Rules[i].UpdatedAt = now
+		}
+		return nil
+	}); err != nil {
+		f.log.Error("转发：无法停用启动失败的规则", "rules", ids, "error", err)
+		return
+	}
+	f.mu.Lock()
+	f.cfg = f.deps.Cfg.Snapshot()
+	f.mu.Unlock()
+	f.log.Warn("转发：规则端口被占用，已自动停用；释放端口后可在列表里手动启用", "rules", ids)
 }
 
 // RegisterAPI mounts the REST endpoints.
@@ -237,7 +280,7 @@ func (f *Forward) Stats() map[string]any {
 	}
 	for _, r := range rules {
 		total++
-		if r.Enable {
+		if r.Enable && !r.Disabled {
 			enabled++
 		}
 	}
@@ -411,7 +454,7 @@ func countEnabled(cfg *model.Config) int {
 	}
 	n := 0
 	for _, r := range cfg.Forward.Rules {
-		if r.Enable {
+		if r.Enable && !r.Disabled {
 			n++
 		}
 	}
