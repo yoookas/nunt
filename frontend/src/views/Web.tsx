@@ -286,34 +286,6 @@ export default function Web() {
 
 
   const routeColumns: Column<WebRule>[] = [
-    {
-      key: 'status',
-      title: '状态',
-      className: 'w-32',
-      render: (row) => (
-        <div className="flex items-center gap-2 whitespace-nowrap">
-          <Switch
-            isSelected={row.enable}
-            isDisabled={busyRuleId === row.id}
-            onChange={(selected) => void toggleRule(row, selected)}
-            aria-label={`启停路由 ${row.name || row.id}`}
-          >
-            <Switch.Content>
-              <Switch.Control>
-                <Switch.Thumb />
-              </Switch.Control>
-            </Switch.Content>
-          </Switch>
-          {!row.enable ? (
-            <span className="text-xs text-muted">已停用</span>
-          ) : row.active ? (
-            <StatusChip color="success">运行中</StatusChip>
-          ) : (
-            <StatusChip color="warning">未生效</StatusChip>
-          )}
-        </div>
-      ),
-    },
   ]
   routeColumns.push(
     {
@@ -388,6 +360,34 @@ export default function Web() {
         <span className="block text-xs tabular-nums text-muted">
           {Number(row.requests || 0).toLocaleString()}
         </span>
+      ),
+    },
+    {
+      key: 'status',
+      title: '状态',
+      className: 'w-32',
+      render: (row) => (
+        <div className="flex items-center gap-2 whitespace-nowrap">
+          <Switch
+            isSelected={row.enable}
+            isDisabled={busyRuleId === row.id}
+            onChange={(selected) => void toggleRule(row, selected)}
+            aria-label={`启停路由 ${row.name || row.id}`}
+          >
+            <Switch.Content>
+              <Switch.Control>
+                <Switch.Thumb />
+              </Switch.Control>
+            </Switch.Content>
+          </Switch>
+          {!row.enable ? (
+            <span className="text-xs text-muted">已停用</span>
+          ) : row.active ? (
+            <StatusChip color="success">运行中</StatusChip>
+          ) : (
+            <StatusChip color="warning">未生效</StatusChip>
+          )}
+        </div>
       ),
     },
     {
