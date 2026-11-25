@@ -333,6 +333,7 @@ export function DataTable<T>({
   sortable = false,
   onReorder,
   tableClassName,
+  minWidthClass = 'min-w-[600px] md:min-w-0',
 }: {
   items: T[]
   columns: Column<T>[]
@@ -348,6 +349,9 @@ export function DataTable<T>({
   /** Extra classes for the <table>; "table-fixed" keeps long cells from
    * stretching the table past its container. */
   tableClassName?: string
+  /** Minimum width of the scrolling wrapper, so a dense table scrolls instead
+   * of squeezing its columns to nothing. */
+  minWidthClass?: string
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [overflow, setOverflow] = useState(false)
@@ -444,7 +448,7 @@ export function DataTable<T>({
         role="region"
         aria-label={`${ariaLabel}（可横向滚动）`}
       >
-        <div className="min-w-[600px] md:min-w-0">
+        <div className={minWidthClass}>
           {draggable ? (
             <SortableList ids={ids} onReorder={onReorder}>
               {table}
@@ -456,8 +460,8 @@ export function DataTable<T>({
       </div>
 
       {overflow ? (
-        <div className="mt-1 flex items-center justify-end gap-1.5 px-1 md:hidden">
-          <span className="mr-auto text-[11px] text-muted">左右滑动查看完整表格</span>
+        <div className="mt-1 flex items-center justify-end gap-1.5 px-1 xl:hidden">
+          <span className="mr-auto text-[11px] text-muted">表格超出屏幕，可左右滚动查看</span>
           <Button
             isIconOnly
             size="sm"

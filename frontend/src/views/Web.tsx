@@ -587,6 +587,7 @@ export default function Web() {
             ariaLabel="Web 路由"
             variant="primary"
             tableClassName="table-fixed"
+            minWidthClass="min-w-[760px] xl:min-w-0"
             sortable
             onReorder={(ids) => void reorderRules(ids)}
             empty={loading ? '加载中…' : routeEmptyText}
