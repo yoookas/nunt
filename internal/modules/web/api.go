@@ -558,7 +558,11 @@ func (w *Web) handleUpdateRule(rw http.ResponseWriter, req *http.Request) {
 		return errNotFound
 	})
 	if err != nil {
-		rest.Fail(rw, http.StatusNotFound, "rule not found")
+		if errors.Is(err, errNotFound) {
+			rest.Fail(rw, http.StatusNotFound, "rule not found")
+			return
+		}
+		rest.Fail(rw, http.StatusBadRequest, "cannot delete the rule: %s", err)
 		return
 	}
 	rest.NoContent(rw)

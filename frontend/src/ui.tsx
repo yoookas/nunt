@@ -333,7 +333,7 @@ export function DataTable<T>({
   sortable = false,
   onReorder,
   tableClassName,
-  minWidthClass = 'min-w-[600px] md:min-w-0',
+  minWidthClass = 'min-w-max',
 }: {
   items: T[]
   columns: Column<T>[]
@@ -460,7 +460,7 @@ export function DataTable<T>({
       </div>
 
       {overflow ? (
-        <div className="mt-1 flex items-center justify-end gap-1.5 px-1 xl:hidden">
+        <div className="mt-1 flex items-center justify-end gap-1.5 px-1">
           <span className="mr-auto text-[11px] text-muted">表格超出屏幕，可左右滚动查看</span>
           <Button
             isIconOnly
@@ -549,7 +549,7 @@ export function FormModal({
   title: ReactNode
   children: ReactNode
   footer?: ReactNode
-  size?: 'sm' | 'md' | 'lg' | 'xl' | 'full'
+  size?: 'sm' | 'md' | 'lg' | 'xl' | 'wide' | 'full'
 }) {
   // A form is a dialog, not a side sheet: Modal centers it on screen. The
   // Drawer component used here before anchored itself to the left edge.
@@ -557,7 +557,7 @@ export function FormModal({
     <Modal isOpen={open} onOpenChange={(isOpen: boolean) => !isOpen && onClose()}>
       <Modal.Backdrop>
         <Modal.Container placement="center" scroll="inside" size="lg">
-          <Modal.Dialog className={size === 'xl' || size === 'full' ? 'sm:max-w-3xl' : 'sm:max-w-xl'}>
+          <Modal.Dialog className={size === 'wide' ? 'sm:max-w-6xl' : size === 'xl' || size === 'full' ? 'sm:max-w-3xl' : 'sm:max-w-xl'}>
             <Modal.Header>
               <Modal.Heading>{title}</Modal.Heading>
             </Modal.Header>

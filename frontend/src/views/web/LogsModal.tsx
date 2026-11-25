@@ -79,21 +79,25 @@ export default function LogsModal({
     {
       key: 'time',
       title: '时间',
+      className: 'w-44',
       render: (row) => <span className="whitespace-nowrap text-xs">{fmtTime(row.time)}</span>,
     },
     {
       key: 'clientIp',
       title: '客户端',
-      render: (row) => <span className="mono text-xs">{row.clientIp || '-'}</span>,
+      className: 'w-36',
+      render: (row) => <span className="mono whitespace-nowrap text-xs">{row.clientIp || '-'}</span>,
     },
     {
       key: 'method',
       title: '方法',
+      className: 'w-16',
       render: (row) => <span className="text-xs">{row.method || '-'}</span>,
     },
     {
       key: 'path',
       title: '路径',
+      className: 'w-56',
       render: (row) => (
         <span className="mono block max-w-xs truncate text-xs" title={row.path}>
           {row.path || '-'}
@@ -103,6 +107,7 @@ export default function LogsModal({
     {
       key: 'status',
       title: '状态',
+      className: 'w-20',
       render: (row) => (
         <StatusChip color={statusColor(row.status)}>{row.status || '-'}</StatusChip>
       ),
@@ -110,6 +115,7 @@ export default function LogsModal({
     {
       key: 'duration',
       title: '耗时',
+      className: 'w-20',
       render: (row) => (
         <span className="whitespace-nowrap text-xs">
           {row.duration || (row.durationMs != null ? `${row.durationMs} ms` : '-')}
@@ -119,16 +125,19 @@ export default function LogsModal({
     {
       key: 'bytes',
       title: '大小',
+      className: 'w-20',
       render: (row) => <span className="whitespace-nowrap text-xs">{fmtBytes(row.bytes)}</span>,
     },
     {
       key: 'upstream',
       title: '上游',
-      render: (row) => <span className="mono text-xs">{row.upstream || '-'}</span>,
+      className: 'w-44',
+      render: (row) => <span className="mono whitespace-nowrap text-xs">{row.upstream || '-'}</span>,
     },
     {
       key: 'ua',
       title: 'User-Agent',
+      className: 'w-64',
       render: (row) => (
         <span className="block max-w-xs truncate text-xs text-muted" title={row.userAgent}>
           {row.userAgent || '-'}
@@ -142,7 +151,7 @@ export default function LogsModal({
       open={open}
       onClose={onClose}
       title={`访问日志 · ${rule?.name || rule?.id || ''}`}
-      size="xl"
+      size="wide"
       footer={
         <div className="flex justify-end">
           <Button variant="tertiary" onPress={onClose}>
