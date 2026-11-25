@@ -724,8 +724,8 @@ export default function Waf() {
                   value={form.bodyLimitKb}
                   onChange={(bodyLimitKb) => setForm((prev) => ({ ...prev, bodyLimitKb }))}
                   min={0}
-                  max={10240}
-                  hint="0 表示后端默认值"
+                  max={262144}
+                  hint="0 表示后端默认值（128 KB）。只决定检查多少：超出的部分照常转发但不检查；大请求体会落到临时文件，不占内存。"
                 />
                 <SwitchInput
                   label="管理后台防护"

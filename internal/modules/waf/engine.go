@@ -78,9 +78,15 @@ func (b *directiveBuilder) String() string {
 	return sb.String()
 }
 
-// maxBodyLimitKB caps the inspected request body. Coraza itself allows up to
-// 1 GiB; buffering that much per request would be a memory hazard.
-const maxBodyLimitKB = 10 * 1024
+// maxBodyLimitKB caps the inspected request body. Coraza buffers up to the
+// limit; beyond the in-memory limit the buffer spills to a temporary file, so
+// a large limit costs disk and CPU during the upload rather than RAM.
+const maxBodyLimitKB = 256 * 1024
+
+// bodyMemoryLimitKB is how much of a request body stays in memory. Larger
+// bodies are spooled to disk by Coraza, which keeps a 256 MiB inspection limit
+// from becoming a 256 MiB allocation per concurrent upload.
+const bodyMemoryLimitKB = 1024
 
 // allowedRequestContentTypes is the value tx.allowed_request_content_type
 // is set to unless an administrator overrides it. It is the default list of
@@ -300,7 +306,7 @@ func renderDirectives(cfg model.WAFConfig, catalog []ruleFile) *directiveBuilder
 		fmt.Sprintf("SecRuleEngine %s", engineMode),
 		"SecRequestBodyAccess On",
 		fmt.Sprintf("SecRequestBodyLimit %d", bodyLimit),
-		fmt.Sprintf("SecRequestBodyInMemoryLimit %d", bodyLimit),
+		fmt.Sprintf("SecRequestBodyInMemoryLimit %d", minInt(bodyLimit, bodyMemoryLimitKB*1024)),
 		// ProcessPartial inspects the first BodyLimitKB bytes of a large upload
 		// instead of rejecting it, which keeps file transfers working.
 		"SecRequestBodyLimitAction ProcessPartial",
@@ -329,13 +335,17 @@ func compile(cfg model.WAFConfig, catalog []ruleFile, diskFiles []string, log *s
 	installPathTransforms()
 
 	bodyLimit := cfg.BodyLimitKB * 1024
+	memoryLimit := bodyMemoryLimitKB * 1024
+	if bodyLimit < memoryLimit {
+		memoryLimit = bodyLimit
+	}
 	b := renderDirectives(cfg, catalog)
 
 	wafCfg := coraza.NewWAFConfig().
 		WithRootFS(rulesFS{}).
 		WithRequestBodyAccess().
 		WithRequestBodyLimit(bodyLimit).
-		WithRequestBodyInMemoryLimit(bodyLimit).
+		WithRequestBodyInMemoryLimit(memoryLimit).
 		WithDirectives(b.String())
 	for _, f := range diskFiles {
 		wafCfg = wafCfg.WithDirectivesFromFile(f)
@@ -634,4 +644,12 @@ func collectMatched(tx types.Transaction, interruptID int) []ruleHit {
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+// minInt returns the smaller of two ints.
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

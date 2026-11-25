@@ -988,3 +988,22 @@ func TestInspectionFailureIsClosedInEnforceMode(t *testing.T) {
 		t.Fatalf("the request reached the upstream: %q", got)
 	}
 }
+
+// A large inspection limit must not turn into an equally large per-request
+// memory buffer: Coraza spills the excess to a temporary file.
+func TestLargeBodyLimitUsesDiskSpool(t *testing.T) {
+	cfg := baseConfig()
+	cfg.BodyLimitKB = 20 * 1024 // 20 MiB
+	stream := renderDirectives(cfg, nil).String()
+	if !strings.Contains(stream, "SecRequestBodyLimit 20971520") {
+		t.Fatalf("the inspection limit was not raised:\n%s", stream)
+	}
+	if !strings.Contains(stream, "SecRequestBodyInMemoryLimit 1048576") {
+		t.Fatalf("the in-memory cap was not applied:\n%s", stream)
+	}
+
+	cfg.BodyLimitKB = 1024 * 1024 // 1 GiB, above the cap
+	if got := normalizeWAFConfig(cfg).BodyLimitKB; got != 256*1024 {
+		t.Fatalf("the limit was clamped to %d KB, want %d", got, 256*1024)
+	}
+}
