@@ -584,7 +584,7 @@ export default function AccessLogs() {
       >
         {detail ? (
           <div className="space-y-3 text-sm">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
               <Detail label="时间" value={fmtTime(detail.time)} />
               <Detail label="来源" value={detail.source} />
               <Detail label="站点 / 规则" value={detail.rule || detail.ruleId || '-'} />
