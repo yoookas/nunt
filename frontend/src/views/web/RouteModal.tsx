@@ -11,7 +11,6 @@ import {
   TextAreaInput,
   TextInput,
   toast,
-  type SelectOption,
 } from '../../ui'
 import {
   ACCESS_OPTIONS,
@@ -27,7 +26,6 @@ import {
   textToKV,
   type AccessMode,
   type BasicAuthUser,
-  type Certificate,
   type ProxyTarget,
   type RedirectTarget,
   type RouteType,
@@ -153,7 +151,6 @@ export default function RouteModal({
   open,
   rule,
   listeners,
-  certificates,
   defaultListenerId,
   onClose,
   onSaved,
@@ -161,7 +158,6 @@ export default function RouteModal({
   open: boolean
   rule: WebRule | null
   listeners: WebListenerView[]
-  certificates: Certificate[]
   defaultListenerId: string
   onClose: () => void
   onSaved: () => void

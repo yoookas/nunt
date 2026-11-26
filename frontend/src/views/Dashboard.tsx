@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { usePolling } from '../usePolling'
-import { Button, Typography } from '@heroui/react'
+import { Typography } from '@heroui/react'
 import { Activity, Boxes, Cpu, Globe, HardDrive, Server } from 'lucide-react'
 import { api, errorText } from '../api'
 import { fmtBytes, fmtDuration, fmtTime } from '../format'

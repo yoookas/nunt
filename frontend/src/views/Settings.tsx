@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Alert, Button, Switch, Tabs } from '@heroui/react'
+import { Alert, Button, Tabs } from '@heroui/react'
 import { api, errorText } from '../api'
 import { copyText } from '../clipboard'
 import { fmtBytes, fmtTime } from '../format'
-import { useAuth } from '../session'
 import TotpPanel from './settings/TotpPanel'
 import { useTheme } from '../theme'
 import {
@@ -15,7 +14,6 @@ import {
   PageHeader,
   Panel,
   SelectInput,
-  StatusChip,
   SwitchInput,
   TagInput,
   TextInput,

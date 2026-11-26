@@ -23,8 +23,6 @@ import RouteModal from './web/RouteModal'
 import {
   TLS_LABEL,
   TYPE_OPTIONS,
-  certDomainsText,
-  certTooltip,
   listenerName,
   ruleTypeColor,
   ruleTypeLabel,
@@ -607,7 +605,6 @@ export default function Web() {
         open={routeModal.open}
         rule={routeModal.rule}
         listeners={listeners}
-        certificates={certificates}
         defaultListenerId={defaultListenerId}
         onClose={() => setRouteModal({ open: false, rule: null })}
         onSaved={() => void refreshAll()}

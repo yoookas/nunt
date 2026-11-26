@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button, Drawer, Dropdown, Menu, useOverlayState } from '@heroui/react'
+import { Button, Drawer, Dropdown, Menu } from '@heroui/react'
 import { CircleUserRound, KeyRound, LogOut, Menu as MenuIcon, TriangleAlert } from 'lucide-react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api'
@@ -54,7 +54,6 @@ export default function AppLayout() {
   const [problems, setProblems] = useState<HealthProblem[]>([])
   const current = menu.find((item) => (item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path)))
 
-  const drawer = useOverlayState()
 
   // Surface certificate, module and renewal failures on every page: they used
   // to appear only on the overview, so a failed issuance stayed invisible

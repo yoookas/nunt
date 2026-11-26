@@ -305,28 +305,6 @@ export function targetText(rule: WebRule): string {
   return '-'
 }
 
-export function certOf(certId: string | undefined, certificates: Certificate[]): Certificate | null {
-  if (!certId) return null
-  return certificates.find((cert) => cert.id === certId) || null
-}
-
-export function certDomainsText(certId: string | undefined, certificates: Certificate[]): string {
-  if (!certId) return '未选择证书'
-  const cert = certOf(certId, certificates)
-  if (!cert) return `证书 ${certId}（未找到）`
-  const domains = Array.isArray(cert.domains) ? cert.domains : []
-  return domains.length ? domains.join(', ') : cert.id
-}
-
-export function certTooltip(certId: string | undefined, certificates: Certificate[]): string {
-  const cert = certOf(certId, certificates)
-  if (!cert) return certId ? `证书 ${certId} 不在证书列表中` : '没有选择证书'
-  const parts = [`到期 ${fmtTime(cert.notAfter)}`]
-  if (cert.issuer) parts.push(`签发者 ${cert.issuer}`)
-  if (cert.expired) parts.push('已过期')
-  return parts.join(' · ')
-}
-
 export function certOptions(certificates: Certificate[]): SelectOption[] {
   return certificates.map((cert) => {
     const domains = (Array.isArray(cert.domains) ? cert.domains : []).join(', ') || cert.id

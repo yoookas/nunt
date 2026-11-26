@@ -12,7 +12,6 @@ import {
   NumberInput,
   Page,
   PageHeader,
-  Panel,
   StatCard,
   SelectInput,
   LiveStatus,

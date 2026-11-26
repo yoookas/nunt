@@ -60,7 +60,6 @@ interface PageResult {
   nextCursor?: string
   hasMore: boolean
   scanned: number
-  truncated?: boolean
 }
 
 interface Count {
@@ -177,7 +176,6 @@ export default function AccessLogs() {
   const [more, setMore] = useState(false)
   const [stats, setStats] = useState<Stats | null>(null)
   const [meta, setMeta] = useState<Meta | null>(null)
-  const [truncated, setTruncated] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
   const [auto, setAuto] = useState(false)
 
@@ -218,7 +216,6 @@ export default function AccessLogs() {
         setRows((prev) => (mode === 'more' ? prev.concat(mapped) : mapped))
         setCursor(page.nextCursor || '')
         setHasMore(!!page.hasMore)
-        setTruncated(!!page.truncated)
         if (mode === 'reset') {
           const next = await api.get<Stats>('/api/v1/logs/access/stats', params)
           setStats(next)

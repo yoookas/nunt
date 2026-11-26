@@ -24,13 +24,10 @@ import {
   Card,
   Chip,
   Description,
-  Dropdown,
   EmptyState,
   Input,
   Label,
   ListBox,
-  Menu,
-  MenuItem,
   Modal,
   NumberField,
   SearchField,
@@ -44,7 +41,7 @@ import {
   Typography,
   toast,
 } from '@heroui/react'
-import { ChevronDown, ChevronLeft, ChevronRight, GripVertical, Minus, Plus, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, GripVertical, Minus, Plus, X } from 'lucide-react'
 
 export { toast }
 
@@ -597,7 +594,7 @@ export function DataTable<T>({
   )
 }
 
-export function TableSkeleton({ columns = 4, rows = 5 }: { columns?: number; rows?: number }) {
+function TableSkeleton({ columns = 4, rows = 5 }: { columns?: number; rows?: number }) {
   return (
     <div className="space-y-2 p-4">
       {Array.from({ length: rows }).map((_, rowIndex) => (
@@ -617,27 +614,6 @@ export function LoadingBlock({ label = '加载中…' }: { label?: string }) {
       <Spinner size="sm" />
       {label}
     </div>
-  )
-}
-
-export function SearchInput({
-  value,
-  onChange,
-  placeholder = '搜索…',
-}: {
-  value: string
-  onChange: (value: string) => void
-  placeholder?: string
-}) {
-  return (
-    <TextField
-      aria-label={placeholder}
-      value={value}
-      onChange={onChange}
-      className="w-56"
-    >
-      <Input placeholder={placeholder} />
-    </TextField>
   )
 }
 
@@ -1087,8 +1063,4 @@ export function AlertBox({
       </Alert.Content>
     </Alert>
   )
-}
-
-export function useOptions<T>(items: T[], getValue: (item: T) => string, getLabel: (item: T) => string) {
-  return useMemo(() => items.map((item) => ({ value: getValue(item), label: getLabel(item) })), [items])
 }

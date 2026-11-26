@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ReactNode } from 'react'
+import { lazy } from 'react'
 import { createHashRouter, Navigate, Outlet, useLocation } from 'react-router-dom'
 import AppLayout from './layout/AppLayout'
 import { useAuth } from './session'
@@ -28,10 +28,6 @@ function RequireAuth() {
     return <Navigate to="/password" replace />
   }
   return <Outlet />
-}
-
-function Lazy({ children }: { children: ReactNode }) {
-  return <Suspense fallback={<div className="p-6 text-sm text-muted">加载中…</div>}>{children}</Suspense>
 }
 
 const router = createHashRouter([
