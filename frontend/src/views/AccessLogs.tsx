@@ -7,7 +7,6 @@ import {
   AlertBox,
   ConfirmModal,
   DataTable,
-  FormModal,
   LoadingBlock,
   Panel,
   SelectInput,
@@ -34,7 +33,6 @@ interface Entry {
   path?: string
   status?: number
   clientIp?: string
-  userAgent?: string
   upstream?: string
   durationMs?: number
   bytes?: number
@@ -180,7 +178,6 @@ export default function AccessLogs() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [meta, setMeta] = useState<Meta | null>(null)
   const [truncated, setTruncated] = useState(false)
-  const [detail, setDetail] = useState<Row | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const [auto, setAuto] = useState(false)
 
@@ -456,60 +453,13 @@ export default function AccessLogs() {
           <LoadingBlock />
         ) : (
           <div className="space-y-3 p-3">
-            <div className="md:hidden">
-              {rows.length ? (
-                <div className="overflow-hidden rounded-lg border border-border">
-                  {rows.map((row) => {
-                    const meta = SOURCE_META[row.source] || { label: row.source || '-', color: 'default' as const }
-                    return (
-                      <button
-                        key={row.key}
-                        type="button"
-                        onClick={() => setDetail(row)}
-                        className="flex w-full flex-col gap-1 border-b border-border px-3 py-3 text-left last:border-b-0 hover:bg-default/40"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-muted">{fmtTime(row.time)}</span>
-                          <StatusChip color={meta.color}>{meta.label}</StatusChip>
-                          <span className="flex-1" />
-                          {row.status ? (
-                            <StatusChip color={statusColor(row.status)}>{row.status}</StatusChip>
-                          ) : (
-                            <span className="text-xs text-muted">{row.result || '-'}</span>
-                          )}
-                        </div>
-                        <div className="truncate text-sm font-medium">{row.rule || row.ruleId || '-'}</div>
-                        <div className="mono truncate text-xs text-muted">
-                          {row.method || '-'} {row.path || '-'}
-                        </div>
-                        {row.reason || row.error ? (
-                          <div className="truncate text-[11px] text-warning">{row.reason || row.error}</div>
-                        ) : null}
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted">
-                          <span className="mono">{row.clientIp || '-'}</span>
-                          <span>{row.durationMs ? `${row.durationMs} ms` : '-'}</span>
-                          <span>{row.bytes ? fmtBytes(row.bytes) : '-'}</span>
-                          {row.requestId ? <span className="mono">{row.requestId.slice(0, 8)}</span> : null}
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              ) : (
-                <div className="rounded-lg border border-border px-3 py-6 text-center text-sm text-muted">
-                  {loading ? '加载中…' : '没有匹配的访问记录'}
-                </div>
-              )}
-            </div>
-            <div className="hidden md:block">
-              <DataTable
-                items={rows}
-                columns={columns}
-                rowKey={(row) => row.key}
-                ariaLabel="访问记录"
-                empty="没有匹配的访问记录"
-              />
-            </div>
+            <DataTable
+              items={rows}
+              columns={columns}
+              rowKey={(row) => row.key}
+              ariaLabel="访问记录"
+              empty="没有匹配的访问记录"
+            />
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
               <span>
                 已显示 {rows.length} 条
@@ -569,75 +519,6 @@ export default function AccessLogs() {
         onCancel={() => setConfirmClear(false)}
         onConfirm={() => void clearAll()}
       />
-      <FormModal
-        open={!!detail}
-        onClose={() => setDetail(null)}
-        title="访问记录详情"
-        size="lg"
-        footer={
-          <div className="flex justify-end">
-            <Button variant="tertiary" onPress={() => setDetail(null)}>
-              关闭
-            </Button>
-          </div>
-        }
-      >
-        {detail ? (
-          <div className="space-y-3 text-sm">
-            <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
-              <Detail label="时间" value={fmtTime(detail.time)} />
-              <Detail label="来源" value={detail.source} />
-              <Detail label="站点 / 规则" value={detail.rule || detail.ruleId || '-'} />
-              <Detail label="监听 / 域名" value={[detail.listen, detail.host].filter(Boolean).join(' · ') || '-'} />
-              <Detail label="方法" value={detail.method || '-'} />
-              <Detail label="路径" value={detail.path || '-'} mono />
-              <Detail label="状态" value={detail.status ? String(detail.status) : detail.result || '-'} />
-              <Detail label="客户端" value={detail.clientIp || '-'} mono />
-              <Detail label="耗时" value={detail.durationMs ? `${detail.durationMs} ms` : '-'} />
-              <Detail
-                label="字节"
-                value={detail.bytesIn || detail.bytesOut
-                  ? `请求 ${fmtBytes(detail.bytesIn ?? 0)} · 响应 ${fmtBytes(detail.bytesOut ?? 0)} · 合计 ${fmtBytes(detail.bytes ?? 0)}`
-                  : detail.bytes ? fmtBytes(detail.bytes) : '-'}
-              />
-              <Detail label="上游" value={detail.upstream || '-'} mono />
-              <Detail
-                label="上游状态 / 尝试"
-                value={[detail.upstreamStatus, detail.attempts ? `${detail.attempts} 次` : ''].filter(Boolean).join(' · ') || '-'}
-              />
-              <Detail label="HTTP / TLS" value={[detail.proto, detail.tls ? `TLS ${detail.tls}` : ''].filter(Boolean).join(' · ') || '-'} />
-              <Detail label="请求 ID" value={detail.requestId || '-'} mono />
-            </div>
-            {detail.reason || detail.error ? (
-              <div className="rounded-lg border border-warning/40 bg-warning/5 px-3 py-2 text-xs">
-                {detail.reason ? <div>拒绝原因：{detail.reason}</div> : null}
-                {detail.error ? <div className="mono mt-1 break-all">错误：{detail.error}</div> : null}
-              </div>
-            ) : null}
-            {detail.userAgent ? (
-              <div>
-                <div className="text-xs text-muted">User-Agent</div>
-                <div className="mono break-all text-xs">{detail.userAgent}</div>
-              </div>
-            ) : null}
-            {detail.message ? (
-              <div>
-                <div className="text-xs text-muted">消息</div>
-                <div className="text-xs">{detail.message}</div>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </FormModal>
-    </div>
-  )
-}
-
-function Detail({ label, value, mono }: { label: string; value?: string; mono?: boolean }) {
-  return (
-    <div className="min-w-0">
-      <div className="text-xs text-muted">{label}</div>
-      <div className={['mt-0.5 break-words', mono ? 'mono text-xs' : ''].filter(Boolean).join(' ')}>{value || '-'}</div>
     </div>
   )
 }
