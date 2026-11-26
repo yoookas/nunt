@@ -214,9 +214,11 @@ function RunLogs() {
     entriesRef.current = entries
   }, [entries])
 
-  const scrollToBottom = useCallback(() => {
+  // The newest entry is rendered first, so following the stream means staying
+  // at the top of the list instead of the bottom.
+  const scrollToTop = useCallback(() => {
     const view = listRef.current
-    if (view) view.scrollTop = view.scrollHeight
+    if (view) view.scrollTop = 0
   }, [])
 
   const scheduleScroll = useCallback(() => {
@@ -225,9 +227,9 @@ function RunLogs() {
     frameRef.current = requestAnimationFrame(() => {
       scrollPendingRef.current = false
       frameRef.current = null
-      if (autoScrollRef.current) scrollToBottom()
+      if (autoScrollRef.current) scrollToTop()
     })
-  }, [scrollToBottom])
+  }, [scrollToTop])
 
   const pushEntry = useCallback(
     (input: unknown) => {
@@ -350,7 +352,9 @@ function RunLogs() {
     })
   }, [entries, level, keyword])
 
-  const visible = filtered
+  // Newest first: the stream appends to the end of entries, so render the
+  // filtered slice backwards and keep the view at the top while following.
+  const visible = useMemo(() => filtered.slice().reverse(), [filtered])
   const total = entries.length
   const matched = filtered.length
   const shown = visible.length
@@ -397,16 +401,16 @@ function RunLogs() {
   const onAutoScrollChange = (value: boolean) => {
     autoScrollRef.current = value
     setAutoScroll(value)
-    if (value) scrollToBottom()
+    if (value) scrollToTop()
   }
 
   const onViewScroll = (event: UIEvent<HTMLDivElement>) => {
     const view = event.currentTarget
-    const nearBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 24
-    if (nearBottom !== autoScrollRef.current) {
-      autoScrollRef.current = nearBottom
-      setAutoScroll(nearBottom)
-      if (nearBottom) scrollToBottom()
+    const nearTop = view.scrollTop < 24
+    if (nearTop !== autoScrollRef.current) {
+      autoScrollRef.current = nearTop
+      setAutoScroll(nearTop)
+      if (nearTop) scrollToTop()
     }
   }
 

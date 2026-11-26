@@ -1,3 +1,4 @@
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   DndContext,
@@ -334,6 +335,11 @@ export function DataTable<T>({
   onReorder,
   tableClassName,
   minWidthClass = 'min-w-max',
+  virtual = false,
+  virtualHeightClass = 'h-[min(70vh,640px)]',
+  rowHeight = 56,
+  onEndReached,
+  scrollResetKey,
 }: {
   items: T[]
   columns: Column<T>[]
@@ -352,11 +358,67 @@ export function DataTable<T>({
   /** Minimum width of the scrolling wrapper, so a dense table scrolls instead
    * of squeezing its columns to nothing. */
   minWidthClass?: string
+  /** Render only the visible rows inside a fixed-height viewport. The table
+   * keeps its markup; rows are spaced with two padding rows. Requires a fixed
+   * rowHeight and does not combine with drag reordering. */
+  virtual?: boolean
+  /** Height of the virtual viewport; ignored when virtual is false. */
+  virtualHeightClass?: string
+  /** Row height in pixels; every row is clamped to it so the virtualizer can
+   * estimate the scroll height. Keep cell content within this height. */
+  rowHeight?: number
+  /** Called when the virtual viewport nears its end (infinite loading). */
+  onEndReached?: () => void
+  /** Scroll back to the top when this value changes (filter changes). */
+  scrollResetKey?: unknown
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [overflow, setOverflow] = useState(false)
   const [atStart, setAtStart] = useState(true)
   const [atEnd, setAtEnd] = useState(false)
+
+  const virtualized = virtual && !(sortable && onReorder !== undefined)
+  const virtualizer = useVirtualizer({
+    count: virtualized ? items.length : 0,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => rowHeight,
+    overscan: 8,
+  })
+  const endRef = useRef(onEndReached)
+  endRef.current = onEndReached
+  const lastEnd = useRef(0)
+
+  const requestMore = () => {
+    if (!virtualized || !endRef.current) return
+    const now = Date.now()
+    if (now - lastEnd.current < 600) return
+    lastEnd.current = now
+    endRef.current()
+  }
+
+  useEffect(() => {
+    if (!virtualized) return
+    virtualizer.measure()
+  }, [virtualized, items.length, virtualizer])
+
+  useEffect(() => {
+    if (!virtualized || scrollResetKey === undefined) return
+    scrollRef.current?.scrollTo({ top: 0 })
+  }, [scrollResetKey, virtualized])
+
+  // When the first page is shorter than the viewport, keep asking for the next
+  // page until the viewport can scroll (or the caller runs out).
+  useEffect(() => {
+    if (!virtualized) return
+    const timer = window.setTimeout(() => {
+      const el = scrollRef.current
+      if (!el) return
+      if (items.length > 0 && el.scrollHeight > 0 && el.scrollHeight <= el.clientHeight + rowHeight) {
+        requestMore()
+      }
+    }, 200)
+    return () => window.clearTimeout(timer)
+  }, [items.length, virtualized, rowHeight])
 
   const measure = useMemo(
     () => () => {
@@ -398,12 +460,16 @@ export function DataTable<T>({
     )
   }
 
-  const ids = items.map((row) => rowKey(row))
   const draggable = sortable && onReorder !== undefined
+  const ids = draggable ? items.map((row) => rowKey(row)) : []
+  const virtualItems = virtualized ? virtualizer.getVirtualItems() : []
+  const totalSize = virtualized ? virtualizer.getTotalSize() : 0
+  const padTop = virtualItems.length ? virtualItems[0].start : 0
+  const padBottom = virtualItems.length ? totalSize - virtualItems[virtualItems.length - 1].end : 0
   const table = (
     <Table variant={variant}>
       <Table.Content aria-label={ariaLabel} className={tableClassName}>
-        <Table.Header>
+        <Table.Header className={virtualized ? 'sticky top-0 z-10 bg-surface' : undefined}>
           {draggable ? (
             <Table.Column className="w-8">
               <span className="sr-only">排序</span>
@@ -420,23 +486,37 @@ export function DataTable<T>({
           ))}
         </Table.Header>
         <Table.Body>
-          {items.map((row) => {
+          {virtualized && virtualItems.length > 0 ? (
+            <Table.Row aria-hidden style={{ height: padTop }}>
+              <Table.Cell colSpan={columns.length} style={{ padding: 0, border: 0 }} />
+            </Table.Row>
+          ) : null}
+          {(virtualized
+            ? virtualItems.map((item) => items[item.index])
+            : items
+          ).map((row) => {
             const key = rowKey(row)
             const cells = columns.map((column) => (
               <Table.Cell key={column.key} className={column.className}>
                 {column.render(row)}
               </Table.Cell>
             ))
+            const style = virtualized ? { height: rowHeight } : undefined
             return draggable ? (
               <SortableTableRow key={key} id={key}>
                 {cells}
               </SortableTableRow>
             ) : (
-              <Table.Row key={key} id={key}>
+              <Table.Row key={key} id={key} style={style}>
                 {cells}
               </Table.Row>
             )
           })}
+          {virtualized && virtualItems.length > 0 ? (
+            <Table.Row aria-hidden style={{ height: padBottom }}>
+              <Table.Cell colSpan={columns.length} style={{ padding: 0, border: 0 }} />
+            </Table.Row>
+          ) : null}
         </Table.Body>
       </Table.Content>
     </Table>
@@ -447,9 +527,25 @@ export function DataTable<T>({
       <div className="relative">
         <div
           ref={scrollRef}
-          onScroll={measure}
+          onScroll={() => {
+            measure()
+            const el = scrollRef.current
+            if (
+              virtualized &&
+              el &&
+              el.scrollHeight > el.clientHeight + rowHeight &&
+              el.scrollTop + el.clientHeight >= el.scrollHeight - 200
+            ) {
+              requestMore()
+            }
+          }}
           tabIndex={0}
-          className="data-table-scroll w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]"
+          className={[
+            'data-table-scroll w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]',
+            virtualized ? `${virtualHeightClass} overflow-y-auto` : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
           role="region"
           aria-label={`${ariaLabel}（可横向滚动）`}
         >

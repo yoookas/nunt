@@ -182,6 +182,7 @@ export default function AccessLogs() {
   const [auto, setAuto] = useState(false)
 
   const seqRef = useRef(0)
+  const moreRef = useRef(false)
 
   const params = useMemo(
     () => ({
@@ -197,7 +198,11 @@ export default function AccessLogs() {
 
   const load = useCallback(
     async (mode: 'reset' | 'more', quiet = false) => {
-      if (mode === 'more') setMore(true)
+      if (mode === 'more') {
+        if (moreRef.current) return
+        moreRef.current = true
+        setMore(true)
+      }
       else if (!quiet) setLoading(true)
       try {
         const query = {
@@ -223,6 +228,7 @@ export default function AccessLogs() {
       } catch (err) {
         toast.danger(errorText(err))
       } finally {
+        if (mode === 'more') moreRef.current = false
         setLoading(false)
         setMore(false)
       }
@@ -458,6 +464,10 @@ export default function AccessLogs() {
               columns={columns}
               rowKey={(row) => row.key}
               ariaLabel="访问记录"
+              virtual
+              rowHeight={64}
+              scrollResetKey={params}
+              onEndReached={hasMore ? () => void load('more') : undefined}
               empty="没有匹配的访问记录"
             />
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
