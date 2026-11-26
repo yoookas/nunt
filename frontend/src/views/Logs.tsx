@@ -7,8 +7,6 @@ import AccessLogs from './AccessLogs'
 import {
   FormModal,
   Page,
-  PageHeader,
-  Panel,
   SelectInput,
   StatusChip,
   SwitchInput,
@@ -417,17 +415,16 @@ function RunLogs() {
   const meta = statusMeta(status)
 
   return (
-    <div className="space-y-5">
+    <div className="flex h-full min-h-0 flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <StatusChip color={meta.color}>{meta.label}</StatusChip>
         <Button variant="secondary" onPress={reconnect}>
           <RefreshCw size={14} />
           重新连接
         </Button>
-        <span className="text-xs text-muted">通过 SSE 实时接收，连接建立后先回放服务端最近 100 条历史</span>
       </div>
 
-      <div className="space-y-5">
+      <div className="flex min-h-0 flex-1 flex-col gap-2">
         {streamError ? (
           <Notice status={status === 'error' ? 'danger' : 'warning'}>{streamError}</Notice>
         ) : null}
@@ -437,17 +434,9 @@ function RunLogs() {
           </Notice>
         ) : null}
 
-        <Panel
-          title="运行日志"
-          extra={
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-muted">{counter}</span>
-              <SwitchInput label="自动滚动" value={autoScroll} onChange={onAutoScrollChange} />
-            </div>
-          }
-        >
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface">
           <div className="flex flex-wrap items-end gap-3 border-b border-border p-3">
-            <div className="w-full sm:w-40">
+            <div className="w-[calc(50%-0.375rem)] sm:w-40">
               <SelectInput
                 label="日志级别"
                 value={level || 'all'}
@@ -455,7 +444,7 @@ function RunLogs() {
                 options={LEVELS}
               />
             </div>
-            <div className="w-full sm:w-56">
+            <div className="w-[calc(50%-0.375rem)] sm:w-56">
               <TextInput
                 label="关键字"
                 value={keyword}
@@ -471,11 +460,14 @@ function RunLogs() {
               <Trash2 size={14} />
               清屏
             </Button>
+            <div className="flex-1" />
+            <span className="text-xs text-muted">{counter}</span>
+            <SwitchInput label="自动滚动" value={autoScroll} onChange={onAutoScrollChange} />
           </div>
 
           <div
             ref={listRef}
-            className="h-[min(62vh,560px)] overflow-auto bg-background-secondary"
+            className="min-h-0 flex-1 overflow-auto bg-background-secondary"
             onScroll={onViewScroll}
             role="log"
             aria-live="off"
@@ -533,11 +525,10 @@ function RunLogs() {
             </div>
           </div>
 
-          <div className="border-t border-border p-3 text-xs leading-5 text-muted">
-            日志窗口最多保留 {MAX_ENTRIES} 条；清屏只影响当前页面。SSE 中断后浏览器会自动重连，服务端回放的历史会按
-            时间、级别与内容去重。
+          <div className="border-t border-border px-3 py-1.5 text-[11px] leading-4 text-muted">
+            最多保留 {MAX_ENTRIES} 条；清屏只影响当前页面
           </div>
-        </Panel>
+        </div>
       </div>
 
       <FormModal
@@ -605,30 +596,20 @@ export default function Logs() {
   const [tab, setTab] = useState('run')
 
   return (
-    <Page>
-      <PageHeader
-        title="日志"
-        sub="运行日志实时接收，访问日志落盘保留，可按来源、状态与关键字检索"
-      />
-      <Tabs selectedKey={tab} onSelectionChange={(key) => setTab(String(key))} className="w-full">
+    <Page fill>
+      <h2 className="sr-only">日志</h2>
+      <Tabs selectedKey={tab} onSelectionChange={(key) => setTab(String(key))} className="w-full shrink-0">
         <Tabs.ListContainer>
           <Tabs.List aria-label="日志分类">
             <Tabs.Tab id="run">运行日志</Tabs.Tab>
             <Tabs.Tab id="access">访问日志</Tabs.Tab>
           </Tabs.List>
         </Tabs.ListContainer>
-
-        <Tabs.Panel id="run">
-          <div className="pt-4">
-            <RunLogs />
-          </div>
-        </Tabs.Panel>
-        <Tabs.Panel id="access">
-          <div className="pt-4">
-            <AccessLogs />
-          </div>
-        </Tabs.Panel>
       </Tabs>
+
+      <div className="flex min-h-0 flex-1 flex-col">
+        {tab === 'run' ? <RunLogs /> : <AccessLogs />}
+      </div>
     </Page>
   )
 }

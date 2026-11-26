@@ -49,7 +49,14 @@ export { toast }
 /* Page shell                                                                 */
 /* -------------------------------------------------------------------------- */
 
-export function Page({ children }: { children: ReactNode }) {
+export function Page({ children, fill = false }: { children: ReactNode; fill?: boolean }) {
+  if (fill) {
+    return (
+      <div className="mx-auto flex h-full min-h-0 w-full max-w-[1600px] flex-col gap-3 px-4 py-4 sm:px-6 lg:px-8">
+        {children}
+      </div>
+    )
+  }
   return <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">{children}</div>
 }
 
@@ -333,6 +340,7 @@ export function DataTable<T>({
   tableClassName,
   minWidthClass = 'min-w-max',
   virtual = false,
+  fill = false,
   virtualHeightClass = 'h-[min(70vh,640px)]',
   rowHeight = 56,
   onEndReached,
@@ -361,6 +369,9 @@ export function DataTable<T>({
   virtual?: boolean
   /** Height of the virtual viewport; ignored when virtual is false. */
   virtualHeightClass?: string
+  /** Let the virtual viewport fill its flex parent instead of using
+   * virtualHeightClass. The caller must give the table a bounded height. */
+  fill?: boolean
   /** Row height in pixels; every row is clamped to it so the virtualizer can
    * estimate the scroll height. Keep cell content within this height. */
   rowHeight?: number
@@ -520,8 +531,8 @@ export function DataTable<T>({
   )
 
   return (
-    <div>
-      <div className="relative">
+    <div className={fill && virtualized ? 'flex h-full min-h-0 flex-col' : undefined}>
+      <div className={fill && virtualized ? 'relative min-h-0 flex-1' : 'relative'}>
         <div
           ref={scrollRef}
           onScroll={() => {
@@ -539,7 +550,7 @@ export function DataTable<T>({
           tabIndex={0}
           className={[
             'data-table-scroll w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]',
-            virtualized ? `${virtualHeightClass} overflow-y-auto` : '',
+            virtualized ? (fill ? 'h-full overflow-y-auto' : `${virtualHeightClass} overflow-y-auto`) : '',
           ]
             .filter(Boolean)
             .join(' ')}

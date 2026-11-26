@@ -7,10 +7,9 @@ import {
   AlertBox,
   ConfirmModal,
   DataTable,
+  FormModal,
   LoadingBlock,
-  Panel,
   SelectInput,
-  StatCard,
   StatusChip,
   TextInput,
   toast,
@@ -181,6 +180,7 @@ export default function AccessLogs() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [meta, setMeta] = useState<Meta | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [auto, setAuto] = useState(false)
 
   const seqRef = useRef(0)
@@ -404,136 +404,132 @@ export default function AccessLogs() {
     },
   ]
 
+  const filterFields = (
+    <>
+      <div className="w-full sm:w-36">
+        <SelectInput label="来源" value={source} onChange={setSource} options={SOURCES} />
+      </div>
+      <div className="w-full sm:w-36">
+        <SelectInput label="状态" value={status} onChange={setStatus} options={STATUSES} />
+      </div>
+      <div className="w-full sm:w-36">
+        <SelectInput label="时间范围" value={range} onChange={setRange} options={RANGES} />
+      </div>
+      <div className="w-full sm:w-40">
+        <TextInput label="客户端 IP" value={ip} onChange={setIP} placeholder="前缀匹配" />
+      </div>
+      <div className="w-full sm:w-48">
+        <TextInput label="关键字" value={keyword} onChange={setKeyword} placeholder="路径 / 域名 / UA" />
+      </div>
+    </>
+  )
+
+  const activeFilters = [source !== 'all', status !== 'all', range !== '24h', ip.trim() !== '', keyword.trim() !== ''].filter(Boolean).length
+
+  const actions = (
+    <>
+      <Button size="sm" variant="secondary" isDisabled={loading || more} onPress={() => void load('reset')}>
+        <RefreshCw size={14} />
+        刷新
+      </Button>
+      <Button size="sm" variant="secondary" onPress={exportCSV}>
+        <Download size={14} />
+        导出
+      </Button>
+      <Button size="sm" variant="tertiary" onPress={() => setConfirmClear(true)}>
+        <Trash2 size={14} />
+        清空
+      </Button>
+      <Button
+        size="sm"
+        variant={auto ? 'primary' : 'tertiary'}
+        onPress={() => {
+          setAuto((prev) => !prev)
+          toast.info(auto ? '已关闭自动刷新' : '已开启自动刷新（每 10 秒）')
+        }}
+      >
+        自动刷新
+      </Button>
+    </>
+  )
+
   return (
-    <div className="space-y-5">
+    <div className="flex h-full min-h-0 flex-col gap-2">
       {meta && !meta.persist ? (
         <AlertBox status="warning" title="磁盘持久化已关闭">
           访问记录只保留在各模块的内存缓冲里，重启后丢失。可在「设置 → 日志」中开启持久化。
         </AlertBox>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        <StatCard label="匹配记录" value={(stats?.total ?? 0).toLocaleString()} hint={`匹配 ${stats?.scanned ?? 0} 条`} />
-        <StatCard label="失败请求" value={failure.toLocaleString()} hint={`占比 ${failureRate}%（4xx + 5xx）`} />
-        <StatCard label="流量合计" value={fmtBytes(stats?.bytes ?? 0)} hint={`平均耗时 ${Math.round(stats?.avgDurationMs ?? 0)} ms`} />
-        <StatCard
-          label="最活跃客户端"
-          value={topIP?.name || '-'}
-          hint={topIP ? `${topIP.count.toLocaleString()} 条记录` : '暂无数据'}
-        />
-      </div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border p-2.5 md:hidden">
+          <Button size="sm" variant="secondary" onPress={() => setFiltersOpen(true)}>
+            筛选{activeFilters ? ` (${activeFilters})` : ''}
+          </Button>
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">{actions}</div>
+        </div>
+        <div className="hidden flex-wrap items-end gap-2 border-b border-border p-2.5 md:flex">
+          {filterFields}
+          <div className="flex flex-1 flex-wrap items-center justify-end gap-1.5">{actions}</div>
+        </div>
 
-      <Panel
-        title="访问日志"
-        description="Web 请求、端口转发连接与 WAF 拦截都会落盘，可按来源、状态、IP 与关键字检索"
-        extra={
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="secondary" isDisabled={loading || more} onPress={() => void load('reset')}>
-              <RefreshCw size={14} />
-              刷新
-            </Button>
-            <Button variant="secondary" onPress={exportCSV}>
-              <Download size={14} />
-              导出 CSV
-            </Button>
-            <Button variant="tertiary" onPress={() => setConfirmClear(true)}>
-              <Trash2 size={14} />
-              清空
-            </Button>
-            <Button
-              variant={auto ? 'primary' : 'tertiary'}
-              onPress={() => {
-                setAuto((prev) => !prev)
-                toast.info(auto ? '已关闭自动刷新' : '已开启自动刷新（每 10 秒）')
-              }}
-            >
-              自动刷新
-            </Button>
-          </div>
-        }
-      >
-        <div className="flex flex-wrap items-end gap-3 border-b border-border p-3">
-          <div className="w-full sm:w-40">
-            <SelectInput label="来源" value={source} onChange={setSource} options={SOURCES} />
-          </div>
-          <div className="w-full sm:w-44">
-            <SelectInput label="状态" value={status} onChange={setStatus} options={STATUSES} />
-          </div>
-          <div className="w-full sm:w-44">
-            <SelectInput label="时间范围" value={range} onChange={setRange} options={RANGES} />
-          </div>
-          <div className="w-full sm:w-40">
-            <TextInput label="客户端 IP" value={ip} onChange={setIP} placeholder="前缀匹配，如 192.168." />
-          </div>
-          <div className="w-full sm:w-52">
-            <TextInput label="关键字" value={keyword} onChange={setKeyword} placeholder="路径 / 域名 / UA / 结果" />
-          </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-border px-3 py-1.5 text-xs text-muted">
+          <span>匹配 {stats?.total ?? 0}</span>
+          <span>失败 {failure}（{failureRate}%）</span>
+          <span className="hidden sm:inline">流量 {fmtBytes(stats?.bytes ?? 0)}</span>
+          <span className="hidden sm:inline">平均 {Math.round(stats?.avgDurationMs ?? 0)} ms</span>
+          <span className="hidden md:inline">最活跃 {topIP?.name || '-'}</span>
         </div>
 
         {loading ? (
           <LoadingBlock />
         ) : (
-          <div className="space-y-3 p-3">
-            <DataTable
-              items={rows}
-              columns={columns}
-              rowKey={(row) => row.key}
-              ariaLabel="访问记录"
-              virtual
-              rowHeight={64}
-              scrollResetKey={params}
-              onEndReached={hasMore ? () => void load('more') : undefined}
-              empty="没有匹配的访问记录"
-            />
+          <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
+            <div className="min-h-0 flex-1">
+              <DataTable
+                items={rows}
+                columns={columns}
+                rowKey={(row) => row.key}
+                ariaLabel="访问记录"
+                virtual
+                fill
+                rowHeight={64}
+                scrollResetKey={params}
+                onEndReached={hasMore ? () => void load('more') : undefined}
+                empty="没有匹配的访问记录"
+              />
+            </div>
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
               <span>
                 已显示 {rows.length} 条
+                {meta ? ` · SQLite ${meta.keepDays} 天 / ${meta.maxFileMb} MB · 占用 ${fmtBytes(meta.totalBytes)}` : ''}
+                {meta?.dropped ? ` · 丢弃 ${meta.dropped}` : ''}
               </span>
               {hasMore ? (
-                <Button variant="secondary" isDisabled={more} onPress={() => void load('more')}>
+                <Button size="sm" variant="secondary" isDisabled={more} onPress={() => void load('more')}>
                   {more ? '加载中…' : '加载更多'}
                 </Button>
               ) : null}
             </div>
           </div>
         )}
-      </Panel>
+      </div>
 
-      <Panel title="存储状态" description="访问日志数据库的位置、保留策略与写入计数">
-        <div className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
-          <div>
-            <div className="text-xs text-muted">目录</div>
-            <div className="mono break-all text-xs">{meta?.dir || '-'}</div>
+      <FormModal
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        title="筛选访问日志"
+        size="md"
+        footer={
+          <div className="flex justify-end">
+            <Button variant="tertiary" onPress={() => setFiltersOpen(false)}>
+              完成
+            </Button>
           </div>
-          <div>
-            <div className="text-xs text-muted">保留</div>
-            <div className="text-sm">
-              {meta ? `${meta.keepDays} 天 · 数据库上限 ${meta.maxFileMb} MB` : '-'}
-            </div>
-          </div>
-          <div>
-            <div className="text-xs text-muted">已写入 / 丢弃</div>
-            <div className="text-sm">
-              {(meta?.written ?? 0).toLocaleString()} / {(meta?.dropped ?? 0).toLocaleString()}
-            </div>
-          </div>
-          <div>
-            <div className="text-xs text-muted">数据库 / 占用</div>
-            <div className="text-sm">
-              {meta?.files?.length ?? 0} 个 · {fmtBytes(meta?.totalBytes ?? 0)}
-            </div>
-          </div>
-        </div>
-        {meta?.files?.length ? (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {meta.files.slice(-8).map((file) => (
-              <StatusChip key={file.name}>
-                {file.name.replace('access-', '').replace('.jsonl', '')} · {fmtBytes(file.size)}
-              </StatusChip>
-            ))}
-          </div>
-        ) : null}
-      </Panel>
+        }
+      >
+        <div className="grid grid-cols-1 gap-3">{filterFields}</div>
+      </FormModal>
 
       <ConfirmModal
         open={confirmClear}
