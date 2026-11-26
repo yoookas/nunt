@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   Alert,
   App,
@@ -30,7 +30,18 @@ import {
   ReloadOutlined,
   SearchOutlined,
   WarningOutlined,
+  HolderOutlined,
 } from '@ant-design/icons'
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { api, errorText } from '../api'
 import { DataTable, Muted, PageHeader, Panel, Toolbar, useIsMobile } from '../components'
 import ListenerModal from './web/ListenerModal'
@@ -77,6 +88,53 @@ function mergeVisibleOrder(all: WebRule[], visibleIds: string[]): WebRule[] {
   return out
 }
 
+function SortableTableRow(props: any) {
+  const id = String(props['data-row-key'] ?? '')
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  return (
+    <tr
+      {...props}
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      style={{
+        ...props.style,
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.55 : 1,
+        cursor: 'grab',
+      }}
+    />
+  )
+}
+
+function SortableCard({ id, children }: { id: string; children: (handle: ReactNode) => ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.55 : 1,
+        background: 'var(--ant-color-bg-container)',
+      }}
+    >
+      {children(
+        <Button
+          type="text"
+          size="small"
+          icon={<HolderOutlined />}
+          aria-label="拖动排序"
+          style={{ cursor: 'grab', touchAction: 'none' }}
+          {...attributes}
+          {...listeners}
+        />,
+      )}
+    </div>
+  )
+}
+
 export default function Web() {
   const { message, modal } = App.useApp()
   const { token } = theme.useToken()
@@ -100,6 +158,7 @@ export default function Web() {
   const [busyListenerId, setBusyListenerId] = useState('')
   const [busyRuleId, setBusyRuleId] = useState('')
   const [reordering, setReordering] = useState(false)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
 
   const [listenerModal, setListenerModal] = useState<{
     open: boolean
@@ -211,11 +270,6 @@ export default function Web() {
     })
   }, [rules, selectedListenerId, typeFilter, search, listeners])
 
-  const ruleOrderIndex = useMemo(() => {
-    const map = new Map<string, number>()
-    filteredRules.forEach((rule, index) => map.set(rule.id, index))
-    return map
-  }, [filteredRules])
 
   const routeEmptyText = useMemo(() => {
     if (!listeners.length) return '还没有监听器，请先新建监听器'
@@ -267,13 +321,8 @@ export default function Web() {
     }
   }
 
-  const moveListener = async (id: string, direction: -1 | 1) => {
+  const persistListenerOrder = async (next: WebListenerView[]) => {
     if (reordering) return
-    const index = listeners.findIndex((item) => item.id === id)
-    const target = index + direction
-    if (index < 0 || target < 0 || target >= listeners.length) return
-    const next = [...listeners]
-    ;[next[index], next[target]] = [next[target], next[index]]
     setListeners(next)
     setReordering(true)
     try {
@@ -286,14 +335,8 @@ export default function Web() {
     }
   }
 
-  const moveRule = async (id: string, direction: -1 | 1) => {
+  const persistRuleOrder = async (nextVisible: string[]) => {
     if (reordering) return
-    const visibleIds = filteredRules.map((rule) => rule.id)
-    const index = visibleIds.indexOf(id)
-    const target = index + direction
-    if (index < 0 || target < 0 || target >= visibleIds.length) return
-    const nextVisible = [...visibleIds]
-    ;[nextVisible[index], nextVisible[target]] = [nextVisible[target], nextVisible[index]]
     const nextAll = mergeVisibleOrder(rules, nextVisible)
     setRules(nextAll)
     setReordering(true)
@@ -305,6 +348,31 @@ export default function Web() {
     } finally {
       setReordering(false)
     }
+  }
+
+  const moveListener = (id: string, direction: -1 | 1) => {
+    const index = listeners.findIndex((item) => item.id === id)
+    const target = index + direction
+    if (index < 0 || target < 0 || target >= listeners.length) return
+    void persistListenerOrder(arrayMove(listeners, index, target))
+  }
+
+
+  const onListenerDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return
+    const oldIndex = listeners.findIndex((item) => item.id === active.id)
+    const newIndex = listeners.findIndex((item) => item.id === over.id)
+    if (oldIndex < 0 || newIndex < 0) return
+    void persistListenerOrder(arrayMove(listeners, oldIndex, newIndex))
+  }
+
+  const onRuleDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return
+    const ids = filteredRules.map((rule) => rule.id)
+    const oldIndex = ids.indexOf(String(active.id))
+    const newIndex = ids.indexOf(String(over.id))
+    if (oldIndex < 0 || newIndex < 0) return
+    void persistRuleOrder(arrayMove(ids, oldIndex, newIndex))
   }
 
   const openCreateListener = () => setListenerModal({ open: true, listener: null })
@@ -401,29 +469,10 @@ export default function Web() {
       key: 'sort',
       title: '排序',
       width: 48,
-      render: (_value, row, index) => (
-        <Space direction="vertical" size={0}>
-          <Tooltip title="上移">
-            <Button
-              type="text"
-              size="small"
-              icon={<ArrowUpOutlined />}
-              disabled={index <= 0 || reordering}
-              onClick={() => void moveListener(row.id, -1)}
-              aria-label={`上移监听器 ${row.name || row.id}`}
-            />
-          </Tooltip>
-          <Tooltip title="下移">
-            <Button
-              type="text"
-              size="small"
-              icon={<ArrowDownOutlined />}
-              disabled={index >= listeners.length - 1 || reordering}
-              onClick={() => void moveListener(row.id, 1)}
-              aria-label={`下移监听器 ${row.name || row.id}`}
-            />
-          </Tooltip>
-        </Space>
+      render: () => (
+        <Tooltip title="拖动或使用菜单排序">
+          <HolderOutlined style={{ cursor: 'grab', color: 'rgba(0,0,0,0.35)' }} />
+        </Tooltip>
       ),
     },
     {
@@ -506,33 +555,11 @@ export default function Web() {
       key: 'sort',
       title: '排序',
       width: 48,
-      render: (_value, row) => {
-        const index = ruleOrderIndex.get(row.id) ?? -1
-        return (
-          <Space direction="vertical" size={0}>
-            <Tooltip title="上移">
-              <Button
-                type="text"
-                size="small"
-                icon={<ArrowUpOutlined />}
-                disabled={index <= 0 || reordering}
-                onClick={() => void moveRule(row.id, -1)}
-                aria-label={`上移路由 ${row.name || row.id}`}
-              />
-            </Tooltip>
-            <Tooltip title="下移">
-              <Button
-                type="text"
-                size="small"
-                icon={<ArrowDownOutlined />}
-                disabled={index < 0 || index >= filteredRules.length - 1 || reordering}
-                onClick={() => void moveRule(row.id, 1)}
-                aria-label={`下移路由 ${row.name || row.id}`}
-              />
-            </Tooltip>
-          </Space>
-        )
-      },
+      render: () => (
+        <Tooltip title="拖动或使用菜单排序">
+          <HolderOutlined style={{ cursor: 'grab', color: 'rgba(0,0,0,0.35)' }} />
+        </Tooltip>
+      ),
     },
     {
       key: 'site',
@@ -688,6 +715,7 @@ export default function Web() {
       loading={listenerLoading}
       pagination={false}
       scroll={{}}
+      components={{ body: { row: SortableTableRow } }}
       locale={{
         emptyText: (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有监听器">
@@ -708,8 +736,9 @@ export default function Web() {
         </div>
       ) : listeners.length ? (
         listeners.map((listener, index) => (
+          <SortableCard key={listener.id} id={listener.id}>
+            {(handle) => (
           <div
-            key={listener.id}
             style={{
               padding: '10px 12px',
               borderBottom:
@@ -738,6 +767,7 @@ export default function Web() {
                 </div>
               </div>
               <Space size={2} align="start">
+                {handle}
                 <Tooltip title={listener.disabled ? '已停用，点击启用' : '运行中，点击停用'}>
                   <Switch
                     size="small"
@@ -762,6 +792,8 @@ export default function Web() {
               </Space>
             </div>
           </div>
+            )}
+          </SortableCard>
         ))
       ) : (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有监听器" style={{ padding: 24 }}>
@@ -793,7 +825,11 @@ export default function Web() {
           }
         />
       ) : null}
-      {isMobile ? listenerCards : listenerTable}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onListenerDragEnd}>
+        <SortableContext items={listeners.map((listener) => listener.id)} strategy={verticalListSortingStrategy}>
+          {isMobile ? listenerCards : listenerTable}
+        </SortableContext>
+      </DndContext>
     </Panel>
   )
 
@@ -860,12 +896,15 @@ export default function Web() {
         />
       ) : null}
 
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onRuleDragEnd}>
+        <SortableContext items={filteredRules.map((rule) => rule.id)} strategy={verticalListSortingStrategy}>
       <DataTable<WebRule>
         rowKey={(row) => row.id}
         columns={routeColumns}
         dataSource={filteredRules}
         loading={rulesLoading}
         pagination={false}
+        components={{ body: { row: SortableTableRow } }}
         locale={{
           emptyText: (
             <Empty
@@ -885,6 +924,8 @@ export default function Web() {
           ),
         }}
       />
+        </SortableContext>
+      </DndContext>
     </Panel>
   )
 
