@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   App,
   Button,
@@ -6,7 +6,6 @@ import {
   Drawer,
   Grid,
   Input,
-  Modal,
   Select,
   Switch,
   Tag,
@@ -29,7 +28,6 @@ import {
   StatusTag,
   Toolbar,
   confirmDelete,
-  modalWidth,
   useIsMobile,
 } from '../../components'
 import { copyText } from '../../clipboard'
@@ -562,58 +560,67 @@ export default function AccessLogs({ active }: { active: boolean }) {
     )
   }
 
-  const filterFields = (fullWidth: boolean) => {
-    const width = (value: number) => (fullWidth ? { width: '100%' } : { width: value })
-    const size = fullWidth ? 'middle' : 'small'
+  const filterFields = (stacked: boolean) => {
+    const width = (value: number) => (stacked ? { width: '100%' } : { width: value })
+    const size = stacked ? 'middle' : 'small'
+    const field = (label: string, control: ReactNode) =>
+      stacked ? (
+        <div className={styles.field}>
+          <span className={styles.fieldLabel}>{label}</span>
+          {control}
+        </div>
+      ) : (
+        control
+      )
     return (
       <>
-        <div className={styles.field}>
-          <span className={styles.fieldLabel}>来源</span>
+        {field(
+          '来源',
           <Select
             size={size}
             value={source}
             onChange={setSource}
             options={SOURCES}
-            style={width(120)}
+            style={width(116)}
             aria-label="来源"
-          />
-        </div>
-        <div className={styles.field}>
-          <span className={styles.fieldLabel}>状态</span>
+          />,
+        )}
+        {field(
+          '状态',
           <Select
             size={size}
             value={status}
             onChange={setStatus}
             options={STATUSES}
-            style={width(160)}
+            style={width(148)}
             aria-label="状态"
-          />
-        </div>
-        <div className={styles.field}>
-          <span className={styles.fieldLabel}>时间范围</span>
+          />,
+        )}
+        {field(
+          '时间范围',
           <Select
             size={size}
             value={range}
             onChange={(value) => setRange(value as RangeKey)}
             options={RANGES}
-            style={width(160)}
+            style={width(150)}
             aria-label="时间范围"
-          />
-        </div>
-        <div className={styles.field}>
-          <span className={styles.fieldLabel}>客户端 IP</span>
+          />,
+        )}
+        {field(
+          '客户端 IP',
           <Input
             size={size}
             value={ip}
             onChange={(event) => setIP(event.target.value)}
-            placeholder="前缀匹配"
+            placeholder={stacked ? '前缀匹配' : 'IP 前缀'}
             allowClear
-            style={width(150)}
+            style={width(138)}
             aria-label="客户端 IP"
-          />
-        </div>
-        <div className={styles.field}>
-          <span className={styles.fieldLabel}>关键字</span>
+          />,
+        )}
+        {field(
+          '关键字',
           <Input
             size={size}
             value={keyword}
@@ -621,10 +628,10 @@ export default function AccessLogs({ active }: { active: boolean }) {
             placeholder="路径 / 域名 / UA"
             allowClear
             prefix={<SearchOutlined />}
-            style={width(fullWidth ? 0 : 190)}
+            style={width(190)}
             aria-label="关键字"
-          />
-        </div>
+          />,
+        )}
       </>
     )
   }
@@ -837,7 +844,7 @@ export default function AccessLogs({ active }: { active: boolean }) {
             rowHeight={58}
             header={header}
             headerHeight={isMobile ? 38 : 40}
-            contentMinWidth={isMobile ? 540 : showExtraColumns ? 1180 : 980}
+            contentMinWidth={isMobile ? 540 : showExtraColumns ? 1180 : 960}
             ariaLabel="访问日志"
             rowKey={(row) => row.key}
             renderRow={renderRow}
@@ -957,11 +964,17 @@ export default function AccessLogs({ active }: { active: boolean }) {
         </Drawer>
       ) : null}
 
-      <Modal
+      <Drawer
         open={detail !== null}
-        onCancel={() => setDetail(null)}
+        onClose={() => setDetail(null)}
         title="访问日志详情"
-        width={modalWidth(false)}
+        placement={isMobile ? 'bottom' : 'right'}
+        width={isMobile ? '100%' : 560}
+        height={isMobile ? '100%' : undefined}
+        styles={{
+          body: { padding: isMobile ? 16 : 20 },
+          footer: { padding: '10px 16px' },
+        }}
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <Button icon={<CopyOutlined />} onClick={copyDetail}>
@@ -974,11 +987,11 @@ export default function AccessLogs({ active }: { active: boolean }) {
         }
       >
         {detail ? (
-          <div className={styles.modalBody} style={vars}>
+          <div style={vars}>
             <Descriptions size="small" column={1} bordered items={detailItems} />
           </div>
         ) : null}
-      </Modal>
+      </Drawer>
     </div>
   )
 }

@@ -1,1 +1,0 @@
-function e(e){let t=document.createElement(`textarea`);t.value=e,t.setAttribute(`readonly`,``),t.style.position=`fixed`,t.style.top=`0`,t.style.left=`0`,t.style.opacity=`0`,document.body.appendChild(t),t.focus(),t.select(),t.setSelectionRange(0,t.value.length);try{return document.execCommand(`copy`)}catch{return!1}finally{t.remove()}}export{e as t};

@@ -97,7 +97,6 @@ export interface ForwardLogsResponse {
 
 export interface RuleFormValues {
   name: string
-  enable: boolean
   protocol: string
   srcAddr: string
   dstAddr: string
@@ -124,7 +123,6 @@ export function normalizeMode(value: unknown): AccessMode {
 export function emptyRuleForm(): RuleFormValues {
   return {
     name: '',
-    enable: true,
     protocol: 'tcp',
     srcAddr: '',
     dstAddr: '',
@@ -143,7 +141,6 @@ export function ruleFormValues(rule?: ForwardRule | null): RuleFormValues {
   const access = rule.access || {}
   return {
     name: rule.name || '',
-    enable: rule.enable !== false,
     protocol: PROTOCOL_LABEL[rule.protocol || ''] ? rule.protocol || 'tcp' : 'tcp',
     srcAddr: rule.srcAddr || '',
     dstAddr: rule.dstAddr || '',
@@ -166,13 +163,14 @@ export function ruleFormValues(rule?: ForwardRule | null): RuleFormValues {
  */
 export function buildRulePayload(
   values: RuleFormValues,
-  original?: ForwardAccess | null,
+  options: { enable: boolean; originalAccess?: ForwardAccess | null },
 ): Record<string, unknown> {
   const mode = normalizeMode(values.accessMode)
+  const original = options.originalAccess
   const protocol = PROTOCOL_LABEL[values.protocol || ''] ? values.protocol : 'tcp'
   return {
     name: String(values.name ?? '').trim(),
-    enable: values.enable !== false,
+    enable: options.enable !== false,
     protocol,
     srcAddr: String(values.srcAddr ?? '').trim(),
     dstAddr: String(values.dstAddr ?? '').trim(),
@@ -191,16 +189,6 @@ export function buildRulePayload(
 }
 
 /* ------------------------------------------------------------------ 展示 */
-
-export function limitText(value: unknown): string {
-  const n = num(value)
-  return n > 0 ? String(n) : '不限'
-}
-
-export function timeoutText(value: unknown): string {
-  const n = num(value)
-  return n > 0 ? `${n} 秒` : '默认 300 秒'
-}
 
 /** Nanoseconds (Go time.Duration) to a compact human readable string. */
 export function durationText(value: unknown): string {
@@ -243,13 +231,6 @@ export function ruleAccessColor(rule: ForwardRule): string {
   if (mode === 'allow') return 'green'
   if (mode === 'deny') return 'red'
   return 'default'
-}
-
-export function ruleAccessTip(rule: ForwardRule): string {
-  const ips = ruleAccessIps(rule)
-  if (!ips.length) return '没有配置 IP 列表'
-  const head = ips.slice(0, 8).join(', ')
-  return ips.length > 8 ? `${head} 等 ${ips.length} 条` : head
 }
 
 export function logResultColor(result: unknown): string {

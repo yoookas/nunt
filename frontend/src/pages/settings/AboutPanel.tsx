@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Alert, Button, Descriptions, Space, Tag, Typography, theme } from 'antd'
-import { ApiOutlined, ReloadOutlined } from '@ant-design/icons'
+import { ApiOutlined } from '@ant-design/icons'
 import { api, errorText } from '../../api'
-import { Muted, Panel, useIsMobile } from '../../components'
+import { Muted, useIsMobile } from '../../components'
 import { fmtBytes, fmtDuration, fmtTime } from '../../format'
 import type { SystemInfo, SystemStats } from './shared'
+import { SettingsSection } from './ui'
 
 interface Props {
   refreshToken: number
@@ -43,11 +44,12 @@ export default function AboutPanel({ refreshToken }: Props) {
   const versionText = version?.version || '-'
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+    <div>
       {error ? (
         <Alert
           type="error"
           showIcon
+          style={{ marginBottom: 16 }}
           message="无法读取版本信息"
           description={error}
           action={
@@ -58,51 +60,47 @@ export default function AboutPanel({ refreshToken }: Props) {
         />
       ) : null}
 
-      <Panel
-        title="关于 nunt"
-        subtitle="管理控制台的构建版本与运行环境"
-        extra={
-          <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>
-            刷新
-          </Button>
-        }
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          flexWrap: 'wrap',
+          marginBottom: 20,
+        }}
       >
         <div
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            flexWrap: 'wrap',
-            marginBottom: 20,
+            width: 46,
+            height: 46,
+            borderRadius: 10,
+            display: 'grid',
+            placeItems: 'center',
+            fontSize: 22,
+            background: token.colorPrimaryBg,
+            color: token.colorPrimary,
           }}
         >
-          <div
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 10,
-              display: 'grid',
-              placeItems: 'center',
-              fontSize: 24,
-              background: token.colorPrimaryBg,
-              color: token.colorPrimary,
-            }}
-          >
-            <ApiOutlined />
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <Space size={8} wrap>
-              <Typography.Title level={4} style={{ margin: 0 }}>
-                nunt
-              </Typography.Title>
-              <Tag color="blue">{versionText}</Tag>
-            </Space>
-            <div>
-              <Muted>轻量反向代理与端口转发管理控制台</Muted>
-            </div>
+          <ApiOutlined />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <Space size={8} wrap>
+            <Typography.Text strong style={{ fontSize: 18 }}>
+              nunt
+            </Typography.Text>
+            <Tag color="blue">{versionText}</Tag>
+          </Space>
+          <div>
+            <Muted>轻量反向代理与端口转发管理控制台</Muted>
           </div>
         </div>
+      </div>
 
+      <SettingsSection
+        title="构建与运行环境"
+        description="版本信息来自运行中的进程；升级二进制后需重启服务才会更新"
+        first
+      >
         <Descriptions
           bordered
           size="small"
@@ -125,7 +123,15 @@ export default function AboutPanel({ refreshToken }: Props) {
               label: '平台',
               children: version?.os && version?.arch ? `${version.os}/${version.arch}` : '-',
             },
-            { key: 'data', label: '数据目录', children: <span className="mono" style={{ wordBreak: 'break-all' }}>{info?.dataDir || '-'}</span> },
+            {
+              key: 'data',
+              label: '数据目录',
+              children: (
+                <span className="mono" style={{ wordBreak: 'break-all' }}>
+                  {info?.dataDir || '-'}
+                </span>
+              ),
+            },
             { key: 'listen', label: '管理监听', children: <span className="mono">{info?.adminListen || '-'}</span> },
             {
               key: 'source',
@@ -140,13 +146,10 @@ export default function AboutPanel({ refreshToken }: Props) {
             { key: 'cpu', label: 'CPU 核心', children: stats?.numCpu ?? '-' },
           ]}
         />
-
-        <div style={{ marginTop: 16 }}>
-          <Muted>
-            版本信息来自运行中的进程；升级二进制后需重启服务才会更新。前端不检查更新，也不会向外部服务发送任何请求。
-          </Muted>
+        <div style={{ marginTop: 14 }}>
+          <Muted>前端不检查更新，也不会向外部服务发送任何请求。</Muted>
         </div>
-      </Panel>
-    </Space>
+      </SettingsSection>
+    </div>
   )
 }

@@ -1,42 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Alert, App, Button, Empty, Grid, Input, Segmented, Space, Spin, Tag, Typography } from 'antd'
 import {
-  Alert,
-  App,
-  Button,
-  Card,
-  Col,
-  Descriptions,
-  Row,
-  Space,
-  Statistic,
-  Switch,
-  Tabs,
-  Tag,
-  theme,
-  type DescriptionsProps,
-  type TableColumnsType,
-} from 'antd'
-import {
-  CheckCircleOutlined,
-  ClockCircleOutlined,
-  DeleteOutlined,
-  DownloadOutlined,
-  EyeOutlined,
   PlusOutlined,
   ReloadOutlined,
-  SafetyCertificateOutlined,
+  SearchOutlined,
   SettingOutlined,
-  SyncOutlined,
   UploadOutlined,
 } from '@ant-design/icons'
 import { api, errorText } from '../api'
 import { fmtTime } from '../format'
-import { DataTable, Muted, PageHeader, Panel, confirmDelete, useIsMobile } from '../components'
+import { Muted } from '../components'
+import { EntityRow, PaneTitle, Workspace, type ItemStatus } from '../components/Workspace'
 import { usePolling } from '../usePolling'
-import JobModal from './acme/JobModal'
-import UploadModal from './acme/UploadModal'
-import AccountModal from './acme/AccountModal'
-import CertDetailModal from './acme/CertDetailModal'
+import CertDetail from './acme/CertDetail'
+import JobEditor from './acme/JobEditor'
+import RenewalOverview from './acme/RenewalOverview'
+import AccountDrawer from './acme/AccountDrawer'
+import UploadDrawer from './acme/UploadDrawer'
 import {
   baseDomain,
   certDaysLeft,
@@ -49,7 +29,6 @@ import {
   jobRenewState,
   keyLabel,
   matchCertForJob,
-  normalizeChallenge,
   normalizeKeyType,
   normalizeProviders,
   parseKeyOptions,
@@ -65,10 +44,39 @@ import {
 
 const EMPTY_CONFIG: AcmeConfig = { email: '', keyType: 'ec256' }
 
+type ListMode = 'certs' | 'jobs' | 'renewal'
+type Selection =
+  | { kind: 'cert'; id: string }
+  | { kind: 'job'; id: string }
+  | { kind: 'draft' }
+  | { kind: 'overview' }
+  | null
+
+function certItemStatus(cert: Certificate): ItemStatus {
+  if (cert.expired) return 'error'
+  if (certDaysLeft(cert) <= 15) return 'warn'
+  return 'ok'
+}
+
+function jobItemStatus(job: AcmeJob, cert?: Certificate): ItemStatus {
+  if (!job.enable) return 'off'
+  if (!cert) return 'warn'
+  if (cert.expired) return 'error'
+  if (certDaysLeft(cert) <= (Number(job.renewDays) || 30)) return 'warn'
+  return 'ok'
+}
+
+function renewItemStatus(label: string): ItemStatus {
+  if (label === '已过期') return 'error'
+  if (label === '待续期' || label === '尚未签发') return 'warn'
+  if (label === '已停用') return 'off'
+  return 'ok'
+}
+
 export default function Acme() {
-  const { message, modal } = App.useApp()
-  const { token } = theme.useToken()
-  const isMobile = useIsMobile()
+  const { message } = App.useApp()
+  const screens = Grid.useBreakpoint()
+  const desktop = !!screens.lg
 
   const [jobs, setJobs] = useState<AcmeJob[]>([])
   const [certs, setCerts] = useState<Certificate[]>([])
@@ -78,11 +86,12 @@ export default function Acme() {
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState('')
 
-  const [jobOpen, setJobOpen] = useState(false)
-  const [editingJob, setEditingJob] = useState<AcmeJob | null>(null)
-  const [uploadOpen, setUploadOpen] = useState(false)
+  const [mode, setMode] = useState<ListMode>('certs')
+  const [selection, setSelection] = useState<Selection>(null)
+  const [draftSeq, setDraftSeq] = useState(0)
+  const [query, setQuery] = useState('')
   const [accountOpen, setAccountOpen] = useState(false)
-  const [detailCert, setDetailCert] = useState<Certificate | null>(null)
+  const [uploadOpen, setUploadOpen] = useState(false)
 
   const pollTimers = useRef<number[]>([])
 
@@ -166,7 +175,6 @@ export default function Acme() {
       for (const timer of pollTimers.current) window.clearTimeout(timer)
       pollTimers.current = []
     }
-    // The page loads once; later refreshes are explicit or polled.
   }, [loadAll])
 
   usePolling(() => loadStatus(true), 60000)
@@ -174,26 +182,76 @@ export default function Acme() {
   const keyOptions = useMemo(() => parseKeyOptions(config.keyTypes), [config.keyTypes])
   const statusStats = status?.status?.stats
   const moduleRunning = status?.status?.running
-  const moduleError = status?.status?.error || ''
   const lastError = statusStats?.lastError ? String(statusStats.lastError) : ''
-
-  const validCerts = useMemo(() => certs.filter((cert) => !cert.expired), [certs])
   const enabledJobs = useMemo(() => jobs.filter((job) => job.enable).length, [jobs])
-  const soonest = useMemo(() => {
-    if (!validCerts.length) return null
-    return validCerts.reduce((acc, cert) => (certDaysLeft(cert) <= certDaysLeft(acc) ? cert : acc))
-  }, [validCerts])
+  const validCerts = useMemo(() => certs.filter((cert) => !cert.expired), [certs])
 
-  const statDays = Number(statusStats?.nextExpiryDays)
-  const nextDays = Number.isFinite(statDays) ? statDays : soonest ? certDaysLeft(soonest) : undefined
-  const nextExpiry = statusStats?.nextExpiry || soonest?.notAfter
+  const selectedCert =
+    selection?.kind === 'cert' ? certs.find((cert) => cert.id === selection.id) : undefined
+  const selectedJob =
+    selection?.kind === 'job' ? jobs.find((job) => job.id === selection.id) : undefined
+
+  const firstCertID = certs[0]?.id || ''
+  const firstJobID = jobs[0]?.id || ''
+
+  // Drop a selection whose entity disappeared after a reload.
+  useEffect(() => {
+    if (!selection || loading) return
+    if (selection.kind === 'cert' && !certs.some((cert) => cert.id === selection.id)) {
+      setSelection(null)
+    } else if (selection.kind === 'job' && !jobs.some((job) => job.id === selection.id)) {
+      setSelection(null)
+    }
+  }, [selection, certs, jobs, loading])
+
+  // Desktop works like a command center: keep a useful detail pane open.
+  useEffect(() => {
+    if (!desktop || selection) return
+    if (mode === 'renewal') {
+      setSelection({ kind: 'overview' })
+    } else if (mode === 'certs' && firstCertID) {
+      setSelection({ kind: 'cert', id: firstCertID })
+    } else if (mode === 'jobs' && firstJobID) {
+      setSelection({ kind: 'job', id: firstJobID })
+    }
+  }, [desktop, selection, mode, firstCertID, firstJobID])
+
+  const changeMode = (next: ListMode) => {
+    setMode(next)
+    setQuery('')
+    if (!desktop) {
+      setSelection(null)
+      return
+    }
+    if (next === 'certs') {
+      setSelection(firstCertID ? { kind: 'cert', id: firstCertID } : null)
+    } else if (next === 'jobs') {
+      setSelection(firstJobID ? { kind: 'job', id: firstJobID } : null)
+    } else {
+      setSelection({ kind: 'overview' })
+    }
+  }
+
+  const startDraft = () => {
+    setMode('jobs')
+    setQuery('')
+    setDraftSeq((value) => value + 1)
+    setSelection({ kind: 'draft' })
+  }
+
+  const openCert = (cert: Certificate) => {
+    setSelection({ kind: 'cert', id: cert.id })
+  }
+
+  const openJob = (job: AcmeJob) => {
+    setMode((current) => (current === 'certs' ? 'jobs' : current))
+    setSelection({ kind: 'job', id: job.id })
+  }
 
   const jobForCert = (cert: Certificate): AcmeJob | undefined =>
     cert.jobId ? jobs.find((job) => job.id === cert.jobId) : undefined
 
   const downloadCertificate = (cert: Certificate) => {
-    // A hidden iframe keeps the attachment download from navigating the SPA
-    // when the endpoint answers with an error document instead of a zip.
     const frame = document.createElement('iframe')
     frame.style.display = 'none'
     frame.src = `/api/v1/acme/certificates/${encodeURIComponent(cert.id)}/download`
@@ -240,81 +298,60 @@ export default function Acme() {
     }
   }
 
-  const askIssue = (job: AcmeJob) => {
-    modal.confirm({
-      title: '立即签发证书',
-      content: `将为「${jobLabel(job)}」提交签发请求。签发在后台异步执行，通常需要几十秒到几分钟。`,
-      okText: '开始签发',
-      cancelText: '取消',
-      onOk: () => issueJob(job),
-    })
-  }
-
   const renewCertificate = (cert: Certificate) => {
     const job = jobForCert(cert)
     if (!job) {
       message.warning('该证书没有关联的证书任务，无法自动续期')
       return
     }
-    setDetailCert(null)
-    askIssue(job)
+    void issueJob(job)
   }
 
-  const toggleJob = async (job: AcmeJob, next: boolean) => {
-    setBusyId(job.id)
-    try {
-      await api.post(`/api/v1/acme/jobs/${encodeURIComponent(job.id)}/toggle`, { enable: next })
-      message.success(next ? '已启用自动续期' : '已关闭自动续期')
-      await Promise.all([loadJobs(true), loadStatus(true)])
-    } catch (err) {
-      message.error(errorText(err))
-    } finally {
-      setBusyId('')
-    }
-  }
-
-  const removeJob = (job: AcmeJob) => {
-    confirmDelete('删除证书任务', `确定删除「${jobLabel(job)}」吗？已签发的证书不会被删除。`, async () => {
-      try {
-        await api.del(`/api/v1/acme/jobs/${encodeURIComponent(job.id)}`)
-        message.success('证书任务已删除')
-        await Promise.all([loadJobs(true), loadStatus(true)])
-      } catch (err) {
-        message.error(errorText(err))
-        throw err
-      }
-    })
-  }
-
-  const removeCertificate = (cert: Certificate) => {
-    confirmDelete(
-      '删除证书',
-      `确定删除证书「${certDomains(cert)}」吗？使用该证书的站点会失去 TLS。`,
-      async () => {
-        try {
-          await api.del(`/api/v1/acme/certificates/${encodeURIComponent(cert.id)}`)
-          message.success('证书已删除')
-          await Promise.all([loadCerts(true), loadStatus(true)])
-        } catch (err) {
-          message.error(errorText(err))
-          throw err
-        }
-      },
-    )
-  }
-
-  const saveJob = async (id: string, payload: AcmeJobPayload) => {
+  const saveJob = async (id: string, payload: AcmeJobPayload): Promise<string> => {
+    let savedId = id
     if (id) {
       await api.put(`/api/v1/acme/jobs/${encodeURIComponent(id)}`, payload)
     } else {
-      await api.post('/api/v1/acme/jobs', payload)
+      const data = await api.post<{ id?: string }>('/api/v1/acme/jobs', payload)
+      savedId = String(data?.id || '')
     }
     await Promise.all([loadJobs(true), loadStatus(true)])
+    if (!id && savedId) {
+      setMode('jobs')
+      setSelection({ kind: 'job', id: savedId })
+    }
+    return savedId
+  }
+
+  const removeJob = async (job: AcmeJob) => {
+    try {
+      await api.del(`/api/v1/acme/jobs/${encodeURIComponent(job.id)}`)
+      message.success('证书任务已删除')
+      await Promise.all([loadJobs(true), loadStatus(true)])
+      if (selection?.kind === 'job' && selection.id === job.id) setSelection(null)
+    } catch (err) {
+      message.error(errorText(err))
+    }
+  }
+
+  const removeCertificate = async (cert: Certificate) => {
+    try {
+      await api.del(`/api/v1/acme/certificates/${encodeURIComponent(cert.id)}`)
+      message.success('证书已删除')
+      await Promise.all([loadCerts(true), loadStatus(true)])
+      if (selection?.kind === 'cert' && selection.id === cert.id) setSelection(null)
+    } catch (err) {
+      message.error(errorText(err))
+    }
   }
 
   const uploadCertificate = async (payload: UploadPayload) => {
-    await api.post('/api/v1/acme/certificates/upload', payload)
+    const data = await api.post<{ id?: string }>('/api/v1/acme/certificates/upload', payload)
     await Promise.all([loadCerts(true), loadStatus(true)])
+    if (data?.id) {
+      setMode('certs')
+      setSelection({ kind: 'cert', id: data.id })
+    }
   }
 
   const saveAccount = async (payload: AccountPayload) => {
@@ -329,512 +366,324 @@ export default function Acme() {
     await loadStatus(true)
   }
 
-  const openJobForm = (job: AcmeJob | null) => {
-    setEditingJob(job)
-    setJobOpen(true)
-  }
+  const keyword = query.trim().toLowerCase()
+  const filteredCerts = useMemo(() => {
+    if (!keyword) return certs
+    return certs.filter((cert) =>
+      [certDomains(cert), cert.remark, cert.issuer].join(' ').toLowerCase().includes(keyword),
+    )
+  }, [certs, keyword])
+  const filteredJobs = useMemo(() => {
+    if (!keyword) return jobs
+    return jobs.filter((job) =>
+      [jobLabel(job), (job.domains || []).join(' '), job.remark, job.dnsProvider]
+        .join(' ')
+        .toLowerCase()
+        .includes(keyword),
+    )
+  }, [jobs, keyword])
 
-  const certColumns: TableColumnsType<Certificate> = [
-    {
-      key: 'domains',
-      title: '域名',
-      render: (_, record) => {
-        const names = Array.isArray(record.domains) ? record.domains : []
-        return (
-          <div>
-            <span className="mono" style={{ fontSize: 12 }}>
-              {names[0] || '-'}
-            </span>
-            {names.length > 1 ? <Muted> 等 {names.length} 个域名</Muted> : null}
-            {record.remark ? (
-              <div>
-                <Muted>{record.remark}</Muted>
-              </div>
-            ) : null}
-          </div>
-        )
-      },
-    },
-    {
-      key: 'issuer',
-      title: '签发者',
-      responsive: ['md'],
-      render: (_, record) => <span style={{ fontSize: 12 }}>{record.issuer || '-'}</span>,
-    },
-    {
-      key: 'notAfter',
-      title: '到期时间',
-      render: (_, record) => (
-        <div>
-          <div style={{ fontSize: 12 }}>{fmtTime(record.notAfter)}</div>
-          <Muted>{certDaysText(record)}</Muted>
+  const listTitle = mode === 'certs' ? '证书仓库' : mode === 'jobs' ? '证书任务' : '续期状态'
+  const listSubtitle =
+    mode === 'certs'
+      ? `${certs.length} 张证书 · ${validCerts.length} 有效`
+      : mode === 'jobs'
+        ? `${jobs.length} 个任务 · ${enabledJobs} 个自动续期`
+        : '按任务查看当前证书与续期窗口'
+
+  const listBody = (() => {
+    if (loading && !certs.length && !jobs.length) {
+      return (
+        <div style={{ padding: 32, textAlign: 'center' }}>
+          <Spin />
         </div>
-      ),
-    },
-    {
-      key: 'status',
-      title: '状态',
-      render: (_, record) => {
-        const state = certState(record)
-        return <Tag color={state.color}>{state.label}</Tag>
-      },
-    },
-    {
-      key: 'autoRenew',
-      title: '自动续期',
-      responsive: ['lg'],
-      render: (_, record) =>
-        record.autoRenew ? <Tag color="green">自动</Tag> : <Tag>手动</Tag>,
-    },
-    {
-      key: 'actions',
-      title: '操作',
-      render: (_, record) => {
-        const job = jobForCert(record)
+      )
+    }
+
+    if (mode === 'certs') {
+      if (!filteredCerts.length) {
         return (
-          <Space size={0} wrap>
-            <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => setDetailCert(record)}>
-              详情
-            </Button>
-            <Button
-              type="link"
-              size="small"
-              icon={<DownloadOutlined />}
-              onClick={() => downloadCertificate(record)}
+          <div style={{ padding: 20 }}>
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={keyword ? '没有匹配的证书' : '还没有证书'}
             >
-              导出
-            </Button>
-            {job ? (
-              <Button
-                type="link"
-                size="small"
-                icon={<SyncOutlined />}
-                disabled={busyId === job.id}
-                onClick={() => renewCertificate(record)}
-              >
-                续期
-              </Button>
-            ) : null}
-            <Button
-              type="link"
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              onClick={() => removeCertificate(record)}
-            >
-              删除
-            </Button>
-          </Space>
-        )
-      },
-    },
-  ]
-
-  const jobColumns: TableColumnsType<AcmeJob> = [
-    {
-      key: 'domains',
-      title: '任务 / 域名',
-      render: (_, record) => {
-        const domains = record.domainsJoined || (record.domains || []).join(', ') || '-'
-        return (
-          <div>
-            {record.name ? <div style={{ fontWeight: 500 }}>{record.name}</div> : null}
-            <div className="mono" style={{ fontSize: 12 }}>
-              {domains}
-            </div>
-            {record.remark ? (
-              <div>
-                <Muted>{record.remark}</Muted>
-              </div>
-            ) : null}
-          </div>
-        )
-      },
-    },
-    {
-      key: 'challenge',
-      title: '挑战方式',
-      render: (_, record) => (
-        <Tag color={challengeColor(record.challenge)}>{challengeLabel(record.challenge)}</Tag>
-      ),
-    },
-    {
-      key: 'provider',
-      title: 'DNS 提供商',
-      responsive: ['md'],
-      render: (_, record) =>
-        normalizeChallenge(record.challenge) === 'dns' ? (
-          <span className="mono" style={{ fontSize: 12 }}>
-            {providers.find((item) => item.id === record.dnsProvider)?.title || record.dnsProvider || '-'}
-          </span>
-        ) : (
-          <Muted>不使用</Muted>
-        ),
-    },
-    {
-      key: 'keyType',
-      title: '密钥类型',
-      responsive: ['xl'],
-      render: (_, record) => <span style={{ fontSize: 12 }}>{keyLabel(record.keyType)}</span>,
-    },
-    {
-      key: 'renewDays',
-      title: '提前续期',
-      responsive: ['lg'],
-      render: (_, record) => `${record.renewDays || 30} 天`,
-    },
-    {
-      key: 'enable',
-      title: '自动续期',
-      render: (_, record) => (
-        <Switch
-          size="small"
-          checked={!!record.enable}
-          loading={busyId === record.id}
-          onChange={(next) => void toggleJob(record, next)}
-        />
-      ),
-    },
-    {
-      key: 'actions',
-      title: '操作',
-      render: (_, record) => (
-        <Space size={0} wrap>
-          <Button
-            type="link"
-            size="small"
-            icon={<SyncOutlined />}
-            loading={busyId === record.id}
-            onClick={() => askIssue(record)}
-          >
-            签发
-          </Button>
-          <Button type="link" size="small" onClick={() => openJobForm(record)}>
-            编辑
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => removeJob(record)}
-          >
-            删除
-          </Button>
-        </Space>
-      ),
-    },
-  ]
-
-  const planColumns: TableColumnsType<AcmeJob> = [
-    {
-      key: 'job',
-      title: '证书任务',
-      render: (_, record) => (
-        <div>
-          <div style={{ fontWeight: 500 }}>{jobLabel(record)}</div>
-          <div className="mono" style={{ fontSize: 12 }}>
-            {record.domainsJoined || (record.domains || []).join(', ') || '-'}
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: 'enable',
-      title: '自动续期',
-      render: (_, record) =>
-        record.enable ? <Tag color="green">已启用</Tag> : <Tag color="default">已停用</Tag>,
-    },
-    {
-      key: 'window',
-      title: '提前天数',
-      responsive: ['md'],
-      render: (_, record) => `${record.renewDays || 30} 天`,
-    },
-    {
-      key: 'current',
-      title: '当前证书到期',
-      render: (_, record) => {
-        const cert = matchCertForJob(record, certs)
-        return cert ? (
-          <div>
-            <div style={{ fontSize: 12 }}>{fmtTime(cert.notAfter)}</div>
-            <Muted>{certDaysText(cert)}</Muted>
-          </div>
-        ) : (
-          <Muted>尚未签发</Muted>
-        )
-      },
-    },
-    {
-      key: 'state',
-      title: '续期状态',
-      render: (_, record) => {
-        const cert = matchCertForJob(record, certs)
-        const state = jobRenewState(record, cert)
-        return <Tag color={state.color}>{state.label}</Tag>
-      },
-    },
-  ]
-
-  const descriptionColumns = isMobile ? 1 : 2
-  const accountItems: DescriptionsProps['items'] = [
-    {
-      key: 'running',
-      label: '续期模块',
-      children:
-        moduleRunning === undefined ? (
-          <Tag>未知</Tag>
-        ) : moduleRunning ? (
-          <Tag color="green">运行中</Tag>
-        ) : (
-          <Tag color="red">未运行</Tag>
-        ),
-    },
-    {
-      key: 'since',
-      label: '运行开始',
-      children: status?.status?.since ? fmtTime(status.status.since) : '-',
-    },
-    {
-      key: 'jobs',
-      label: '自动续期任务',
-      children: `${enabledJobs} / ${jobs.length} 启用`,
-    },
-    {
-      key: 'certs',
-      label: '有效证书',
-      children: `${validCerts.length} / ${certs.length}`,
-    },
-    {
-      key: 'next',
-      label: '最近到期',
-      children: nextExpiry ? (
-        <span>
-          {fmtTime(nextExpiry)}
-          {nextDays !== undefined ? <Muted>（{nextDays} 天）</Muted> : null}
-        </span>
-      ) : (
-        '-'
-      ),
-    },
-    { key: 'email', label: '联系邮箱', children: config.email || '未设置' },
-    { key: 'keyType', label: '默认密钥类型', children: keyLabel(config.keyType) },
-    {
-      key: 'staging',
-      label: 'ACME 环境',
-      children: config.staging ? <Tag color="orange">staging 测试</Tag> : <Tag color="green">生产</Tag>,
-    },
-    {
-      key: 'directory',
-      label: 'ACME 目录',
-      span: descriptionColumns,
-      children: (
-        <span className="mono" style={{ fontSize: 12, wordBreak: 'break-all' }}>
-          {config.directory || (config.staging ? 'Let\u2019s Encrypt staging' : "Let's Encrypt production")}
-        </span>
-      ),
-    },
-    {
-      key: 'detail',
-      label: '模块详情',
-      span: descriptionColumns,
-      children: status?.status?.detail || '-',
-    },
-  ]
-
-  const tabs = [
-    {
-      key: 'certs',
-      label: '证书仓库',
-      children: (
-        <Panel
-          title="证书仓库"
-          subtitle="上传或自动签发的证书都保存在这里"
-          extra={isMobile ? undefined : <Muted>导出 zip 含证书链与私钥</Muted>}
-        >
-          <DataTable<Certificate>
-            dataSource={certs}
-            columns={certColumns}
-            rowKey="id"
-            loading={loading}
-          />
-        </Panel>
-      ),
-    },
-    {
-      key: 'jobs',
-      label: '证书任务',
-      children: (
-        <Panel
-          title="证书任务"
-          subtitle="任务用于按域名申请证书，并参与定时自动续期"
-          extra={isMobile ? undefined : <Muted>自动续期只在任务启用时参与</Muted>}
-        >
-          <DataTable<AcmeJob> dataSource={jobs} columns={jobColumns} rowKey="id" loading={loading} />
-        </Panel>
-      ),
-    },
-    {
-      key: 'status',
-      label: '续期状态',
-      children: (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <Panel
-            title="定时续期"
-            subtitle="启用的任务会在证书剩余天数进入续期窗口时自动重新签发"
-            extra={
-              isMobile ? undefined : (
-                <Button size="small" icon={<SettingOutlined />} onClick={() => setAccountOpen(true)}>
-                  ACME 设置
+              {keyword ? null : (
+                <Button size="small" onClick={() => setUploadOpen(true)}>
+                  上传证书
                 </Button>
-              )
+              )}
+            </Empty>
+          </div>
+        )
+      }
+      return filteredCerts.map((cert) => {
+        const state = certState(cert)
+        return (
+          <EntityRow
+            key={cert.id}
+            title={cert.domains?.[0] || cert.remark || '证书'}
+            subtitle={
+              cert.domains?.length > 1 ? `${cert.issuer} · ${cert.domains.length} 个域名` : cert.issuer
             }
-          >
-            <Descriptions size="small" bordered column={descriptionColumns} items={accountItems} />
-            {moduleError ? (
-              <Alert
-                type="error"
-                showIcon
-                message="证书模块报告错误"
-                description={moduleError}
-                style={{ marginTop: 16 }}
+            status={certItemStatus(cert)}
+            selected={selection?.kind === 'cert' && selection.id === cert.id}
+            actions={cert.autoRenew ? <Tag color="green">自动</Tag> : undefined}
+            meta={
+              <Space size={6} wrap>
+                <Muted>到期 {fmtTime(cert.notAfter)}</Muted>
+                <Tag color={state.color}>{certDaysText(cert)}</Tag>
+              </Space>
+            }
+            onClick={() => openCert(cert)}
+          />
+        )
+      })
+    }
+
+    if (mode === 'jobs') {
+      if (!filteredJobs.length) {
+        return (
+          <div style={{ padding: 20 }}>
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={keyword ? '没有匹配的任务' : '还没有证书任务'}
+            >
+              {keyword ? null : (
+                <Button size="small" onClick={startDraft}>
+                  新建任务
+                </Button>
+              )}
+            </Empty>
+          </div>
+        )
+      }
+      return filteredJobs.map((job) => {
+        const cert = matchCertForJob(job, certs)
+        return (
+          <EntityRow
+            key={job.id}
+            title={jobLabel(job)}
+            subtitle={(job.domains || []).join(', ') || '-'}
+            status={jobItemStatus(job, cert)}
+            selected={selection?.kind === 'job' && selection.id === job.id}
+            meta={
+              <Space size={6} wrap>
+                <Tag color={challengeColor(job.challenge)}>{challengeLabel(job.challenge)}</Tag>
+                <Muted>{job.renewDays || 30} 天</Muted>
+                <Muted>{cert ? `剩余 ${certDaysText(cert)}` : '尚未签发'}</Muted>
+              </Space>
+            }
+            onClick={() => openJob(job)}
+          />
+        )
+      })
+    }
+
+    return (
+      <>
+        <EntityRow
+          title="续期概览"
+          subtitle="模块状态、账户与需要关注的任务"
+          status={moduleRunning === false ? 'error' : lastError ? 'warn' : 'ok'}
+          selected={selection?.kind === 'overview'}
+          meta={<Muted>{enabledJobs} / {jobs.length} 个任务启用</Muted>}
+          onClick={() => setSelection({ kind: 'overview' })}
+        />
+        {filteredJobs.length ? (
+          filteredJobs.map((job) => {
+            const cert = matchCertForJob(job, certs)
+            const state = jobRenewState(job, cert)
+            return (
+              <EntityRow
+                key={job.id}
+                title={jobLabel(job)}
+                subtitle={(job.domains || []).join(', ') || '-'}
+                status={renewItemStatus(state.label)}
+                selected={selection?.kind === 'job' && selection.id === job.id}
+                meta={
+                  <Space size={6} wrap>
+                    <Tag color={state.color}>{state.label}</Tag>
+                    <Muted>{cert ? `${certDaysText(cert)} · 到期 ${fmtTime(cert.notAfter)}` : '尚未签发'}</Muted>
+                  </Space>
+                }
+                onClick={() => openJob(job)}
               />
-            ) : null}
-          </Panel>
+            )
+          })
+        ) : (
+          <div style={{ padding: 16 }}>
+            <Muted>{keyword ? '没有匹配的任务' : '还没有证书任务'}</Muted>
+          </div>
+        )}
+      </>
+    )
+  })()
 
-          <Panel
-            title="任务续期计划"
-            subtitle="按任务展示当前证书与续期窗口，实际签发在后台执行"
-            extra={<Muted>每 60 秒刷新状态</Muted>}
-          >
-            <DataTable<AcmeJob>
-              dataSource={jobs}
-              columns={planColumns}
-              rowKey="id"
-              loading={loading}
-            />
-          </Panel>
-        </div>
-      ),
-    },
-  ]
-
-  return (
+  const list = (
     <div>
-      <PageHeader
-        title="证书"
-        subtitle={`共 ${jobs.length} 个证书任务、${certs.length} 张证书 · CA：Let's Encrypt${
-          config.email ? ` · ${config.email}` : ''
-        }${config.staging ? ' · staging 测试环境' : ''}`}
-        extra={
-          <>
-            <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void loadAll()}>
-              刷新
-            </Button>
-            <Button icon={<SettingOutlined />} onClick={() => setAccountOpen(true)}>
-              ACME 设置
-            </Button>
-            <Button icon={<UploadOutlined />} onClick={() => setUploadOpen(true)}>
-              上传证书
-            </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => openJobForm(null)}>
+      <div style={{ padding: 10 }}>
+        <Segmented
+          block
+          size="small"
+          value={mode}
+          onChange={(value) => changeMode(value as ListMode)}
+          options={[
+            { value: 'certs', label: `证书 ${certs.length}` },
+            { value: 'jobs', label: `任务 ${jobs.length}` },
+            { value: 'renewal', label: '续期状态' },
+          ]}
+        />
+      </div>
+      <div style={{ padding: '0 10px 10px' }}>
+        <Input
+          size="small"
+          allowClear
+          prefix={<SearchOutlined />}
+          placeholder="搜索域名、名称或备注"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </div>
+      <PaneTitle title={listTitle} subtitle={listSubtitle} />
+      <div style={{ maxHeight: 'calc(100dvh - 260px)', minHeight: 120, overflowY: 'auto' }}>{listBody}</div>
+    </div>
+  )
+
+  const detail = (() => {
+    if (selectedCert) {
+      const job = jobForCert(selectedCert)
+      return (
+        <CertDetail
+          cert={selectedCert}
+          job={job}
+          onRenew={renewCertificate}
+          onDelete={(cert) => void removeCertificate(cert)}
+          onDownload={downloadCertificate}
+          onOpenJob={openJob}
+        />
+      )
+    }
+    if (selectedJob) {
+      return (
+        <JobEditor
+          key={selectedJob.id}
+          job={selectedJob}
+          providers={providers}
+          keyOptions={keyOptions}
+          email={config.email}
+          staging={!!config.staging}
+          issuing={busyId === selectedJob.id}
+          onSave={saveJob}
+          onIssue={(job) => void issueJob(job)}
+          onDelete={(job) => void removeJob(job)}
+          onCancel={() => setSelection(null)}
+        />
+      )
+    }
+    if (selection?.kind === 'draft') {
+      return (
+        <JobEditor
+          key={`draft-${draftSeq}`}
+          job={null}
+          providers={providers}
+          keyOptions={keyOptions}
+          email={config.email}
+          staging={!!config.staging}
+          onSave={saveJob}
+          onIssue={() => undefined}
+          onDelete={() => undefined}
+          onCancel={() => setSelection(null)}
+        />
+      )
+    }
+    if (selection?.kind === 'overview') {
+      return (
+        <RenewalOverview
+          module={status?.status}
+          stats={statusStats}
+          jobs={jobs}
+          certs={certs}
+          config={config}
+          keyLabel={keyLabel(config.keyType)}
+          onOpenJob={openJob}
+          onOpenAccount={() => setAccountOpen(true)}
+        />
+      )
+    }
+    return (
+      <div style={{ padding: '28px 8px' }}>
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择左侧的证书或任务查看详情">
+          <Space wrap>
+            <Button size="small" onClick={startDraft}>
               新建任务
             </Button>
-          </>
-        }
-      />
+            <Button size="small" onClick={() => setUploadOpen(true)}>
+              上传证书
+            </Button>
+          </Space>
+        </Empty>
+      </div>
+    )
+  })()
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+        <Typography.Text strong style={{ fontSize: 18 }}>
+          证书
+        </Typography.Text>
+        <Muted>
+          {certs.length} 张证书 · {jobs.length} 个任务 · {enabledJobs} 个自动续期
+        </Muted>
+        <Tag color={config.staging ? 'orange' : 'green'}>{config.staging ? 'staging' : '生产'}</Tag>
+        {moduleRunning === false ? <Tag color="red">续期模块未运行</Tag> : null}
+        <div style={{ flex: 1 }} />
+        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void loadAll()}>
+          刷新
+        </Button>
+        <Button size="small" icon={<UploadOutlined />} onClick={() => setUploadOpen(true)}>
+          上传
+        </Button>
+        <Button size="small" icon={<SettingOutlined />} onClick={() => setAccountOpen(true)}>
+          账户
+        </Button>
+        <Button size="small" type="primary" icon={<PlusOutlined />} onClick={startDraft}>
+          新建任务
+        </Button>
+      </div>
 
       {moduleRunning === false ? (
         <Alert
           type="warning"
           showIcon
-          message="证书续期模块未运行"
-          description={moduleError || '自动续期不会执行，请检查服务状态或查看系统日志。'}
-          style={{ marginBottom: 16 }}
+          message="证书续期模块未运行，自动续期不会执行"
+          description={status?.status?.error || '请检查服务状态或系统日志。'}
         />
       ) : null}
-
       {lastError ? (
-        <Alert
-          type="error"
-          showIcon
-          message="上次续期或签发失败"
-          description={lastError}
-          style={{ marginBottom: 16 }}
-        />
+        <Alert type="error" showIcon message="上次续期或签发失败" description={lastError} />
       ) : null}
 
-      <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
-        <Col xs={12} lg={6}>
-          <Card size="small" loading={loading}>
-            <Statistic
-              title="证书总数"
-              value={certs.length}
-              prefix={<SafetyCertificateOutlined />}
-              valueStyle={{ fontSize: 22 }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} lg={6}>
-          <Card size="small" loading={loading}>
-            <Statistic
-              title="有效证书"
-              value={validCerts.length}
-              prefix={<CheckCircleOutlined />}
-              valueStyle={{ fontSize: 22, color: token.colorSuccess }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} lg={6}>
-          <Card size="small" loading={loading}>
-            <Statistic
-              title="自动续期任务"
-              value={`${enabledJobs} / ${jobs.length}`}
-              prefix={<SyncOutlined />}
-              valueStyle={{ fontSize: 22 }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} lg={6}>
-          <Card size="small" loading={loading}>
-            <Statistic
-              title="最近到期"
-              value={nextDays === undefined ? '—' : nextDays}
-              suffix={nextDays === undefined ? undefined : '天'}
-              prefix={<ClockCircleOutlined />}
-              valueStyle={{ fontSize: 22 }}
-            />
-          </Card>
-        </Col>
-      </Row>
-
-      <Tabs items={tabs} defaultActiveKey="certs" centered={isMobile} />
-
-      <JobModal
-        open={jobOpen}
-        job={editingJob}
-        providers={providers}
-        keyOptions={keyOptions}
-        email={config.email}
-        staging={!!config.staging}
-        onClose={() => setJobOpen(false)}
-        onSubmit={saveJob}
+      <Workspace
+        list={list}
+        detail={detail}
+        selected={!!selection}
+        onBack={() => setSelection(null)}
+        listWidth={340}
       />
-      <UploadModal open={uploadOpen} onClose={() => setUploadOpen(false)} onSubmit={uploadCertificate} />
-      <AccountModal
+
+      <AccountDrawer
         open={accountOpen}
         config={config}
         keyOptions={keyOptions}
         onClose={() => setAccountOpen(false)}
         onSubmit={saveAccount}
       />
-      <CertDetailModal
-        cert={detailCert}
-        jobs={jobs}
-        onClose={() => setDetailCert(null)}
-        onDownload={downloadCertificate}
-        onRenew={renewCertificate}
+      <UploadDrawer
+        open={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        onSubmit={uploadCertificate}
       />
     </div>
   )

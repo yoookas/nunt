@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, App, Button, Col, Divider, Form, InputNumber, Row, Space, Switch, Typography } from 'antd'
+import { Alert, App, Button, Col, Form, InputNumber, Row, Space, Switch } from 'antd'
 import type { TableProps } from 'antd'
 import { DownloadOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons'
 import { api, errorText } from '../../api'
-import { DataTable, Muted, Panel } from '../../components'
+import { DataTable, Muted } from '../../components'
 import { fmtBytes, fmtTime } from '../../format'
 import { EMPTY_LOG, asArray, downloadFile, type LogFileRow, type LogForm } from './shared'
+import { SettingsSection } from './ui'
 
 interface Props {
   refreshToken: number
@@ -126,24 +127,25 @@ export default function LogsPanel({ refreshToken }: Props) {
   ]
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Panel title="日志设置" subtitle="访问日志写入磁盘的保留策略与运行日志文件的轮转规则">
-        <Form
-          form={form}
-          layout="vertical"
-          initialValues={EMPTY_LOG}
-          requiredMark={false}
-          onFinish={onFinish}
-          disabled={loading}
+    <div>
+      <Form
+        form={form}
+        layout="vertical"
+        initialValues={EMPTY_LOG}
+        requiredMark={false}
+        onFinish={onFinish}
+        disabled={loading}
+      >
+        <SettingsSection
+          title="访问日志（Web / 端口转发 / WAF）"
+          description="写入磁盘的保留策略；关闭后只保留内存缓冲，重启即丢失"
+          first
         >
-          <Divider orientation="left" plain style={{ marginTop: 0 }}>
-            <Typography.Text strong>访问日志（Web / 端口转发 / WAF）</Typography.Text>
-          </Divider>
           <Alert
             type="info"
             showIcon
             style={{ marginBottom: 16 }}
-            message="关闭写入磁盘后只保留内存缓冲，重启即丢失；已写入数据库的记录不会被删除。"
+            message="已写入数据库的记录不会因为关闭写入磁盘而被删除。"
           />
           <Row gutter={[16, 0]}>
             <Col xs={24} md={8}>
@@ -177,10 +179,12 @@ export default function LogsPanel({ refreshToken }: Props) {
               </Form.Item>
             </Col>
           </Row>
+        </SettingsSection>
 
-          <Divider orientation="left" plain>
-            <Typography.Text strong>运行日志文件</Typography.Text>
-          </Divider>
+        <SettingsSection
+          title="运行日志轮转"
+          description="数据目录 logs/ 下的进程日志按大小轮转"
+        >
           <Row gutter={[16, 0]}>
             <Col xs={24} md={8}>
               <Form.Item
@@ -202,22 +206,22 @@ export default function LogsPanel({ refreshToken }: Props) {
               </Form.Item>
             </Col>
           </Row>
+        </SettingsSection>
 
-          <Space wrap>
-            <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={saving} disabled={loading}>
-              保存日志设置
-            </Button>
-            <Button icon={<ReloadOutlined />} onClick={() => void load()} disabled={saving}>
-              还原
-            </Button>
-            <Muted>记录会同时进入各模块的内存缓冲，供页面实时查看。</Muted>
-          </Space>
-        </Form>
-      </Panel>
+        <Space wrap style={{ marginTop: 4 }}>
+          <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={saving} disabled={loading}>
+            保存日志设置
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={() => void load()} disabled={saving}>
+            还原
+          </Button>
+          <Muted>记录会同时进入各模块的内存缓冲，供页面实时查看。</Muted>
+        </Space>
+      </Form>
 
-      <Panel
+      <SettingsSection
         title="运行日志文件"
-        subtitle="数据目录 logs/ 下的进程日志，下载需要管理员会话"
+        description="数据目录 logs/ 下的进程日志，下载需要管理员会话"
         extra={
           <Button
             size="small"
@@ -238,7 +242,7 @@ export default function LogsPanel({ refreshToken }: Props) {
           pagination={false}
           locale={{ emptyText: '还没有运行日志文件' }}
         />
-      </Panel>
-    </Space>
+      </SettingsSection>
+    </div>
   )
 }

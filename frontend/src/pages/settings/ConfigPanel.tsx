@@ -1,14 +1,5 @@
 import { useState } from 'react'
-import {
-  Alert,
-  App,
-  Button,
-  Modal,
-  Space,
-  Typography,
-  Upload,
-  theme,
-} from 'antd'
+import { Alert, App, Button, Space, Upload, theme } from 'antd'
 import {
   CodeOutlined,
   CopyOutlined,
@@ -18,8 +9,9 @@ import {
 } from '@ant-design/icons'
 import { api, errorText } from '../../api'
 import { copyText } from '../../clipboard'
-import { Muted, Panel, Toolbar, modalWidth } from '../../components'
+import { Muted } from '../../components'
 import { adminListenURL, downloadText, type SystemInfo } from './shared'
+import { InlineConfirm, SettingsSection } from './ui'
 
 interface Props {
   onChanged: () => void
@@ -141,16 +133,21 @@ export default function ConfigPanel({ onChanged, onListenMoved }: Props) {
   }
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+    <div>
       <Alert
         type="info"
         showIcon
+        style={{ marginBottom: 16 }}
         message="密钥以掩码导出，回导不会覆盖现有密钥"
         description="导出的 JSON 中所有密钥以 ******** 呈现，管理员密码哈希与恢复码不会导出；直接回导时这些掩码字段会沿用现有值，不会把 ******** 写进配置。"
       />
 
-      <Panel title="配置导出" subtitle="导出当前系统、Web、端口转发、动态域名、证书与 WAF 配置">
-        <Toolbar>
+      <SettingsSection
+        title="导出配置"
+        description="导出当前系统、Web、端口转发、动态域名、证书与 WAF 配置"
+        first
+      >
+        <Space wrap>
           <Button
             type="primary"
             icon={<DownloadOutlined />}
@@ -159,41 +156,117 @@ export default function ConfigPanel({ onChanged, onListenMoved }: Props) {
           >
             导出配置
           </Button>
-          <Button icon={<CodeOutlined />} onClick={() => void showRawConfig()}>
-            查看当前配置 JSON
+          <Button
+            icon={<CodeOutlined />}
+            onClick={() => {
+              if (rawOpen) {
+                setRawOpen(false)
+                return
+              }
+              void showRawConfig()
+            }}
+          >
+            {rawOpen ? '收起配置 JSON' : '查看当前配置 JSON'}
           </Button>
-        </Toolbar>
-      </Panel>
-
-      <Panel title="配置导入" subtitle="导入会替换配置（管理员密码哈希会保留），随后自动重载各模块">
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Alert
-            type="warning"
-            showIcon
-            message="导入是破坏性操作"
-            description="当前配置会被文件中的配置覆盖，包括监听地址、Web 路由、转发规则、证书与 WAF 设置；请先导出一份备份。"
-          />
-          <Space wrap>
-            <Upload
-              accept=".json,application/json"
-              showUploadList={false}
-              disabled={busy !== ''}
-              beforeUpload={(file) => {
-                void readImportFile(file)
-                return false
+        </Space>
+        {rawOpen ? (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <Muted>当前配置（密钥已脱敏）</Muted>
+              <div style={{ flex: 1 }} />
+              <Button size="small" icon={<CopyOutlined />} disabled={rawLoading} onClick={copyRaw}>
+                复制
+              </Button>
+            </div>
+            <pre
+              className="mono"
+              style={{
+                margin: 0,
+                maxHeight: 360,
+                overflow: 'auto',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+                padding: 12,
+                fontSize: 12,
+                lineHeight: 1.7,
+                border: `1px solid ${token.colorBorderSecondary}`,
+                borderRadius: token.borderRadius,
+                background: token.colorFillQuaternary,
               }}
             >
-              <Button icon={<UploadOutlined />} disabled={busy !== ''} loading={busy === 'import'}>
-                选择配置文件
-              </Button>
-            </Upload>
-            <Muted>仅支持 UTF-8 的 JSON 文件，大小以服务器限制为准。</Muted>
-          </Space>
-        </Space>
-      </Panel>
+              {rawLoading ? '加载中…' : rawText}
+            </pre>
+          </div>
+        ) : null}
+      </SettingsSection>
 
-      <Panel title="重载配置" subtitle="修改配置文件后让各模块重新读取，无需重启进程">
-        <Toolbar>
+      <SettingsSection
+        title="导入配置"
+        description="导入会替换配置（管理员密码哈希会保留），随后自动重载各模块"
+      >
+        <Alert
+          type="warning"
+          showIcon
+          message="导入是破坏性操作"
+          description="当前配置会被文件中的配置覆盖，包括监听地址、Web 路由、转发规则、证书与 WAF 设置；请先导出一份备份。"
+        />
+        <Space wrap style={{ marginTop: 12 }}>
+          <Upload
+            accept=".json,application/json"
+            showUploadList={false}
+            disabled={busy !== ''}
+            beforeUpload={(file) => {
+              void readImportFile(file)
+              return false
+            }}
+          >
+            <Button icon={<UploadOutlined />} disabled={busy !== ''} loading={busy === 'import'}>
+              选择配置文件
+            </Button>
+          </Upload>
+          <Muted>仅支持 UTF-8 的 JSON 文件，大小以服务器限制为准。</Muted>
+        </Space>
+
+        {candidate ? (
+          <InlineConfirm
+            title={
+              <>
+                从 <span className="mono">{candidate.name}</span> 导入配置？
+              </>
+            }
+            description={
+              <>
+                文件 {candidate.size} 字节。导入会覆盖当前的系统、Web、转发、动态域名、证书与 WAF 配置；
+                掩码字段（********）会保留现有密钥，管理员密码哈希不会被覆盖。
+              </>
+            }
+            confirmText="导入"
+            danger
+            busy={busy === 'import'}
+            onConfirm={() => void confirmImport()}
+            onCancel={() => {
+              if (busy === 'import') return
+              setCandidate(null)
+              setImportError('')
+            }}
+          />
+        ) : null}
+        {importError ? (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginTop: 12 }}
+            message="导入失败"
+            description={importError}
+          />
+        ) : null}
+      </SettingsSection>
+
+      <SettingsSection
+        title="重载配置"
+        description="修改配置文件后让各模块重新读取，无需重启进程"
+      >
+        <Space wrap>
           <Button
             icon={<ReloadOutlined />}
             loading={busy === 'reload'}
@@ -203,72 +276,8 @@ export default function ConfigPanel({ onChanged, onListenMoved }: Props) {
             重载配置
           </Button>
           <Muted>只重新读取磁盘上的配置，不会回滚未保存的修改。</Muted>
-        </Toolbar>
-      </Panel>
-
-      <Modal
-        open={rawOpen}
-        title="当前配置（密钥已脱敏）"
-        width={modalWidth(true)}
-        onCancel={() => setRawOpen(false)}
-        footer={
-          <Space>
-            <Button type="primary" icon={<CopyOutlined />} disabled={rawLoading} onClick={copyRaw}>
-              复制
-            </Button>
-            <Button onClick={() => setRawOpen(false)}>关闭</Button>
-          </Space>
-        }
-      >
-        <pre
-          className="mono"
-          style={{
-            margin: 0,
-            maxHeight: '60vh',
-            overflow: 'auto',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-            padding: 12,
-            fontSize: 12,
-            lineHeight: 1.7,
-            border: `1px solid ${token.colorBorderSecondary}`,
-            borderRadius: token.borderRadius,
-            background: token.colorFillQuaternary,
-          }}
-        >
-          {rawLoading ? '加载中…' : rawText}
-        </pre>
-      </Modal>
-
-      <Modal
-        open={candidate !== null}
-        title="导入配置"
-        okText="导入"
-        cancelText="取消"
-        okButtonProps={{ danger: true }}
-        confirmLoading={busy === 'import'}
-        maskClosable={busy !== 'import'}
-        onCancel={() => {
-          if (busy !== 'import') setCandidate(null)
-        }}
-        onOk={() => void confirmImport()}
-      >
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Typography.Text>
-            将从 <span className="mono">{candidate?.name}</span>（{candidate?.size ?? 0} 字节）导入配置。
-          </Typography.Text>
-          <Alert
-            type="warning"
-            showIcon
-            message="导入会覆盖当前的系统、Web、转发、动态域名、证书与 WAF 配置，确定继续吗？"
-          />
-          <div>
-            <Muted>掩码字段（********）会保留现有密钥；管理员密码哈希不会被覆盖。</Muted>
-          </div>
-          {importError ? <Alert type="error" showIcon message="导入失败" description={importError} /> : null}
         </Space>
-      </Modal>
-
-    </Space>
+      </SettingsSection>
+    </div>
   )
 }

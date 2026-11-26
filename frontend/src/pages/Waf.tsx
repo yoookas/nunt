@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useState } from 'react'
-import { App, Button, Form, Tabs, Tag, type TabsProps } from 'antd'
-import { ReloadOutlined, SaveOutlined, SyncOutlined } from '@ant-design/icons'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { Alert, App, Card, Collapse, Form, Grid, Space, Typography, theme, type CollapseProps } from 'antd'
+import { BugOutlined, FileSearchOutlined, SafetyCertificateOutlined, SettingOutlined } from '@ant-design/icons'
 import { api, errorText } from '../api'
-import { Muted, PageHeader } from '../components'
-import ConfigPanel from './waf/ConfigPanel'
-import RulesPanel from './waf/RulesPanel'
-import TestPanel from './waf/TestPanel'
-import LogsPanel from './waf/LogsPanel'
+import { Muted, useIsMobile } from '../components'
+import StatusHero from './waf/StatusHero'
+import ConfigSection from './waf/ConfigSection'
+import RulesSection from './waf/RulesSection'
+import EventsSection from './waf/EventsSection'
+import TestSection from './waf/TestSection'
 import {
   EMPTY_WAF_FORM,
   clampLevel,
@@ -23,8 +24,22 @@ import {
   type WafStats,
 } from './waf/types'
 
+function SectionTitle({ icon, title, hint }: { icon: ReactNode; title: string; hint?: string }) {
+  const { token } = theme.useToken()
+  return (
+    <Space size={6}>
+      <span style={{ color: token.colorPrimary, display: 'inline-flex' }}>{icon}</span>
+      <Typography.Text strong>{title}</Typography.Text>
+      {hint ? <Muted>{hint}</Muted> : null}
+    </Space>
+  )
+}
+
 export default function Waf() {
   const { message } = App.useApp()
+  const screens = Grid.useBreakpoint()
+  const isMobile = useIsMobile()
+  const wide = !!screens.lg
   const [form] = Form.useForm<WafForm>()
 
   const [config, setConfig] = useState<WafConfig | null>(null)
@@ -36,7 +51,7 @@ export default function Waf() {
   const [rulesLoading, setRulesLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [reloading, setReloading] = useState(false)
-  const [tab, setTab] = useState('config')
+  const [openKeys, setOpenKeys] = useState<string[]>(['config'])
 
   const watchedUseCrs = Form.useWatch('useCrs', form)
   const watchedDisabledRules = Form.useWatch('disabledRules', form)
@@ -84,6 +99,10 @@ export default function Waf() {
     void loadConfig()
     void loadRules()
   }, [loadConfig, loadRules])
+
+  const handleEventsChange = useCallback((count: number) => {
+    setStats((prev) => (prev.events === count ? prev : { ...prev, events: count }))
+  }, [])
 
   const refresh = async () => {
     await Promise.all([loadConfig(), loadRules()])
@@ -158,97 +177,150 @@ export default function Waf() {
     }
   }
 
-  const handleEventsChange = useCallback((count: number) => {
-    setStats((prev) => (prev.events === count ? prev : { ...prev, events: count }))
-  }, [])
+  const engineError = engine?.error || stats.buildError || ''
 
-  const statusLabel = engine?.error
-    ? '编译失败'
-    : engine
-      ? engine.enabled
-        ? '运行中'
-        : '未运行'
-      : loading
-        ? '加载中'
-        : '未知'
-  const statusColor = engine?.error ? 'red' : engine?.enabled ? 'green' : 'default'
-  const mode = engine?.mode || config?.mode
-  const modeLabel = mode === 'detect' ? '检测' : mode === 'block' ? '拦截' : '-'
-  const ruleCount = engine?.rules ?? stats.rules
-  const fileCount = engine?.ruleFiles ?? stats.ruleFiles
+  const configExtra = engine?.error ? '编译失败' : engine?.enabled ? '运行中' : '未运行'
 
-  const tabs: TabsProps['items'] = [
+  const sections = [
     {
       key: 'config',
-      label: '配置',
+      label: <SectionTitle icon={<SettingOutlined />} title="引擎配置" />,
+      extra: <Muted>{configExtra}</Muted>,
       forceRender: true,
-      children: <ConfigPanel engine={engine} stats={stats} loading={loading} useCrs={useCrs} />,
+      children: <ConfigSection useCrs={useCrs} saving={saving} onSave={() => void saveConfig()} />,
     },
     {
       key: 'rules',
-      label: '规则',
+      label: <SectionTitle icon={<SafetyCertificateOutlined />} title="规则与策略" />,
+      extra: <Muted>{rules.length} 个文件</Muted>,
       forceRender: true,
       children: (
-        <RulesPanel
+        <RulesSection
           rules={rules}
           loading={rulesLoading}
           useCrs={useCrs}
           disabledRules={disabledRules}
+          saving={saving}
           onRefresh={() => void loadRules()}
+          onSave={() => void saveConfig()}
           onDisabledRulesChange={(next) => form.setFieldValue('disabledRules', next)}
         />
       ),
     },
     {
-      key: 'test',
-      label: '测试',
-      children: <TestPanel />,
-    },
-    {
-      key: 'logs',
-      label: '拦截事件',
+      key: 'events',
+      label: <SectionTitle icon={<FileSearchOutlined />} title="拦截事件" />,
+      extra: <Muted>{stats.events ?? 0} 条</Muted>,
+      forceRender: true,
       children: (
-        <LogsPanel active={tab === 'logs'} onEventsChange={handleEventsChange} />
+        <EventsSection
+          active={!isMobile || openKeys.includes('events')}
+          onEventsChange={handleEventsChange}
+        />
       ),
     },
-  ]
+    {
+      key: 'test',
+      label: <SectionTitle icon={<BugOutlined />} title="在线测试" />,
+      forceRender: true,
+      children: <TestSection />,
+    },
+  ] satisfies CollapseProps['items']
+
+  const configCard = (
+    <Card
+      size="small"
+      title={<SectionTitle icon={<SettingOutlined />} title="引擎配置" />}
+      extra={<Muted>{configExtra}</Muted>}
+    >
+      <ConfigSection useCrs={useCrs} saving={saving} onSave={() => void saveConfig()} />
+    </Card>
+  )
+
+  const testCard = (
+    <Card size="small" title={<SectionTitle icon={<BugOutlined />} title="在线测试" />} extra={<Muted>不发出真实请求</Muted>}>
+      <TestSection />
+    </Card>
+  )
+
+  const rulesCard = (
+    <Card
+      size="small"
+      title={<SectionTitle icon={<SafetyCertificateOutlined />} title="规则与策略" />}
+      extra={<Muted>{rules.length} 个文件</Muted>}
+    >
+      <RulesSection
+        rules={rules}
+        loading={rulesLoading}
+        useCrs={useCrs}
+        disabledRules={disabledRules}
+        saving={saving}
+        onRefresh={() => void loadRules()}
+        onSave={() => void saveConfig()}
+        onDisabledRulesChange={(next) => form.setFieldValue('disabledRules', next)}
+      />
+    </Card>
+  )
+
+  const eventsCard = (
+    <Card size="small" title={<SectionTitle icon={<FileSearchOutlined />} title="拦截事件" />} extra={<Muted>{stats.events ?? 0} 条</Muted>}>
+      <EventsSection active onEventsChange={handleEventsChange} />
+    </Card>
+  )
 
   return (
-    <div>
-      <PageHeader
-        title="WAF"
-        subtitle={`嵌入式 Coraza 引擎 · ${modeLabel}模式 · 规则 ${ruleCount ?? '-'} 条 / 文件 ${
-          fileCount ?? '-'
-        } 个`}
-        extra={
-          <>
-            <Tag color={statusColor}>{statusLabel}</Tag>
-            {crsVersion ? <Muted>CRS {crsVersion}</Muted> : null}
-            <Button
-              icon={<SyncOutlined />}
-              loading={loading || rulesLoading}
-              onClick={() => void refresh()}
-            >
-              刷新
-            </Button>
-            <Button icon={<ReloadOutlined />} loading={reloading} onClick={() => void reloadEngine()}>
-              重载引擎
-            </Button>
-            <Button
-              type="primary"
-              icon={<SaveOutlined />}
-              loading={saving}
-              disabled={!config || loading}
-              onClick={() => void saveConfig()}
-            >
-              保存配置
-            </Button>
-          </>
-        }
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <StatusHero
+        engine={engine}
+        stats={stats}
+        config={config}
+        crsVersion={crsVersion}
+        loading={loading}
+        saving={saving}
+        reloading={reloading}
+        onRefresh={() => void refresh()}
+        onReload={() => void reloadEngine()}
+        onSave={() => void saveConfig()}
       />
 
+      {engineError ? (
+        <Alert type="error" showIcon message="规则集编译失败" description={engineError} />
+      ) : null}
+
       <Form form={form} component={false} layout="vertical" initialValues={EMPTY_WAF_FORM}>
-        <Tabs activeKey={tab} onChange={setTab} items={tabs} />
+        {isMobile ? (
+          <Collapse
+            size="small"
+            activeKey={openKeys}
+            onChange={(keys) => setOpenKeys(keys)}
+            items={sections}
+          />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: wide ? 'minmax(0, 1.35fr) minmax(0, 1fr)' : '1fr',
+                gap: 12,
+                alignItems: 'start',
+              }}
+            >
+              {configCard}
+              {testCard}
+            </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: wide ? 'minmax(0, 1.35fr) minmax(0, 1fr)' : '1fr',
+                gap: 12,
+                alignItems: 'start',
+              }}
+            >
+              {rulesCard}
+              {eventsCard}
+            </div>
+          </div>
+        )}
       </Form>
     </div>
   )

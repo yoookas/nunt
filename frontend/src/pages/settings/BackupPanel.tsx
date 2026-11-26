@@ -3,7 +3,7 @@ import { Alert, App, Button, Col, Form, Input, InputNumber, Row, Space, Switch, 
 import type { TableProps } from 'antd'
 import { CloudDownloadOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons'
 import { api, errorText } from '../../api'
-import { DataTable, Muted, Panel } from '../../components'
+import { DataTable, Muted } from '../../components'
 import { fmtBytes, fmtTime } from '../../format'
 import {
   EMPTY_BACKUP,
@@ -13,6 +13,7 @@ import {
   type BackupFile,
   type BackupForm,
 } from './shared'
+import { SettingsSection } from './ui'
 
 interface Props {
   refreshToken: number
@@ -115,25 +116,27 @@ export default function BackupPanel({ refreshToken }: Props) {
   ]
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+    <div>
       <Alert
         type="warning"
         showIcon
+        style={{ marginBottom: 16 }}
         message="备份包含密钥材料"
         description="归档中包含配置、证书、ACME 账号与 secret.key。归档权限为 0600，但离开本机前请自行加密；日志与旧备份不在归档内。"
       />
 
-      <Panel
-        title="自动备份"
-        subtitle="按间隔把配置、密钥、证书与 ACME 账号打成 tar.gz"
+      <Form
+        form={form}
+        layout="vertical"
+        initialValues={EMPTY_BACKUP}
+        requiredMark={false}
+        onFinish={onFinish}
+        disabled={loading}
       >
-        <Form
-          form={form}
-          layout="vertical"
-          initialValues={EMPTY_BACKUP}
-          requiredMark={false}
-          onFinish={onFinish}
-          disabled={loading}
+        <SettingsSection
+          title="自动备份"
+          description="按间隔把配置、密钥、证书与 ACME 账号打成 tar.gz"
+          first
         >
           <Row gutter={[16, 0]}>
             <Col xs={24} md={8}>
@@ -188,26 +191,23 @@ export default function BackupPanel({ refreshToken }: Props) {
             <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={saving} disabled={loading}>
               保存备份设置
             </Button>
-            <Button
-              icon={<CloudDownloadOutlined />}
-              loading={creating}
-              onClick={() => void createBackup()}
-            >
+            <Button icon={<CloudDownloadOutlined />} loading={creating} onClick={() => void createBackup()}>
               立即备份并下载
             </Button>
-            <Button icon={<ReloadOutlined />} onClick={() => void load()} disabled={saving || creating}>
-              刷新
-            </Button>
+            {dir ? <Muted>当前备份目录：{dir}</Muted> : null}
           </Space>
-          {dir ? (
-            <div style={{ marginTop: 12 }}>
-              <Muted>当前备份目录：{dir}</Muted>
-            </div>
-          ) : null}
-        </Form>
-      </Panel>
+        </SettingsSection>
+      </Form>
 
-      <Panel title="备份文件" subtitle="按修改时间倒序，超过保留份数的旧归档会被自动清理">
+      <SettingsSection
+        title="备份文件"
+        description="按修改时间倒序，超过保留份数的旧归档会被自动清理"
+        extra={
+          <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void load()} disabled={saving || creating}>
+            刷新
+          </Button>
+        }
+      >
         <DataTable<BackupFile>
           rowKey="name"
           columns={columns}
@@ -216,11 +216,11 @@ export default function BackupPanel({ refreshToken }: Props) {
           pagination={false}
           locale={{ emptyText: '还没有备份文件' }}
         />
-      </Panel>
+      </SettingsSection>
 
-      <Typography.Paragraph type="secondary" style={{ margin: 0, fontSize: 12 }}>
+      <Typography.Paragraph type="secondary" style={{ margin: '14px 0 0', fontSize: 12 }}>
         手动下载同样会生成一份新的归档并纳入保留策略，因此可以随时用它验证备份流程。
       </Typography.Paragraph>
-    </Space>
+    </div>
   )
 }

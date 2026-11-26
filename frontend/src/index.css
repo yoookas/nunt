@@ -6,7 +6,7 @@ body,
 
 body {
   margin: 0;
-  background: #f5f5f5;
+  background: #f6f7f9;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -28,7 +28,7 @@ body {
 }
 
 [data-theme='dark'] body {
-  background: #000;
+  background: #0f1115;
 }
 
 /* Full-height pages (logs) must not create a second page scrollbar. */

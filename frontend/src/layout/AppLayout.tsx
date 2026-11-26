@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Avatar, Button, Drawer, Dropdown, Layout, Menu, Space, Typography, theme } from 'antd'
+import { Avatar, Button, Drawer, Dropdown, Grid, Layout, Menu, Space, Typography, theme } from 'antd'
 import { LogoutOutlined, MenuOutlined, SearchOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { menu } from '../menu'
@@ -16,7 +16,8 @@ export default function AppLayout() {
   const { token } = theme.useToken()
   const [drawer, setDrawer] = useState(false)
   const [palette, setPalette] = useState(false)
-  const isMobile = useIsMobile()
+  const screens = Grid.useBreakpoint()
+  const isMobile = !screens.lg
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -85,7 +86,7 @@ export default function AppLayout() {
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: 6,
-                  color: isActive ? token.colorPrimary : 'rgba(0,0,0,0.62)',
+                  color: isActive ? token.colorPrimary : token.colorTextSecondary,
                   borderBottom: `2px solid ${isActive ? token.colorPrimary : 'transparent'}`,
                   fontWeight: isActive ? 600 : 400,
                   fontSize: 13,
@@ -152,15 +153,4 @@ export default function AppLayout() {
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
     </Layout>
   )
-}
-
-function useIsMobile() {
-  const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches)
-  useEffect(() => {
-    const media = window.matchMedia('(max-width: 767px)')
-    const onChange = (event: MediaQueryListEvent) => setMobile(event.matches)
-    media.addEventListener('change', onChange)
-    return () => media.removeEventListener('change', onChange)
-  }, [])
-  return mobile
 }

@@ -4,8 +4,8 @@ import { useMemo, type CSSProperties } from 'react'
 /**
  * Theme tokens exposed as CSS custom properties. The page root sets them, so
  * every row/table rule can stay in the CSS module while still supporting the
- * light and dark antd algorithms. Modals render in a portal, so they set the
- * same properties on their own wrapper.
+ * light and dark antd algorithms. Modals and drawers render in a portal, so
+ * they set the same properties on their own wrapper.
  */
 export function useLogThemeVars(): CSSProperties {
   const { token } = theme.useToken()
@@ -23,7 +23,7 @@ export function useLogThemeVars(): CSSProperties {
         '--logs-warn-bg': token.colorWarningBg,
         '--logs-error-text': token.colorErrorText,
         '--logs-error-bg': token.colorErrorBg,
-        '--logs-fill': token.colorFillTertiary,
+        '--logs-radius': `${token.borderRadius}px`,
       }) as CSSProperties,
     [token],
   )

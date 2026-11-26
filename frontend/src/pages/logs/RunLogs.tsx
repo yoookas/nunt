@@ -527,6 +527,7 @@ export default function RunLogs() {
           <div className={styles.toolbar}>
             <Toolbar>
               <Select
+                size="small"
                 value={level}
                 onChange={setLevel}
                 options={LEVEL_OPTIONS}
@@ -534,6 +535,7 @@ export default function RunLogs() {
                 aria-label="日志级别"
               />
               <Input
+                size="small"
                 allowClear
                 prefix={<SearchOutlined />}
                 placeholder="按关键字过滤…"

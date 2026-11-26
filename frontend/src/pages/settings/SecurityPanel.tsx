@@ -6,7 +6,6 @@ import {
   Col,
   Form,
   Input,
-  Modal,
   Row,
   Space,
   Spin,
@@ -15,10 +14,11 @@ import {
   Typography,
   theme,
 } from 'antd'
-import { CopyOutlined, ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
+import { CopyOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { api, errorText } from '../../api'
 import { copyText } from '../../clipboard'
-import { Muted, Panel, useIsMobile } from '../../components'
+import { InlineConfirm, SettingsSection } from './ui'
+import { Muted, useIsMobile } from '../../components'
 
 type Flow = '' | 'password' | 'scan' | 'codes' | 'disable' | 'regen'
 type FactorAction = 'disable' | 'regen'
@@ -157,7 +157,6 @@ export default function SecurityPanel({ refreshToken }: Props) {
       // the error stays visible in the panel.
       setError(errorText(err))
       setPendingAction(null)
-      setPendingValues(null)
     } finally {
       setBusy(false)
     }
@@ -207,226 +206,231 @@ export default function SecurityPanel({ refreshToken }: Props) {
       : '重新生成会立即作废全部旧恢复码，之前保存的恢复码将无法再使用。'
 
   return (
-    <>
-      <Panel
-        title="双因子认证（TOTP）"
-        subtitle="密码之外再要一个验证器生成的 6 位码；启用后请把恢复码保存在离线位置"
-        extra={
-          <Space size={8}>
-            {statusTag}
-            <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>
-              刷新
-            </Button>
-          </Space>
-        }
-      >
-        <Spin spinning={loading}>
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            {error ? (
-              <Alert
-                type="error"
-                showIcon
-                message={error}
-                closable
-                onClose={() => setError('')}
-              />
-            ) : null}
+    <SettingsSection
+      title="双因子认证（TOTP）"
+      description="密码之外再要一个验证器生成的 6 位码；启用后请把恢复码保存在离线位置"
+      extra={statusTag}
+      first
+    >
+      <Spin spinning={loading}>
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          {error ? (
+            <Alert
+              type="error"
+              showIcon
+              message={error}
+              closable
+              onClose={() => setError('')}
+            />
+          ) : null}
 
-            {flow === '' ? (
-              enabled ? (
-                <Space direction="vertical" size={14} style={{ width: '100%' }}>
-                  <Alert
-                    type={left === 0 ? 'warning' : 'success'}
-                    showIcon
-                    message={
-                      left === 0
-                        ? '验证器已绑定，但恢复码已经用完'
-                        : `验证器已绑定，剩余恢复码 ${left} 枚`
-                    }
-                    description={
-                      left === 0
-                        ? '建议立即重新生成恢复码并保存到离线位置，避免验证器丢失后无法登录。'
-                        : '恢复码每枚只能使用一次。设备丢失时用它代替动态验证码登录。'
-                    }
-                  />
-                  <Space wrap>
-                    <Button onClick={() => setFlow('regen')}>重新生成恢复码</Button>
-                    <Button danger onClick={() => setFlow('disable')}>
-                      关闭双因子
-                    </Button>
-                  </Space>
-                </Space>
-              ) : (
-                <Space direction="vertical" size={14} style={{ width: '100%' }}>
-                  <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
-                    启用后登录需要两个步骤，适合管理后台暴露在公网或只经反向代理访问的场景。
-                    验证器密钥只在本页显示一次，请妥善保存恢复码。
-                  </Typography.Paragraph>
-                  <div>
-                    <Button
-                      type="primary"
-                      icon={<SafetyCertificateOutlined />}
-                      onClick={() => setFlow('password')}
-                    >
-                      启用双因子
-                    </Button>
-                  </div>
-                </Space>
-              )
-            ) : null}
-
-            {flow === 'password' ? (
-              <Form layout="vertical" requiredMark={false} onFinish={startSetup}>
-                <Steps
-                  size="small"
-                  current={0}
-                  style={{ marginBottom: 20 }}
-                  items={[{ title: '验证密码' }, { title: '添加验证器' }, { title: '保存恢复码' }]}
-                />
+          {flow === '' ? (
+            enabled ? (
+              <Space direction="vertical" size={14} style={{ width: '100%' }}>
                 <Alert
-                  type="info"
+                  type={left === 0 ? 'warning' : 'success'}
                   showIcon
-                  style={{ marginBottom: 16 }}
-                  message="先确认当前密码"
-                  description="验证密码后服务端会生成新的 TOTP 密钥，密钥 5 分钟内有效。"
+                  message={
+                    left === 0
+                      ? '验证器已绑定，但恢复码已经用完'
+                      : `验证器已绑定，剩余恢复码 ${left} 枚`
+                  }
+                  description={
+                    left === 0
+                      ? '建议立即重新生成恢复码并保存到离线位置，避免验证器丢失后无法登录。'
+                      : '恢复码每枚只能使用一次。设备丢失时用它代替动态验证码登录。'
+                  }
                 />
+                <Space wrap>
+                  <Button onClick={() => setFlow('regen')}>重新生成恢复码</Button>
+                  <Button danger onClick={() => setFlow('disable')}>
+                    关闭双因子
+                  </Button>
+                </Space>
+              </Space>
+            ) : (
+              <Space direction="vertical" size={14} style={{ width: '100%' }}>
+                <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
+                  启用后登录需要两个步骤，适合管理后台暴露在公网或只经反向代理访问的场景。
+                  验证器密钥只在本页显示一次，请妥善保存恢复码。
+                </Typography.Paragraph>
+                <div>
+                  <Button
+                    type="primary"
+                    icon={<SafetyCertificateOutlined />}
+                    onClick={() => setFlow('password')}
+                  >
+                    启用双因子
+                  </Button>
+                </div>
+              </Space>
+            )
+          ) : null}
+
+          {flow === 'password' ? (
+            <Form layout="vertical" requiredMark={false} onFinish={startSetup}>
+              <Steps
+                size="small"
+                current={0}
+                style={{ marginBottom: 20 }}
+                items={[{ title: '验证密码' }, { title: '添加验证器' }, { title: '保存恢复码' }]}
+              />
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message="先确认当前密码"
+                description="验证密码后服务端会生成新的 TOTP 密钥，密钥 5 分钟内有效。"
+              />
+              <Form.Item
+                name="password"
+                label="当前密码"
+                rules={[{ required: true, message: '请输入当前密码' }]}
+              >
+                <Input.Password autoFocus autoComplete="current-password" />
+              </Form.Item>
+              <Space wrap>
+                <Button type="primary" htmlType="submit" loading={busy}>
+                  下一步
+                </Button>
+                <Button onClick={reset} disabled={busy}>
+                  取消
+                </Button>
+              </Space>
+            </Form>
+          ) : null}
+
+          {flow === 'scan' ? (
+            <Space direction="vertical" size={16} style={{ width: '100%' }}>
+              <Steps
+                size="small"
+                current={1}
+                style={{ marginBottom: 4 }}
+                items={[{ title: '验证密码' }, { title: '添加验证器' }, { title: '保存恢复码' }]}
+              />
+              <Alert
+                type="info"
+                showIcon
+                message="请手动添加验证器账户"
+                description="当前前端构建未包含二维码生成库，暂不显示二维码。请复制下方密钥，在 1Password、Authy、Google Authenticator 等验证器中手动添加；二维码会在后续版本补上。"
+              />
+              <Row gutter={[16, 16]}>
+                <Col xs={24} md={12}>
+                  <Typography.Text strong>密钥（Base32）</Typography.Text>
+                  <div style={{ marginTop: 8 }}>{codeBlock(secret)}</div>
+                  <Button
+                    size="small"
+                    icon={<CopyOutlined />}
+                    style={{ marginTop: 8 }}
+                    onClick={() => copy(secret, '密钥')}
+                  >
+                    复制密钥
+                  </Button>
+                </Col>
+                <Col xs={24} md={12}>
+                  <Typography.Text strong>otpauth URI</Typography.Text>
+                  <div style={{ marginTop: 8 }}>{codeBlock(uri)}</div>
+                  <Button
+                    size="small"
+                    icon={<CopyOutlined />}
+                    style={{ marginTop: 8 }}
+                    onClick={() => copy(uri, 'otpauth URI')}
+                  >
+                    复制 URI
+                  </Button>
+                </Col>
+              </Row>
+              <div>
+                <Muted>
+                  验证器账户名固定为 <span className="mono">nunt:admin</span>，类型 TOTP、6 位、30 秒。密钥只在本页显示，离开后需重新开始。
+                </Muted>
+              </div>
+              <Form layout="vertical" requiredMark={false} onFinish={confirmSetup}>
                 <Form.Item
-                  name="password"
-                  label="当前密码"
-                  rules={[{ required: true, message: '请输入当前密码' }]}
+                  name="code"
+                  label="验证码"
+                  rules={[
+                    { required: true, message: '请输入验证器显示的 6 位验证码' },
+                    { pattern: /^\d{6}$/, message: '请输入 6 位数字验证码' },
+                  ]}
                 >
-                  <Input.Password autoFocus autoComplete="current-password" />
+                  <Input
+                    autoFocus
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="输入验证器显示的 6 位码"
+                    style={{ maxWidth: 260 }}
+                  />
                 </Form.Item>
                 <Space wrap>
                   <Button type="primary" htmlType="submit" loading={busy}>
-                    下一步
+                    确认启用
                   </Button>
                   <Button onClick={reset} disabled={busy}>
                     取消
                   </Button>
                 </Space>
               </Form>
-            ) : null}
+            </Space>
+          ) : null}
 
-            {flow === 'scan' ? (
-              <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                <Steps
-                  size="small"
-                  current={1}
-                  style={{ marginBottom: 4 }}
-                  items={[{ title: '验证密码' }, { title: '添加验证器' }, { title: '保存恢复码' }]}
-                />
-                <Alert
-                  type="info"
-                  showIcon
-                  message="请手动添加验证器账户"
-                  description="当前前端构建未包含二维码生成库，暂不显示二维码。请复制下方密钥，在 1Password、Authy、Google Authenticator 等验证器中手动添加；二维码会在后续版本补上。"
-                />
-                <Row gutter={[16, 16]}>
-                  <Col xs={24} md={12}>
-                    <Typography.Text strong>密钥（Base32）</Typography.Text>
-                    <div style={{ marginTop: 8 }}>{codeBlock(secret)}</div>
-                    <Button
-                      size="small"
-                      icon={<CopyOutlined />}
-                      style={{ marginTop: 8 }}
-                      onClick={() => copy(secret, '密钥')}
-                    >
-                      复制密钥
-                    </Button>
-                  </Col>
-                  <Col xs={24} md={12}>
-                    <Typography.Text strong>otpauth URI</Typography.Text>
-                    <div style={{ marginTop: 8 }}>{codeBlock(uri)}</div>
-                    <Button
-                      size="small"
-                      icon={<CopyOutlined />}
-                      style={{ marginTop: 8 }}
-                      onClick={() => copy(uri, 'otpauth URI')}
-                    >
-                      复制 URI
-                    </Button>
-                  </Col>
-                </Row>
-                <div>
-                  <Muted>
-                    验证器账户名固定为 <span className="mono">nunt:admin</span>，类型 TOTP、6 位、30 秒。密钥只在本页显示，离开后需重新开始。
-                  </Muted>
-                </div>
-                <Form layout="vertical" requiredMark={false} onFinish={confirmSetup}>
-                  <Form.Item
-                    name="code"
-                    label="验证码"
-                    rules={[
-                      { required: true, message: '请输入验证器显示的 6 位验证码' },
-                      { pattern: /^\d{6}$/, message: '请输入 6 位数字验证码' },
-                    ]}
-                  >
-                    <Input
-                      autoFocus
-                      inputMode="numeric"
-                      maxLength={6}
-                      placeholder="输入验证器显示的 6 位码"
-                      style={{ maxWidth: 260 }}
-                    />
-                  </Form.Item>
-                  <Space wrap>
-                    <Button type="primary" htmlType="submit" loading={busy}>
-                      确认启用
-                    </Button>
-                    <Button onClick={reset} disabled={busy}>
-                      取消
-                    </Button>
-                  </Space>
-                </Form>
+          {flow === 'codes' ? (
+            <Space direction="vertical" size={16} style={{ width: '100%' }}>
+              <Steps
+                size="small"
+                current={3}
+                items={[{ title: '验证密码' }, { title: '添加验证器' }, { title: '保存恢复码' }]}
+              />
+              <Alert
+                type="warning"
+                showIcon
+                message="恢复码只显示这一次"
+                description="每枚恢复码只能用一次。请现在保存到离线位置（密码管理器或打印），设备丢失时用它登录。"
+              />
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 1fr))',
+                  gap: 8,
+                  padding: 12,
+                  border: `1px solid ${token.colorBorderSecondary}`,
+                  borderRadius: token.borderRadius,
+                  background: token.colorFillQuaternary,
+                }}
+              >
+                {codes.map((item) => (
+                  <span key={item} className="mono" style={{ fontSize: 14 }}>
+                    {item}
+                  </span>
+                ))}
+              </div>
+              <Space wrap>
+                <Button icon={<CopyOutlined />} onClick={() => copy(codes.join('\n'), '恢复码')}>
+                  复制全部
+                </Button>
+                <Button type="primary" onClick={reset}>
+                  我已保存
+                </Button>
               </Space>
-            ) : null}
+            </Space>
+          ) : null}
 
-            {flow === 'codes' ? (
-              <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                <Steps
-                  size="small"
-                  current={3}
-                  items={[{ title: '验证密码' }, { title: '添加验证器' }, { title: '保存恢复码' }]}
-                />
-                <Alert
-                  type="warning"
-                  showIcon
-                  message="恢复码只显示这一次"
-                  description="每枚恢复码只能用一次。请现在保存到离线位置（密码管理器或打印），设备丢失时用它登录。"
-                />
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 1fr))',
-                    gap: 8,
-                    padding: 12,
-                    border: `1px solid ${token.colorBorderSecondary}`,
-                    borderRadius: token.borderRadius,
-                    background: token.colorFillQuaternary,
-                  }}
-                >
-                  {codes.map((item) => (
-                    <span key={item} className="mono" style={{ fontSize: 14 }}>
-                      {item}
-                    </span>
-                  ))}
-                </div>
-                <Space wrap>
-                  <Button icon={<CopyOutlined />} onClick={() => copy(codes.join('\n'), '恢复码')}>
-                    复制全部
-                  </Button>
-                  <Button type="primary" onClick={reset}>
-                    我已保存
-                  </Button>
-                </Space>
-              </Space>
-            ) : null}
-
-            {flow === 'disable' || flow === 'regen' ? (
+          {flow === 'disable' || flow === 'regen' ? (
+            pendingAction ? (
+              <InlineConfirm
+                title={modalTitle}
+                description={modalText}
+                confirmText={pendingAction === 'disable' ? '关闭双因子' : '重新生成'}
+                danger={pendingAction === 'disable'}
+                busy={busy}
+                onConfirm={() => void runPending()}
+                onCancel={() => setPendingAction(null)}
+              />
+            ) : (
               <Form
                 layout="vertical"
                 requiredMark={false}
+                initialValues={pendingValues || undefined}
                 onFinish={(values) => askFactor(flow === 'disable' ? 'disable' : 'regen', values)}
               >
                 <Typography.Paragraph type="secondary" style={{ marginBottom: 16 }}>
@@ -467,35 +471,10 @@ export default function SecurityPanel({ refreshToken }: Props) {
                   </Button>
                 </Space>
               </Form>
-            ) : null}
-          </Space>
-        </Spin>
-      </Panel>
-
-      <Modal
-        open={pendingAction !== null}
-        title={modalTitle}
-        okText={pendingAction === 'disable' ? '关闭双因子' : '重新生成'}
-        cancelText="取消"
-        okButtonProps={{ danger: pendingAction === 'disable' }}
-        confirmLoading={busy}
-        maskClosable={!busy}
-        onCancel={() => {
-          if (busy) return
-          setPendingAction(null)
-          setPendingValues(null)
-        }}
-        onOk={() => void runPending()}
-      >
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Typography.Text>{modalText}</Typography.Text>
-          <Alert
-            type={pendingAction === 'disable' ? 'error' : 'warning'}
-            showIcon
-            message={pendingAction === 'disable' ? '关闭后安全性会降低' : '旧恢复码将立即作废'}
-          />
+            )
+          ) : null}
         </Space>
-      </Modal>
-    </>
+      </Spin>
+    </SettingsSection>
   )
 }

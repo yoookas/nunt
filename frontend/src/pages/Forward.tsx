@@ -4,108 +4,112 @@ import {
   App,
   Badge,
   Button,
-  Card,
-  Col,
+  Empty,
+  Grid,
   Input,
-  Row,
   Select,
   Space,
-  Statistic,
+  Spin,
   Switch,
   Tag,
   Tooltip,
   Typography,
+  theme,
 } from 'antd'
 import {
   DeleteOutlined,
-  EditOutlined,
-  FileTextOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
-import type { TableColumnsType } from 'antd'
 import { api, ApiError, errorText } from '../api'
 import { fmtBytes } from '../format'
-import {
-  confirmDelete,
-  DataTable,
-  Muted,
-  PageHeader,
-  Panel,
-  Toolbar,
-  useIsMobile,
-} from '../components'
+import { confirmDelete, Muted } from '../components'
+import { EntityRow, PaneTitle, Workspace, type ItemStatus } from '../components/Workspace'
 import { usePolling } from '../usePolling'
-import ForwardRuleModal from './forward/RuleModal'
-import ForwardLogsModal from './forward/LogsModal'
+import ForwardRuleForm from './forward/RuleForm'
+import ForwardLogsPanel from './forward/LogsPanel'
 import {
-  limitText,
   num,
   PROTOCOL_LABEL,
   PROTOCOL_OPTIONS,
   protocolColor,
   ruleAccessColor,
   ruleAccessText,
-  ruleAccessTip,
-  timeoutText,
   type ForwardRule,
 } from './forward/types'
 
-const PAGINATION = { pageSize: 10, hideOnSinglePage: true, showSizeChanger: false }
-
-function StatTile({ title, value, hint }: { title: string; value: string | number; hint?: ReactNode }) {
+function Metric({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode }) {
+  const { token } = theme.useToken()
   return (
-    <Card size="small" styles={{ body: { padding: 12 } }}>
-      <Statistic
-        title={title}
-        value={value}
-        valueStyle={{ fontSize: 20, fontWeight: 600, lineHeight: 1.3 }}
-      />
+    <div style={{ padding: '8px 10px', borderRadius: 8, background: token.colorFillQuaternary, minWidth: 0 }}>
+      <div style={{ fontSize: 12, color: token.colorTextSecondary }}>{label}</div>
+      <div
+        title={typeof value === 'string' ? value : undefined}
+        style={{ fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+      >
+        {value}
+      </div>
       {hint ? (
-        <div style={{ marginTop: 4 }}>
-          <Muted>{hint}</Muted>
+        <div style={{ fontSize: 11, color: token.colorTextTertiary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {hint}
         </div>
       ) : null}
-    </Card>
+    </div>
   )
 }
 
-function LiveHint({ updatedAt, failed }: { updatedAt: number | null; failed: boolean }) {
-  const text = failed
-    ? '自动刷新失败'
-    : updatedAt
-      ? `更新于 ${new Date(updatedAt).toLocaleTimeString('zh-CN', { hour12: false })}`
-      : '等待自动刷新'
+function Section({
+  title,
+  extra,
+  first,
+  children,
+}: {
+  title: ReactNode
+  extra?: ReactNode
+  first?: boolean
+  children: ReactNode
+}) {
+  const { token } = theme.useToken()
   return (
-    <Tooltip title="每 5 秒自动刷新连接数与流量">
-      <Space size={4}>
-        <Badge status={failed ? 'error' : updatedAt ? 'processing' : 'default'} />
-        <Muted>{text}</Muted>
-      </Space>
-    </Tooltip>
+    <div
+      style={{
+        marginTop: first ? 4 : 22,
+        paddingTop: first ? 0 : 18,
+        borderTop: first ? undefined : `1px solid ${token.colorBorderSecondary}`,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+        <Typography.Text strong>{title}</Typography.Text>
+        {extra ? <div style={{ marginLeft: 'auto' }}>{extra}</div> : null}
+      </div>
+      {children}
+    </div>
   )
+}
+
+function ruleStatus(rule: ForwardRule): ItemStatus {
+  if (rule.disabled) return 'warn'
+  if (!rule.enable) return 'off'
+  return rule.listening ? 'ok' : 'warn'
 }
 
 export default function Forward() {
   const { message } = App.useApp()
-  const isMobile = useIsMobile()
+  const { token } = theme.useToken()
+  const screens = Grid.useBreakpoint()
+  const desktop = Boolean(screens.lg)
+
   const [rules, setRules] = useState<ForwardRule[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
   const [busyId, setBusyId] = useState('')
+  const [saving, setSaving] = useState(false)
   const [keyword, setKeyword] = useState('')
   const [protoFilter, setProtoFilter] = useState('all')
-  const [editor, setEditor] = useState<{ open: boolean; rule: ForwardRule | null; seq: number }>({
-    open: false,
-    rule: null,
-    seq: 0,
-  })
-  const [logsView, setLogsView] = useState<{ open: boolean; ruleId: string; seq: number }>({
-    open: false,
-    ruleId: '',
-    seq: 0,
-  })
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [draftEnable, setDraftEnable] = useState(true)
 
   const fetchRules = useCallback(async () => {
     const data = await api.get<ForwardRule[] | { rules?: ForwardRule[]; items?: ForwardRule[] }>(
@@ -139,7 +143,7 @@ export default function Forward() {
   }, [loadRules])
 
   // Live counters live on the rules endpoint, so a quiet re-read is enough. A
-  // failing poll only flips the hint: no toast spam from a background refresh.
+  // failing poll only flips the badge: no toast spam from a background refresh.
   const live = usePolling(async () => {
     try {
       applyRules(await fetchRules())
@@ -150,24 +154,9 @@ export default function Forward() {
   }, 5000)
 
   const summary = useMemo(() => {
-    const out = {
-      enabled: 0,
-      listening: 0,
-      portBusy: 0,
-      active: 0,
-      total: 0,
-      up: 0,
-      down: 0,
-      rejectedRule: 0,
-      rejectedIp: 0,
-    }
+    const out = { enabled: 0, listening: 0, portBusy: 0, active: 0 }
     for (const rule of rules) {
       out.active += num(rule.activeConns)
-      out.total += num(rule.totalConns)
-      out.up += num(rule.upBytes)
-      out.down += num(rule.downBytes)
-      out.rejectedRule += num(rule.rejectedRuleLimit)
-      out.rejectedIp += num(rule.rejectedIpLimit)
       if (rule.disabled) out.portBusy += 1
       if (rule.enable && !rule.disabled) out.enabled += 1
       if (rule.listening) out.listening += 1
@@ -186,6 +175,71 @@ export default function Forward() {
         .includes(q)
     })
   }, [rules, protoFilter, keyword])
+
+  const selectedRule = useMemo(
+    () => rules.find((rule) => rule.id === selectedId) || null,
+    [rules, selectedId],
+  )
+
+  // Desktop keeps a detail pane; without a manual choice, show the first rule.
+  useEffect(() => {
+    if (!desktop || creating) return
+    if (selectedId && rules.some((rule) => rule.id === selectedId)) return
+    setSelectedId(rules.length ? rules[0].id : null)
+  }, [desktop, creating, rules, selectedId])
+
+  const selectRule = (rule: ForwardRule) => {
+    setCreating(false)
+    setSelectedId(String(rule.id))
+  }
+
+  const openCreate = () => {
+    setCreating(true)
+    setSelectedId(null)
+    setDraftEnable(true)
+  }
+
+  const backToList = () => {
+    setCreating(false)
+    setSelectedId(null)
+  }
+
+  const saveRule = async (payload: Record<string, unknown>) => {
+    const current = selectedRule
+    const isCreate = creating || !current
+    setSaving(true)
+    try {
+      const saved = isCreate
+        ? await api.post<ForwardRule>('/api/v1/forward/rules', payload)
+        : await api.put<ForwardRule>(`/api/v1/forward/rules/${encodeURIComponent(current.id)}`, payload)
+      const next = await fetchRules()
+      setRules(next)
+      setLoadError(null)
+
+      let id = String(saved?.id || '')
+      if (!id && isCreate) {
+        const name = String(payload.name || '')
+        id = next.find((rule) => (rule.name || '') === name)?.id || ''
+      }
+      if (!id) id = current?.id || ''
+      const fresh = next.find((rule) => rule.id === id)
+      if (fresh?.disabled && payload.enable !== false) {
+        message.warning(
+          isCreate
+            ? '规则已创建，但监听端口被占用，后端已自动停用；请释放端口后重新启用'
+            : '规则已保存，但监听端口被占用，后端已自动停用；请释放端口后重新启用',
+        )
+      } else {
+        message.success(isCreate ? '规则已创建' : '规则已保存')
+      }
+      setCreating(false)
+      setSelectedId(id || (desktop ? next[0]?.id ?? null : null))
+    } catch (err) {
+      message.error(errorText(err))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const toggleRule = async (rule: ForwardRule, next: boolean) => {
     const id = String(rule.id)
@@ -215,7 +269,11 @@ export default function Forward() {
         try {
           await api.del(`/api/v1/forward/rules/${encodeURIComponent(String(rule.id))}`)
           message.success('规则已删除')
-          await loadRules(true)
+          const next = await fetchRules()
+          setRules(next)
+          setLoadError(null)
+          setCreating(false)
+          setSelectedId(desktop ? next[0]?.id ?? null : null)
         } catch (err) {
           message.error(errorText(err))
         }
@@ -223,255 +281,266 @@ export default function Forward() {
     )
   }
 
-  const openCreate = () => setEditor((prev) => ({ open: true, rule: null, seq: prev.seq + 1 }))
-  const openEdit = (rule: ForwardRule) => setEditor((prev) => ({ open: true, rule, seq: prev.seq + 1 }))
-  const openLogs = (ruleId: string) =>
-    setLogsView((prev) => ({ open: true, ruleId, seq: prev.seq + 1 }))
+  const liveLabel = live.failed
+    ? '自动刷新失败'
+    : live.updatedAt
+      ? `更新于 ${new Date(live.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })}`
+      : '等待自动刷新'
 
-  const columns: TableColumnsType<ForwardRule> = [
-    {
-      title: '规则',
-      key: 'rule',
-      width: 280,
-      render: (_value, row) => (
-        <div style={{ minWidth: 200 }}>
-          <Space size={6} wrap>
-            <Typography.Text strong style={{ wordBreak: 'break-all' }}>
-              {row.name || row.id}
-            </Typography.Text>
-            <Tag color={protocolColor(row.protocol)}>
-              {PROTOCOL_LABEL[row.protocol || ''] || row.protocol || '-'}
-            </Tag>
-            {row.listening ? <Tag color="processing">监听中</Tag> : null}
-            {row.disabled ? <Tag color="red">端口占用</Tag> : null}
-          </Space>
-          <div
-            className="mono"
-            style={{ fontSize: 12, marginTop: 2, wordBreak: 'break-all' }}
-            title={`${row.srcAddr || '-'} → ${row.dstAddr || '-'}`}
-          >
-            <Typography.Text type="secondary">
-              {row.srcAddr || '-'} → {row.dstAddr || '-'}
-            </Typography.Text>
-          </div>
-          {row.remark ? <Muted>{row.remark}</Muted> : null}
-        </div>
-      ),
-    },
-    {
-      title: '访问 / 限制',
-      key: 'limits',
-      width: 230,
-      responsive: ['lg'],
-      render: (_value, row) => {
-        const rejected = num(row.rejectedRuleLimit) + num(row.rejectedIpLimit)
-        return (
-          <div>
-            <Space size={4} wrap>
-              <Tooltip title={ruleAccessTip(row)}>
-                <Tag color={ruleAccessColor(row)}>{ruleAccessText(row)}</Tag>
-              </Tooltip>
-              <Muted>超时 {timeoutText(row.timeoutSec)}</Muted>
-            </Space>
-            <div style={{ marginTop: 2 }}>
-              <Muted>
-                并发 {limitText(row.connLimit)}/{limitText(row.connLimitPerIp)}
-                {rejected > 0 ? ` · 拒绝 ${rejected}` : ''}
-              </Muted>
-            </div>
-          </div>
-        )
-      },
-    },
-    {
-      title: '实时统计',
-      key: 'stats',
-      width: 190,
-      responsive: ['md'],
-      render: (_value, row) => (
-        <div style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
-          <div>
-            活跃 {num(row.activeConns)} · 累计 {num(row.totalConns)}
-          </div>
-          <Muted>
-            ↑ {fmtBytes(row.upBytes)} · ↓ {fmtBytes(row.downBytes)}
-          </Muted>
-        </div>
-      ),
-    },
-    {
-      title: '状态',
-      key: 'status',
-      width: 150,
-      render: (_value, row) => {
-        const id = String(row.id)
-        return (
-          <Space size={8} style={{ whiteSpace: 'nowrap' }}>
-            <Switch
-              size="small"
-              checked={Boolean(row.enable) && !row.disabled}
-              loading={busyId === id}
-              disabled={busyId !== '' && busyId !== id}
-              onChange={(checked) => void toggleRule(row, checked)}
-              aria-label={`${row.name || row.id} 启停`}
-            />
-            <Muted>{row.disabled ? '端口被占用' : row.enable ? '启用' : '停用'}</Muted>
-          </Space>
-        )
-      },
-    },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 210,
-      render: (_value, row) => (
-        <Space size={0} wrap>
-          <Button
-            type="link"
-            size="small"
-            icon={<FileTextOutlined />}
-            onClick={() => openLogs(String(row.id))}
-          >
-            日志
-          </Button>
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(row)}>
-            编辑
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => removeRule(row)}
-          >
-            删除
-          </Button>
-        </Space>
-      ),
-    },
-  ]
-
-  return (
+  const listPane = (
     <div>
-      <PageHeader
+      <PaneTitle
         title="端口转发"
-        subtitle="TCP / UDP 端口映射、源地址访问控制、并发上限与实时运行统计"
+        subtitle={`共 ${rules.length} · 启用 ${summary.enabled}`}
         extra={
-          <>
-            <LiveHint updatedAt={live.updatedAt} failed={live.failed} />
-            <Button icon={<ReloadOutlined />} onClick={() => void loadRules()} loading={loading}>
-              刷新
+          <Space size={4}>
+            <Tooltip title={liveLabel}>
+              <Badge status={live.failed ? 'error' : live.updatedAt ? 'processing' : 'default'} />
+            </Tooltip>
+            <Button
+              size="small"
+              type="text"
+              icon={<ReloadOutlined />}
+              loading={loading}
+              aria-label="刷新规则"
+              onClick={() => void loadRules()}
+            />
+            <Button size="small" type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              新建
             </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-              新建规则
-            </Button>
-          </>
+          </Space>
         }
       />
 
-      {loadError ? (
-        <Alert
-          type="error"
-          showIcon
-          style={{ marginBottom: 16 }}
-          message={`加载转发规则失败：${errorText(loadError)}`}
-          action={
-            <Button size="small" onClick={() => void loadRules()}>
-              重试
-            </Button>
-          }
+      <div style={{ padding: '10px 12px', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
+        <Input
+          size="small"
+          allowClear
+          prefix={<SearchOutlined />}
+          placeholder="搜索名称 / 监听 / 目标地址"
+          value={keyword}
+          onChange={(event) => setKeyword(event.target.value)}
         />
-      ) : null}
-
-      <Row gutter={[8, 8]} style={{ marginBottom: 16 }}>
-        <Col xs={12} sm={12} md={8} xl={4}>
-          <StatTile
-            title="转发规则"
-            value={rules.length}
-            hint={`启用 ${summary.enabled} · 监听 ${summary.listening}`}
-          />
-        </Col>
-        <Col xs={12} sm={12} md={8} xl={4}>
-          <StatTile title="活跃连接" value={summary.active} hint="当前正在转发的连接数" />
-        </Col>
-        <Col xs={12} sm={12} md={8} xl={4}>
-          <StatTile title="累计连接" value={summary.total} hint="进程启动以来接受的连接" />
-        </Col>
-        <Col xs={12} sm={12} md={8} xl={4}>
-          <StatTile title="上行流量" value={fmtBytes(summary.up)} hint="客户端 → 目标" />
-        </Col>
-        <Col xs={12} sm={12} md={8} xl={4}>
-          <StatTile title="下行流量" value={fmtBytes(summary.down)} hint="目标 → 客户端" />
-        </Col>
-        <Col xs={12} sm={12} md={8} xl={4}>
-          <StatTile
-            title="被限流拒绝"
-            value={summary.rejectedRule + summary.rejectedIp}
-            hint={`规则上限 ${summary.rejectedRule} · 单 IP ${summary.rejectedIp}`}
-          />
-        </Col>
-      </Row>
-
-      <Panel title="转发规则">
-        <Toolbar>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
           <Select
+            size="small"
             value={protoFilter}
             onChange={setProtoFilter}
             options={[{ value: 'all', label: '全部协议' }, ...PROTOCOL_OPTIONS]}
-            style={{ width: isMobile ? '100%' : 140 }}
+            style={{ flex: 1, minWidth: 110 }}
             aria-label="协议筛选"
           />
-          <Input
-            allowClear
-            prefix={<SearchOutlined />}
-            placeholder="搜索名称 / 监听 / 目标地址"
-            value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
-            style={{ width: isMobile ? '100%' : 280 }}
-          />
-          <Button icon={<FileTextOutlined />} onClick={() => openLogs('')}>
-            访问日志
-          </Button>
           <Muted>
-            共 {rules.length} 条 · 显示 {filtered.length} 条
+            {filtered.length}/{rules.length}
+            {summary.portBusy ? ` · 端口占用 ${summary.portBusy}` : ''}
           </Muted>
-        </Toolbar>
+        </div>
+      </div>
 
-        {summary.portBusy > 0 ? (
+      {loadError ? (
+        <div style={{ padding: 10 }}>
           <Alert
-            type="warning"
+            type="error"
             showIcon
-            style={{ marginTop: 12 }}
-            message={`${summary.portBusy} 条规则因监听端口被占用而自动停用`}
-            description="释放端口后，打开列表中的启停开关即可重新尝试绑定。"
-          />
-        ) : null}
-
-        <div style={{ marginTop: 12 }}>
-          <DataTable<ForwardRule>
-            rowKey={(row) => String(row.id)}
-            columns={columns}
-            dataSource={filtered}
-            loading={loading}
-            pagination={PAGINATION}
+            message="加载规则失败"
+            description={errorText(loadError)}
+            action={
+              <Button size="small" onClick={() => void loadRules()}>
+                重试
+              </Button>
+            }
           />
         </div>
-      </Panel>
+      ) : null}
 
-      <ForwardRuleModal
-        key={editor.seq}
-        open={editor.open}
-        rule={editor.rule}
-        onClose={() => setEditor((prev) => ({ ...prev, open: false }))}
-        onSaved={() => loadRules(true)}
-      />
-      <ForwardLogsModal
-        key={logsView.seq}
-        open={logsView.open}
-        rules={rules}
-        initialRuleId={logsView.ruleId}
-        onClose={() => setLogsView((prev) => ({ ...prev, open: false }))}
-      />
+      <div style={desktop ? { maxHeight: 'calc(100dvh - 280px)', overflowY: 'auto' } : undefined}>
+        {loading && !rules.length ? (
+          <div style={{ padding: 28, textAlign: 'center' }}>
+            <Spin size="small" />
+          </div>
+        ) : null}
+
+        {filtered.map((rule) => (
+          <EntityRow
+            key={rule.id}
+            title={rule.name || rule.id}
+            subtitle={
+              <span className="mono">
+                {rule.srcAddr || '-'} → {rule.dstAddr || '-'}
+              </span>
+            }
+            meta={
+              <Space size={4} wrap>
+                <Tag color={protocolColor(rule.protocol)} style={{ marginInlineEnd: 0 }}>
+                  {PROTOCOL_LABEL[rule.protocol || ''] || rule.protocol || '-'}
+                </Tag>
+                <Tag color={ruleAccessColor(rule)} style={{ marginInlineEnd: 0 }}>
+                  {ruleAccessText(rule)}
+                </Tag>
+                <Muted>
+                  活跃 {num(rule.activeConns)} · ↑ {fmtBytes(rule.upBytes)}
+                </Muted>
+              </Space>
+            }
+            status={ruleStatus(rule)}
+            selected={!creating && selectedRule?.id === rule.id}
+            onClick={() => selectRule(rule)}
+          />
+        ))}
+
+        {!loading && !filtered.length ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={rules.length ? '没有符合筛选条件的规则' : '还没有端口转发规则'}
+            style={{ padding: '24px 0' }}
+          >
+            {!rules.length ? (
+              <Button size="small" type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+                新建规则
+              </Button>
+            ) : null}
+          </Empty>
+        ) : null}
+      </div>
     </div>
+  )
+
+  const rule = selectedRule
+  const effectiveEnable = rule ? Boolean(rule.enable) && !rule.disabled : draftEnable
+
+  const detailPane = creating ? (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <Typography.Title level={5} style={{ margin: 0 }}>
+          新建规则
+        </Typography.Title>
+        <Tag>草稿</Tag>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Muted>启用</Muted>
+          <Switch checked={draftEnable} onChange={setDraftEnable} size="small" aria-label="新建规则默认启用" />
+        </div>
+      </div>
+      <Muted>创建后会立即按填写的监听地址尝试绑定端口。</Muted>
+      <Section title="规则配置" first>
+        <ForwardRuleForm
+          key="new"
+          rule={null}
+          enable={draftEnable}
+          saving={saving}
+          onSubmit={saveRule}
+          onCancel={backToList}
+          cancelLabel="取消"
+        />
+      </Section>
+    </div>
+  ) : rule ? (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <Typography.Title level={5} style={{ margin: 0 }}>
+          {rule.name || rule.id}
+        </Typography.Title>
+        <Tag color={protocolColor(rule.protocol)}>
+          {PROTOCOL_LABEL[rule.protocol || ''] || rule.protocol || '-'}
+        </Tag>
+        <Tag color={ruleAccessColor(rule)}>{ruleAccessText(rule)}</Tag>
+        {rule.listening ? <Tag color="success">监听中</Tag> : null}
+        {rule.disabled ? <Tag color="error">端口占用</Tag> : null}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Tooltip title={effectiveEnable ? '停用这条规则' : '启用这条规则'}>
+            <Switch
+              size="small"
+              checked={effectiveEnable}
+              loading={busyId === String(rule.id)}
+              disabled={busyId !== '' && busyId !== String(rule.id)}
+              onChange={(checked) => void toggleRule(rule, checked)}
+              aria-label={`${rule.name || rule.id} 启停`}
+            />
+          </Tooltip>
+          <Button
+            danger
+            type="text"
+            size="small"
+            icon={<DeleteOutlined />}
+            onClick={() => removeRule(rule)}
+          >
+            删除
+          </Button>
+        </div>
+      </div>
+      <div className="mono" style={{ marginTop: 4, fontSize: 12, wordBreak: 'break-all' }}>
+        <Typography.Text type="secondary">
+          {rule.srcAddr || '-'} → {rule.dstAddr || '-'}
+        </Typography.Text>
+      </div>
+      {rule.remark ? <Muted>{rule.remark}</Muted> : null}
+
+      {rule.disabled ? (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginTop: 10 }}
+          message="端口被占用，规则已自动停用"
+          description="释放占用该端口的进程后，用右上角开关重新启用；后端会重试绑定。"
+        />
+      ) : null}
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(116px, 1fr))',
+          gap: 8,
+          marginTop: 14,
+        }}
+      >
+        <Metric label="活跃连接" value={num(rule.activeConns)} hint="当前正在转发" />
+        <Metric label="累计连接" value={num(rule.totalConns)} hint="进程启动以来" />
+        <Metric label="上行流量" value={fmtBytes(rule.upBytes)} hint="客户端 → 目标" />
+        <Metric label="下行流量" value={fmtBytes(rule.downBytes)} hint="目标 → 客户端" />
+        <Metric
+          label="被上限拒绝"
+          value={num(rule.rejectedRuleLimit) + num(rule.rejectedIpLimit)}
+          hint={`规则 ${num(rule.rejectedRuleLimit)} · 单 IP ${num(rule.rejectedIpLimit)}`}
+        />
+      </div>
+
+      <Section
+        title="规则配置"
+        extra={<Muted>保存后立即生效 · 并发 {num(rule.connLimit) || '不限'}/{num(rule.connLimitPerIp) || '不限'}</Muted>}
+        first={false}
+      >
+        <ForwardRuleForm
+          key={rule.id}
+          rule={rule}
+          enable={effectiveEnable}
+          saving={saving}
+          onSubmit={saveRule}
+        />
+      </Section>
+
+      <Section title="访问日志" extra={<Muted>当前规则 · 内存缓冲</Muted>}>
+        <ForwardLogsPanel key={rule.id} rule={rule} />
+      </Section>
+    </div>
+  ) : (
+    <div style={{ padding: '56px 0' }}>
+      <Empty
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+        description={rules.length ? '从左侧选择一条规则查看详情' : '还没有端口转发规则'}
+      >
+        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+          新建规则
+        </Button>
+      </Empty>
+    </div>
+  )
+
+  return (
+    <Workspace
+      list={listPane}
+      detail={detailPane}
+      selected={creating || Boolean(selectedRule)}
+      onBack={backToList}
+      listWidth={340}
+    />
   )
 }

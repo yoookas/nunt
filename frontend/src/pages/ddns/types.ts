@@ -86,6 +86,8 @@ export interface DdnsRule {
 }
 
 export interface DdnsRecord {
+  /** Assigned by the runtime panel so the table has a stable key. */
+  key?: string
   time?: string
   ok?: boolean
   message?: string
@@ -117,7 +119,6 @@ export interface GetIPFormValues {
 
 export interface DdnsFormValues {
   name: string
-  enable: boolean
   provider: string
   domain: string
   subDomainsText: string
@@ -175,7 +176,6 @@ export function ddnsFormValues(
   const subs = Array.isArray(rule?.subDomains) ? rule?.subDomains ?? [] : []
   return {
     name: rule?.name || '',
-    enable: rule ? rule.enable !== false : true,
     provider: rule?.provider || provider || '',
     domain: rule?.domain || '',
     subDomainsText: subs.length ? subs.join('\n') : '@',
@@ -210,6 +210,7 @@ export function buildGetIP(group: GetIPFormValues): Record<string, unknown> {
 export function buildDdnsPayload(
   values: DdnsFormValues,
   options: {
+    enable: boolean
     fields: ProviderField[]
     originalCreds?: Record<string, string> | null
     originalCallback?: DdnsCallback | null
@@ -232,7 +233,7 @@ export function buildDdnsPayload(
     : 'A'
   return {
     name: String(values.name || '').trim(),
-    enable: values.enable !== false,
+    enable: options.enable !== false,
     provider: values.provider,
     creds,
     domain: String(values.domain || '').trim(),

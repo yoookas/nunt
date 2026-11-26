@@ -159,8 +159,8 @@ export interface WafLogsResponse {
 }
 
 export const MODE_OPTIONS: { value: WafMode; label: string }[] = [
-  { value: 'detect', label: '检测模式（只记录不拦截）' },
-  { value: 'block', label: '拦截模式（命中即返回 403）' },
+  { value: 'detect', label: '检测模式' },
+  { value: 'block', label: '拦截模式' },
 ]
 
 export const LEVEL_OPTIONS = [1, 2, 3, 4].map((value) => ({ value, label: `PL${value}` }))

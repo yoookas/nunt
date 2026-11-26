@@ -4,78 +4,42 @@ import {
   App,
   Badge,
   Button,
-  Card,
-  Col,
+  Empty,
+  Grid,
   Input,
-  Row,
   Space,
-  Statistic,
+  Spin,
   Switch,
   Tag,
   Tooltip,
   Typography,
+  theme,
 } from 'antd'
 import {
   DeleteOutlined,
-  EditOutlined,
-  FileTextOutlined,
-  PlusOutlined,
   PlayCircleOutlined,
+  PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
 import type { TableColumnsType } from 'antd'
 import { api, errorText } from '../api'
 import { fmtTime } from '../format'
-import { confirmDelete, DataTable, Muted, PageHeader, Panel, Toolbar, useIsMobile } from '../components'
+import { confirmDelete, DataTable, Muted } from '../components'
+import { EntityRow, PaneTitle, Workspace, type ItemStatus } from '../components/Workspace'
 import { usePolling } from '../usePolling'
-import DdnsRuleModal from './ddns/RuleModal'
-import DdnsLogsModal from './ddns/LogsModal'
+import DdnsRuleForm from './ddns/RuleForm'
 import {
   ipModeText,
   num,
   providerTitle,
   scheduleText,
   statusMessage,
+  type DdnsRecord,
   type DdnsRule,
   type DdnsStatus,
   type ProviderMeta,
 } from './ddns/types'
-
-const PAGINATION = { pageSize: 10, hideOnSinglePage: true, showSizeChanger: false }
-
-function StatTile({ title, value, hint }: { title: string; value: string | number; hint?: ReactNode }) {
-  return (
-    <Card size="small" styles={{ body: { padding: 12 } }}>
-      <Statistic
-        title={title}
-        value={value}
-        valueStyle={{ fontSize: 20, fontWeight: 600, lineHeight: 1.3 }}
-      />
-      {hint ? (
-        <div style={{ marginTop: 4 }}>
-          <Muted>{hint}</Muted>
-        </div>
-      ) : null}
-    </Card>
-  )
-}
-
-function LiveHint({ updatedAt, failed }: { updatedAt: number | null; failed: boolean }) {
-  const text = failed
-    ? '自动刷新失败'
-    : updatedAt
-      ? `更新于 ${new Date(updatedAt).toLocaleTimeString('zh-CN', { hour12: false })}`
-      : '等待自动刷新'
-  return (
-    <Tooltip title="每 10 秒自动刷新规则状态与执行计数">
-      <Space size={4}>
-        <Badge status={failed ? 'error' : updatedAt ? 'processing' : 'default'} />
-        <Muted>{text}</Muted>
-      </Space>
-    </Tooltip>
-  )
-}
 
 function normalizeRules(data: DdnsRule[] | { rules?: DdnsRule[]; items?: DdnsRule[] } | null): DdnsRule[] {
   if (Array.isArray(data)) return data
@@ -87,30 +51,91 @@ function normalizeStatuses(data: DdnsStatus[] | { rules?: DdnsStatus[] } | null)
   return data?.rules || []
 }
 
+function Metric({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode }) {
+  const { token } = theme.useToken()
+  return (
+    <div style={{ padding: '8px 10px', borderRadius: 8, background: token.colorFillQuaternary, minWidth: 0 }}>
+      <div style={{ fontSize: 12, color: token.colorTextSecondary }}>{label}</div>
+      <div
+        title={typeof value === 'string' ? value : undefined}
+        style={{
+          fontSize: 15,
+          fontWeight: 600,
+          fontVariantNumeric: 'tabular-nums',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {value}
+      </div>
+      {hint ? (
+        <div
+          style={{
+            fontSize: 11,
+            color: token.colorTextTertiary,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {hint}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function Section({
+  title,
+  extra,
+  first,
+  children,
+}: {
+  title: ReactNode
+  extra?: ReactNode
+  first?: boolean
+  children: ReactNode
+}) {
+  const { token } = theme.useToken()
+  return (
+    <div
+      style={{
+        marginTop: first ? 4 : 22,
+        paddingTop: first ? 0 : 18,
+        borderTop: first ? undefined : `1px solid ${token.colorBorderSecondary}`,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+        <Typography.Text strong>{title}</Typography.Text>
+        {extra ? <div style={{ marginLeft: 'auto' }}>{extra}</div> : null}
+      </div>
+      {children}
+    </div>
+  )
+}
+
 export default function Ddns() {
   const { message, modal } = App.useApp()
-  const isMobile = useIsMobile()
+  const { token } = theme.useToken()
+  const screens = Grid.useBreakpoint()
+  const desktop = Boolean(screens.lg)
+
   const [rules, setRules] = useState<DdnsRule[]>([])
   const [statuses, setStatuses] = useState<DdnsStatus[]>([])
   const [providers, setProviders] = useState<ProviderMeta[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [rulesError, setRulesError] = useState<unknown>(null)
   const [statusLoading, setStatusLoading] = useState(false)
   const [statusError, setStatusError] = useState<unknown>(null)
   const [providersLoading, setProvidersLoading] = useState(false)
   const [providersError, setProvidersError] = useState<unknown>(null)
   const [busyId, setBusyId] = useState('')
+  const [saving, setSaving] = useState(false)
   const [keyword, setKeyword] = useState('')
-  const [editor, setEditor] = useState<{ open: boolean; rule: DdnsRule | null; seq: number }>({
-    open: false,
-    rule: null,
-    seq: 0,
-  })
-  const [logsTarget, setLogsTarget] = useState<{ open: boolean; status: DdnsStatus | null; seq: number }>({
-    open: false,
-    status: null,
-    seq: 0,
-  })
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [draftEnable, setDraftEnable] = useState(true)
 
   const fetchRules = useCallback(async () => {
     const data = await api.get<DdnsRule[] | { rules?: DdnsRule[]; items?: DdnsRule[] }>('/api/v1/ddns/rules')
@@ -177,8 +202,6 @@ export default function Ddns() {
     void loadStatus()
   }, [loadProviders, loadRules, loadStatus])
 
-  // Schedule and last result live on the rules, the counters on the status
-  // endpoint. Both are re-read quietly; a failed poll only tints the hint.
   const live = usePolling(async () => {
     let ok = false
     try {
@@ -206,17 +229,6 @@ export default function Ddns() {
     return map
   }, [statuses])
 
-  const filtered = useMemo(() => {
-    const q = keyword.trim().toLowerCase()
-    if (!q) return rules
-    return rules.filter((rule) =>
-      [rule.name, rule.domain, rule.provider, (rule.subDomains || []).join(' ')]
-        .join(' ')
-        .toLowerCase()
-        .includes(q),
-    )
-  }, [rules, keyword])
-
   const summary = useMemo(() => {
     let enabled = 0
     let success = 0
@@ -229,8 +241,77 @@ export default function Ddns() {
     return { enabled, success, failures }
   }, [rules, statuses])
 
-  const refreshAll = async () => {
-    await Promise.all([loadRules(), loadStatus()])
+  const filtered = useMemo(() => {
+    const q = keyword.trim().toLowerCase()
+    if (!q) return rules
+    return rules.filter((rule) =>
+      [rule.name, rule.domain, rule.provider, (rule.subDomains || []).join(' ')]
+        .join(' ')
+        .toLowerCase()
+        .includes(q),
+    )
+  }, [rules, keyword])
+
+  const selectedRule = useMemo(
+    () => rules.find((rule) => rule.id === selectedId) || null,
+    [rules, selectedId],
+  )
+  const selectedStatus = selectedRule ? statusMap[selectedRule.id] || null : null
+
+  useEffect(() => {
+    if (!desktop || creating) return
+    if (selectedId && rules.some((rule) => rule.id === selectedId)) return
+    setSelectedId(rules.length ? rules[0].id : null)
+  }, [desktop, creating, rules, selectedId])
+
+  const selectRule = (rule: DdnsRule) => {
+    setCreating(false)
+    setSelectedId(String(rule.id))
+  }
+
+  const openCreate = () => {
+    if (!providers.length) {
+      message.warning('还没有获取到 DNS 提供商列表，请先重试加载')
+      return
+    }
+    setCreating(true)
+    setSelectedId(null)
+    setDraftEnable(true)
+  }
+
+  const backToList = () => {
+    setCreating(false)
+    setSelectedId(null)
+  }
+
+  const saveRule = async (payload: Record<string, unknown>) => {
+    const current = selectedRule
+    const isCreate = creating || !current
+    setSaving(true)
+    try {
+      const saved = isCreate
+        ? await api.post<{ id?: string }>('/api/v1/ddns/rules', payload)
+        : await api.put(`/api/v1/ddns/rules/${encodeURIComponent(current.id)}`, payload)
+      const [nextRules, nextStatuses] = await Promise.all([fetchRules(), fetchStatuses()])
+      setRules(nextRules)
+      setStatuses(nextStatuses)
+      setRulesError(null)
+      setStatusError(null)
+
+      let id = String(saved?.id || '')
+      if (!id && isCreate) {
+        const name = String(payload.name || '')
+        id = nextRules.find((rule) => (rule.name || '') === name)?.id || ''
+      }
+      if (!id) id = current?.id || ''
+      message.success(isCreate ? '规则已创建' : '规则已保存')
+      setCreating(false)
+      setSelectedId(id || (desktop ? nextRules[0]?.id ?? null : null))
+    } catch (err) {
+      message.error(errorText(err))
+    } finally {
+      setSaving(false)
+    }
   }
 
   const toggleRule = async (rule: DdnsRule, next: boolean) => {
@@ -291,7 +372,11 @@ export default function Ddns() {
         try {
           await api.del(`/api/v1/ddns/rules/${encodeURIComponent(String(rule.id))}`)
           message.success('规则已删除')
-          await Promise.all([loadRules(true), loadStatus(true)])
+          const [nextRules, nextStatuses] = await Promise.all([fetchRules(), fetchStatuses()])
+          setRules(nextRules)
+          setStatuses(nextStatuses)
+          setCreating(false)
+          setSelectedId(desktop ? nextRules[0]?.id ?? null : null)
         } catch (err) {
           message.error(errorText(err))
         }
@@ -299,453 +384,394 @@ export default function Ddns() {
     )
   }
 
-  const openLogs = (status: DdnsStatus) =>
-    setLogsTarget((prev) => ({ open: true, status, seq: prev.seq + 1 }))
+  const liveLabel = live.failed
+    ? '自动刷新失败'
+    : live.updatedAt
+      ? `更新于 ${new Date(live.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })}`
+      : '等待自动刷新'
 
-  const openRuleLogs = (rule: DdnsRule) => {
-    openLogs(
-      statusMap[rule.id] || {
-        id: rule.id,
-        name: rule.name,
-        enable: rule.enable,
-        records: [],
-      },
-    )
+  const ruleSignal = (rule: DdnsRule): ItemStatus => {
+    if (!rule.enable) return 'off'
+    const state = statusMap[rule.id]
+    if (state?.lastError) return 'error'
+    if (state?.lastSuccess) return 'ok'
+    return 'warn'
   }
 
-  const openCreate = () => setEditor((prev) => ({ open: true, rule: null, seq: prev.seq + 1 }))
-  const openEdit = (rule: DdnsRule) => setEditor((prev) => ({ open: true, rule, seq: prev.seq + 1 }))
-
-  const ruleColumns: TableColumnsType<DdnsRule> = [
-    {
-      title: '规则',
-      key: 'name',
-      width: 220,
-      render: (_value, row) => (
-        <div style={{ minWidth: 150 }}>
-          <Typography.Text strong style={{ wordBreak: 'break-all' }}>
-            {row.name || row.id}
-          </Typography.Text>
-          {row.remark ? (
-            <div>
-              <Muted>{row.remark}</Muted>
-            </div>
-          ) : null}
-        </div>
-      ),
-    },
-    {
-      title: '域名 / 子域',
-      key: 'domain',
-      width: 250,
-      render: (_value, row) => (
-        <div style={{ minWidth: 170 }}>
-          <div className="mono" style={{ fontSize: 12, wordBreak: 'break-all' }}>
-            {row.domain || '-'}
-          </div>
-          {Array.isArray(row.subDomains) && row.subDomains.length ? (
-            <Space size={4} wrap style={{ marginTop: 4 }}>
-              {row.subDomains.map((sub) => (
-                <Tag key={sub} style={{ marginInlineEnd: 0 }}>
-                  {sub}
-                </Tag>
-              ))}
-            </Space>
-          ) : null}
-        </div>
-      ),
-    },
-    {
-      title: '提供商 / 类型',
-      key: 'provider',
-      width: 190,
-      responsive: ['md'],
-      render: (_value, row) => (
-        <Space size={4} wrap>
-          <Tag color="blue">{providerTitle(providers, row.provider)}</Tag>
-          <Tag>{row.recordType || 'A'}</Tag>
-        </Space>
-      ),
-    },
-    {
-      title: 'IP 探测',
-      key: 'probe',
-      width: 150,
-      responsive: ['lg'],
-      render: (_value, row) => (
-        <div style={{ fontSize: 12 }}>
-          <div>IPv4：{ipModeText(row.ipv4)}</div>
-          <div>IPv6：{ipModeText(row.ipv6)}</div>
-        </div>
-      ),
-    },
-    {
-      title: '调度',
-      key: 'schedule',
-      width: 180,
-      responsive: ['lg'],
-      render: (_value, row) => (
-        <span className="mono" style={{ fontSize: 12, wordBreak: 'break-all' }}>
-          {scheduleText(row)}
-        </span>
-      ),
-    },
-    {
-      title: '当前 IP',
-      key: 'ip',
-      width: 170,
-      responsive: ['md'],
-      render: (_value, row) => {
-        const state = statusMap[row.id]
-        const ips = [state?.ipv4, state?.ipv6].filter(Boolean) as string[]
-        if (!ips.length) return <Muted>-</Muted>
-        return (
-          <div className="mono" style={{ fontSize: 12 }}>
-            {ips.map((ip) => (
-              <div key={ip} style={{ wordBreak: 'break-all' }}>
-                {ip}
-              </div>
-            ))}
-          </div>
-        )
-      },
-    },
-    {
-      title: '状态',
-      key: 'status',
-      width: 140,
-      render: (_value, row) => {
-        const id = String(row.id)
-        return (
-          <Space size={8} style={{ whiteSpace: 'nowrap' }}>
-            <Switch
-              size="small"
-              checked={Boolean(row.enable)}
-              loading={busyId === id}
-              disabled={busyId !== '' && busyId !== id}
-              onChange={(checked) => void toggleRule(row, checked)}
-              aria-label={`${row.name || row.id} 启停`}
-            />
-            <Muted>{row.enable ? '启用' : '停用'}</Muted>
-          </Space>
-        )
-      },
-    },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 280,
-      render: (_value, row) => {
-        const busy = busyId === String(row.id)
-        const label = (text: string) => (isMobile ? null : text)
-        return (
-          <Space size={0} wrap>
-            <Button
-              type="link"
-              size="small"
-              icon={<PlayCircleOutlined />}
-              loading={busy}
-              disabled={!row.enable}
-              title="立即执行"
-              onClick={() => runRule(row)}
-            >
-              {label('执行')}
-            </Button>
-            <Button
-              type="link"
-              size="small"
-              icon={<FileTextOutlined />}
-              title="运行日志"
-              onClick={() => openRuleLogs(row)}
-            >
-              {label('日志')}
-            </Button>
-            <Button
-              type="link"
-              size="small"
-              icon={<EditOutlined />}
-              title="编辑"
-              onClick={() => openEdit(row)}
-            >
-              {label('编辑')}
-            </Button>
-            <Button
-              type="link"
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              title="删除"
-              onClick={() => removeRule(row)}
-            >
-              {label('删除')}
-            </Button>
-          </Space>
-        )
-      },
-    },
-  ]
-
-  const statusColumns: TableColumnsType<DdnsStatus> = [
-    {
-      title: '规则',
-      key: 'name',
-      width: 190,
-      render: (_value, row) => (
-        <div style={{ minWidth: 120 }}>
-          <div style={{ fontWeight: 600, wordBreak: 'break-word' }}>{row.name || row.id}</div>
-          <Muted>{row.enable ? '启用' : '停用'}</Muted>
-        </div>
-      ),
-    },
-    {
-      title: 'IPv4',
-      dataIndex: 'ipv4',
-      key: 'ipv4',
-      width: 150,
-      render: (value) => (
-        <span className="mono" style={{ fontSize: 12, wordBreak: 'break-all' }}>
-          {value || '-'}
-        </span>
-      ),
-    },
-    {
-      title: 'IPv6',
-      dataIndex: 'ipv6',
-      key: 'ipv6',
-      width: 210,
-      responsive: ['lg'],
-      render: (value) => (
-        <span className="mono" style={{ fontSize: 12, wordBreak: 'break-all' }}>
-          {value || '-'}
-        </span>
-      ),
-    },
-    {
-      title: '上次执行',
-      dataIndex: 'lastRun',
-      key: 'lastRun',
-      width: 170,
-      responsive: ['md'],
-      render: (value) => <span style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{fmtTime(value)}</span>,
-    },
-    {
-      title: '上次成功',
-      dataIndex: 'lastSuccess',
-      key: 'lastSuccess',
-      width: 170,
-      responsive: ['xl'],
-      render: (value) => <span style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{fmtTime(value)}</span>,
-    },
-    {
-      title: '成功 / 失败',
-      key: 'counts',
-      width: 160,
-      responsive: ['md'],
-      render: (_value, row) => (
-        <Space size={4} wrap>
-          <Tag color="green">成功 {num(row.success)}</Tag>
-          <Tag color={num(row.failures) ? 'red' : 'default'}>失败 {num(row.failures)}</Tag>
-        </Space>
-      ),
-    },
-    {
-      title: '最近结果',
-      key: 'message',
-      render: (_value, row) => {
-        const text = statusMessage(row)
-        return (
-          <Typography.Text
-            ellipsis={{ tooltip: text }}
-            style={{ maxWidth: 300, fontSize: 12 }}
-          >
-            {text}
-          </Typography.Text>
-        )
-      },
-    },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 100,
-      render: (_value, row) => (
-        <Button type="link" size="small" icon={<FileTextOutlined />} title="运行日志" onClick={() => openLogs(row)}>
-          {isMobile ? null : '日志'}
-        </Button>
-      ),
-    },
-  ]
-
-  return (
+  const listPane = (
     <div>
-      <PageHeader
+      <PaneTitle
         title="动态域名"
-        subtitle="把域名持续指向当前公网 IP：提供商凭据、探测方式、调度与运行状态"
+        subtitle={`共 ${rules.length} · 启用 ${summary.enabled}`}
         extra={
-          <>
-            <LiveHint updatedAt={live.updatedAt} failed={live.failed} />
+          <Space size={4}>
+            <Tooltip title={liveLabel}>
+              <Badge status={live.failed ? 'error' : live.updatedAt ? 'processing' : 'default'} />
+            </Tooltip>
             <Button
+              size="small"
+              type="text"
               icon={<ReloadOutlined />}
               loading={loading || statusLoading}
-              onClick={() => void refreshAll()}
-            >
-              刷新
-            </Button>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              disabled={!providers.length}
-              title={providers.length ? undefined : '尚未获取到 DNS 提供商列表'}
-              onClick={openCreate}
-            >
-              新建规则
-            </Button>
-          </>
+              aria-label="刷新规则与状态"
+              onClick={() => void Promise.all([loadRules(), loadStatus()])}
+            />
+            <Tooltip title={providers.length ? undefined : '尚未获取到 DNS 提供商列表'}>
+              <Button
+                size="small"
+                type="primary"
+                icon={<PlusOutlined />}
+                disabled={!providers.length}
+                onClick={openCreate}
+              >
+                新建
+              </Button>
+            </Tooltip>
+          </Space>
         }
       />
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {providersError ? (
+      <div style={{ padding: '10px 12px', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
+        <Input
+          size="small"
+          allowClear
+          prefix={<SearchOutlined />}
+          placeholder="搜索名称 / 域名 / 提供商 / 子域名"
+          value={keyword}
+          onChange={(event) => setKeyword(event.target.value)}
+        />
+        <div style={{ marginTop: 6, textAlign: 'right' }}>
+          <Muted>
+            {filtered.length}/{rules.length} · 成功 {summary.success} / 失败 {summary.failures}
+          </Muted>
+        </div>
+      </div>
+
+      {providersError ? (
+        <div style={{ padding: 10 }}>
           <Alert
             type="error"
             showIcon
-            message={`无法读取 DNS 提供商列表：${errorText(providersError)}`}
+            message="无法读取 DNS 提供商"
+            description={errorText(providersError)}
             action={
-              <Button size="small" onClick={() => void loadProviders()} loading={providersLoading}>
+              <Button size="small" loading={providersLoading} onClick={() => void loadProviders()}>
                 重试
               </Button>
             }
           />
-        ) : null}
+        </div>
+      ) : null}
 
-        {!providersError && !providersLoading && !providers.length ? (
+      {rulesError ? (
+        <div style={{ padding: 10 }}>
           <Alert
-            type="warning"
+            type="error"
             showIcon
-            message="尚未获取到 DNS 提供商列表"
-            description="新建规则依赖提供商字段元数据；请点击重试或检查后端 /api/v1/ddns/providers。"
+            message="加载规则失败"
+            description={errorText(rulesError)}
             action={
-              <Button size="small" onClick={() => void loadProviders()} loading={providersLoading}>
+              <Button size="small" onClick={() => void loadRules()}>
+                重试
+              </Button>
+            }
+          />
+        </div>
+      ) : null}
+
+      <div style={desktop ? { maxHeight: 'calc(100dvh - 280px)', overflowY: 'auto' } : undefined}>
+        {loading && !rules.length ? (
+          <div style={{ padding: 28, textAlign: 'center' }}>
+            <Spin size="small" />
+          </div>
+        ) : null}
+
+        {filtered.map((rule) => {
+          const state = statusMap[rule.id]
+          const ips = [state?.ipv4, state?.ipv6].filter(Boolean) as string[]
+          return (
+            <EntityRow
+              key={rule.id}
+              title={rule.name || rule.id}
+              subtitle={
+                <span className="mono">
+                  {rule.domain || '-'}
+                  {Array.isArray(rule.subDomains) && rule.subDomains.length
+                    ? ` · ${rule.subDomains.join(', ')}`
+                    : ''}
+                </span>
+              }
+              meta={
+                <Space size={4} wrap>
+                  <Tag color="blue" style={{ marginInlineEnd: 0 }}>
+                    {providerTitle(providers, rule.provider)}
+                  </Tag>
+                  <Tag style={{ marginInlineEnd: 0 }}>{rule.recordType || 'A'}</Tag>
+                  {ips.length ? (
+                    <Typography.Text type="secondary" className="mono" style={{ fontSize: 12 }}>
+                      {ips.join(' / ')}
+                    </Typography.Text>
+                  ) : null}
+                </Space>
+              }
+              status={ruleSignal(rule)}
+              selected={!creating && selectedRule?.id === rule.id}
+              onClick={() => selectRule(rule)}
+            />
+          )
+        })}
+
+        {!loading && !filtered.length ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={rules.length ? '没有符合筛选条件的规则' : '还没有 DDNS 规则'}
+            style={{ padding: '24px 0' }}
+          >
+            {!rules.length ? (
+              <Button
+                size="small"
+                type="primary"
+                icon={<PlusOutlined />}
+                disabled={!providers.length}
+                onClick={openCreate}
+              >
+                新建规则
+              </Button>
+            ) : null}
+          </Empty>
+        ) : null}
+      </div>
+    </div>
+  )
+
+  const effectiveEnable = selectedRule ? Boolean(selectedRule.enable) : draftEnable
+
+  const recordColumns: TableColumnsType<DdnsRecord> = [
+    {
+      title: '时间',
+      dataIndex: 'time',
+      key: 'time',
+      width: 160,
+      render: (value) => <span style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{fmtTime(value)}</span>,
+    },
+    {
+      title: '结果',
+      dataIndex: 'ok',
+      key: 'ok',
+      width: 80,
+      render: (value) => <Tag color={value ? 'green' : 'red'}>{value ? '成功' : '失败'}</Tag>,
+    },
+    {
+      title: '内容',
+      dataIndex: 'message',
+      key: 'message',
+      render: (value) => <span style={{ fontSize: 12, wordBreak: 'break-word' }}>{value || '-'}</span>,
+    },
+  ]
+
+  const runtimeSection = (rule: DdnsRule, state: DdnsStatus | null) => {
+    const records: DdnsRecord[] = Array.isArray(state?.records)
+      ? [...(state?.records ?? [])]
+          .reverse()
+          .map((record, index) => ({ ...record, key: `${record.time || ''}-${index}` }))
+      : []
+    return (
+      <Section
+        title="运行状态"
+        extra={
+          <Button
+            size="small"
+            icon={<ReloadOutlined />}
+            loading={statusLoading}
+            onClick={() => void loadStatus()}
+          >
+            刷新
+          </Button>
+        }
+      >
+        {statusError ? (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 10 }}
+            message={`加载运行状态失败：${errorText(statusError)}`}
+            action={
+              <Button size="small" onClick={() => void loadStatus()}>
                 重试
               </Button>
             }
           />
         ) : null}
 
-        <Row gutter={[8, 8]}>
-          <Col xs={12} md={6}>
-            <StatTile title="DDNS 规则" value={rules.length} hint={`启用 ${summary.enabled} 条`} />
-          </Col>
-          <Col xs={12} md={6}>
-            <StatTile title="已启用" value={summary.enabled} hint="当前参与调度的规则" />
-          </Col>
-          <Col xs={12} md={6}>
-            <StatTile title="累计成功" value={summary.success} hint="来自 /api/v1/ddns/status" />
-          </Col>
-          <Col xs={12} md={6}>
-            <StatTile title="累计失败" value={summary.failures} hint="失败原因可在运行日志中查看" />
-          </Col>
-        </Row>
-
-        <Panel title="DDNS 规则">
-          <Toolbar>
-            <Input
-              allowClear
-              prefix={<SearchOutlined />}
-              placeholder="搜索名称 / 域名 / 提供商 / 子域名"
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
-              style={{ width: isMobile ? '100%' : 300 }}
-            />
-            <Muted>
-              共 {rules.length} 条 · 显示 {filtered.length} 条
-            </Muted>
-          </Toolbar>
-
-          {rulesError ? (
-            <Alert
-              type="error"
-              showIcon
-              style={{ marginTop: 12 }}
-              message={`加载 DDNS 规则失败：${errorText(rulesError)}`}
-              action={
-                <Button size="small" onClick={() => void loadRules()}>
-                  重试
-                </Button>
-              }
-            />
-          ) : null}
-
-          <div style={{ marginTop: 12 }}>
-            <DataTable<DdnsRule>
-              rowKey={(row) => String(row.id)}
-              columns={ruleColumns}
-              dataSource={filtered}
-              loading={loading}
-              pagination={PAGINATION}
-            />
-          </div>
-        </Panel>
-
-        <Panel
-          title="运行状态"
-          extra={
-            <Button
-              size="small"
-              icon={<ReloadOutlined />}
-              loading={statusLoading}
-              onClick={() => void loadStatus()}
-            >
-              刷新状态
-            </Button>
-          }
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+            gap: 8,
+          }}
         >
-          <Muted>来自 /api/v1/ddns/status；规则执行一次后这里会出现当前 IP、时间与结果。</Muted>
+          <Metric label="IPv4" value={state?.ipv4 || '-'} hint={ipModeText(rule.ipv4)} />
+          <Metric label="IPv6" value={state?.ipv6 || '-'} hint={ipModeText(rule.ipv6)} />
+          <Metric label="上次执行" value={fmtTime(state?.lastRun)} hint={scheduleText(rule)} />
+          <Metric label="上次成功" value={fmtTime(state?.lastSuccess)} />
+          <Metric
+            label="成功 / 失败"
+            value={`${num(state?.success)} / ${num(state?.failures)}`}
+            hint="来自 /api/v1/ddns/status"
+          />
+        </div>
 
-          {statusError ? (
-            <Alert
-              type="error"
-              showIcon
-              style={{ marginTop: 12 }}
-              message={`加载运行状态失败：${errorText(statusError)}`}
-              action={
-                <Button size="small" onClick={() => void loadStatus()}>
-                  重试
-                </Button>
-              }
-            />
-          ) : null}
-
-          <div style={{ marginTop: 12 }}>
-            <DataTable<DdnsStatus>
-              rowKey={(row) => String(row.id)}
-              columns={statusColumns}
-              dataSource={statuses}
-              loading={statusLoading}
-              pagination={PAGINATION}
-            />
+        {state?.lastError ? (
+          <Alert type="error" showIcon style={{ marginTop: 10 }} message="最近一次执行失败" description={state.lastError} />
+        ) : state ? (
+          <div style={{ marginTop: 8 }}>
+            <Muted>最近结果：{statusMessage(state)}</Muted>
           </div>
-        </Panel>
-      </div>
+        ) : null}
 
-      <DdnsRuleModal
-        key={editor.seq}
-        open={editor.open}
-        rule={editor.rule}
-        providers={providers}
-        providersLoading={providersLoading}
-        providersError={providersError}
-        onReloadProviders={() => void loadProviders()}
-        onClose={() => setEditor((prev) => ({ ...prev, open: false }))}
-        onSaved={async () => {
-          await Promise.all([loadRules(true), loadStatus(true)])
-        }}
-      />
-      <DdnsLogsModal
-        key={logsTarget.seq}
-        open={logsTarget.open}
-        status={logsTarget.status}
-        onClose={() => setLogsTarget((prev) => ({ ...prev, open: false }))}
-      />
+        <div style={{ marginTop: 12 }}>
+          <DataTable<DdnsRecord>
+            rowKey={(row) => String(row.key)}
+            columns={recordColumns}
+            dataSource={records}
+            pagination={{ pageSize: 5, hideOnSinglePage: true, showSizeChanger: false, size: 'small' }}
+            locale={{ emptyText: loading ? '加载中…' : '暂无执行记录，执行一次后这里会出现结果' }}
+          />
+        </div>
+      </Section>
+    )
+  }
+
+  const detailMeta = (rule: DdnsRule) => (
+    <div style={{ marginTop: 4 }}>
+      <div className="mono" style={{ fontSize: 12, wordBreak: 'break-all' }}>
+        <Typography.Text type="secondary">{rule.domain || '-'}</Typography.Text>
+      </div>
+      <Space size={4} wrap style={{ marginTop: 4 }}>
+        {(rule.subDomains || []).map((sub) => (
+          <Tag key={sub} style={{ marginInlineEnd: 0 }}>
+            {sub}
+          </Tag>
+        ))}
+        <Muted>{scheduleText(rule)}</Muted>
+      </Space>
     </div>
+  )
+
+  const detailPane = creating ? (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <Typography.Title level={5} style={{ margin: 0 }}>
+          新建规则
+        </Typography.Title>
+        <Tag>草稿</Tag>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Muted>启用</Muted>
+          <Switch checked={draftEnable} onChange={setDraftEnable} size="small" aria-label="新建规则默认启用" />
+        </div>
+      </div>
+      <Muted>创建后按调度自动执行；也可以保存后在详情里立即执行一次。</Muted>
+      <div style={{ marginTop: 12 }}>
+        <DdnsRuleForm
+          key="new"
+          rule={null}
+          enable={draftEnable}
+          providers={providers}
+          providersLoading={providersLoading}
+          providersError={providersError}
+          onReloadProviders={() => void loadProviders()}
+          saving={saving}
+          onSubmit={saveRule}
+          onCancel={backToList}
+          cancelLabel="取消"
+        />
+      </div>
+    </div>
+  ) : selectedRule ? (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <Typography.Title level={5} style={{ margin: 0 }}>
+          {selectedRule.name || selectedRule.id}
+        </Typography.Title>
+        <Tag color="blue">{providerTitle(providers, selectedRule.provider)}</Tag>
+        <Tag>{selectedRule.recordType || 'A'}</Tag>
+        {selectedRule.enable ? <Tag color="success">启用</Tag> : <Tag>停用</Tag>}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Button
+            size="small"
+            type="text"
+            icon={<PlayCircleOutlined />}
+            disabled={!selectedRule.enable}
+            loading={busyId === String(selectedRule.id)}
+            onClick={() => runRule(selectedRule)}
+          >
+            执行
+          </Button>
+          <Tooltip title={effectiveEnable ? '停用这条规则' : '启用这条规则'}>
+            <Switch
+              size="small"
+              checked={effectiveEnable}
+              loading={busyId === String(selectedRule.id)}
+              disabled={busyId !== '' && busyId !== String(selectedRule.id)}
+              onChange={(checked) => void toggleRule(selectedRule, checked)}
+              aria-label={`${selectedRule.name || selectedRule.id} 启停`}
+            />
+          </Tooltip>
+          <Button
+            danger
+            type="text"
+            size="small"
+            icon={<DeleteOutlined />}
+            onClick={() => removeRule(selectedRule)}
+          >
+            删除
+          </Button>
+        </div>
+      </div>
+      {detailMeta(selectedRule)}
+      {selectedRule.remark ? <Muted>{selectedRule.remark}</Muted> : null}
+
+      {runtimeSection(selectedRule, selectedStatus)}
+
+      <Section title="规则配置" extra={<Muted>基础、凭据、高级设置都在这里</Muted>}>
+        <DdnsRuleForm
+          key={selectedRule.id}
+          rule={selectedRule}
+          enable={effectiveEnable}
+          providers={providers}
+          providersLoading={providersLoading}
+          providersError={providersError}
+          onReloadProviders={() => void loadProviders()}
+          saving={saving}
+          onSubmit={saveRule}
+        />
+      </Section>
+    </div>
+  ) : (
+    <div style={{ padding: '56px 0' }}>
+      <Empty
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+        description={rules.length ? '从左侧选择一条规则查看详情' : '还没有 DDNS 规则'}
+      >
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          disabled={!providers.length}
+          onClick={openCreate}
+        >
+          新建规则
+        </Button>
+      </Empty>
+    </div>
+  )
+
+  return (
+    <Workspace
+      list={listPane}
+      detail={detailPane}
+      selected={creating || Boolean(selectedRule)}
+      onBack={backToList}
+      listWidth={340}
+    />
   )
 }

@@ -53,7 +53,7 @@
   overflow: hidden;
   background: var(--logs-bg, #fff);
   border: 1px solid var(--logs-border, #f0f0f0);
-  border-radius: 8px;
+  border-radius: var(--logs-radius, 10px);
 }
 
 /* ------------------------------------------------------------------ */
@@ -64,9 +64,9 @@
   flex: none;
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--logs-border, #f0f0f0);
 }
 

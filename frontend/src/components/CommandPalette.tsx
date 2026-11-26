@@ -25,7 +25,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   }, [query])
 
   return (
-    <Modal open={open} onCancel={onClose} footer={null} width={560} styles={{ body: { padding: 0 } }} destroyOnClose>
+    <Modal open={open} onCancel={onClose} footer={null} width={560} styles={{ body: { padding: 0 } }} destroyOnHidden>
       <div style={{ padding: 12, borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
         <Input
           ref={inputRef}

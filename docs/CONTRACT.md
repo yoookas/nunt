@@ -92,40 +92,36 @@ Lucky v1.10.8 源码（Go module 缓存里已下载好）：
 | C | `internal/modules/ddns`、`internal/dnsprov/*` | DDNS 规则调度、公网 IP 探测（网卡/URL/静态）、自定义回调、各家 DNS 提供商 |
 | D | `internal/modules/acme` | ACME 账号与订单（`golang.org/x/crypto/acme`）、http-01 / dns-01、证书入库、续期循环 |
 | F | `internal/modules/waf` | Coraza v3 引擎、CRS 内置规则、自定义规则、按规则开关、拦截统计与日志、管理接口 |
-| G/H | `frontend/` 与 `internal/webui/assets` | React 19 + HeroUI 管理界面（构建产物提交） |
+| G/H | `frontend/` 与 `internal/webui/assets` | React 19 + Ant Design 管理界面（构建产物提交） |
 
-## 7. 前端契约（React 19 + HeroUI v3 + Tailwind 4 + Vite 8）
+## 7. 前端契约（React 19 + Ant Design 5 + Vite 8）
 
 前端是一个独立的 Vite 工程，位于 `frontend/`，构建产物提交在 `internal/webui/assets/`
 （Go 用 `go:embed all:assets` 打进二进制，所以 `go build` 和 Docker 镜像都不需要 Node；
 镜像里的 `web` 阶段会重新构建一次，保证镜像不会带着过期的前端）。
 
-### 7.1 设计语言（HeroUI 原生）
+### 7.1 设计语言（指挥中心）
 
-页面不是把旧管理界面的组件逐个换成 HeroUI 同款，而是按 HeroUI v3 自己的设计语言组织：
+页面不是把旧管理界面的组件逐个换成 antd 同款，而是按「指挥中心」组织：
 
-- **布局**：HeroUI `Menu` 侧栏 + `Header` 顶栏；移动端导航用 `Drawer`；页面内容最大宽度 1600px；
-- **层级**：`Typography.Heading/Paragraph` 做页面标题与说明；`Card`（`Section` 封装）承载分组；
-  概览/转发/DDNS 用 `StatCard` 展示指标；
-- **数据**：`DataTable` 封装 HeroUI `Table`，空态用 `EmptyState`，加载用 `Skeleton`/`Spinner`，
-  筛选/搜索放在 `Section` header 或 `Toolbar` 中；
-- **编辑**：表单一律走右侧 `Drawer`（`FormModal` 封装），确认操作走 `AlertDialog`
-  （`ConfirmModal` 封装）；字段使用 HeroUI `TextField`/`NumberField`/`Select`/`Switch`/`Tag`；
-- **信息架构**：证书、WAF、设置按能力分 `Tabs`；Web 服务是「监听器列表 + 路由表格」的主从布局；
-- 共享设计层在 `src/ui.tsx`，页面只组合这里的设计原语与 HeroUI 组件，不自己写弹窗/表格/按钮样式；
-- 颜色只用 Tailwind 语义 token（`bg-background`/`bg-surface`/`text-muted`/`border-border`/`text-danger`），
-  不写死颜色；明暗主题由根元素 `.dark` 控制。
+- **布局**：顶部横向导航（不再有固定左侧栏）；移动端用汉堡按钮打开抽屉导航，不使用底部栏；页面内容最大宽度 1440px；
+- **概览**：模块入口卡片 + 状态条，点击卡片进入模块；桌面快捷键 ⌘K / Ctrl+K 打开命令面板；
+- **模块页**：主从工作区——左侧实体列表，右侧详情/编辑；手机端列表 → 整页详情 + 返回；不再整页表格 + 弹窗；
+- **编辑**：表单内联在详情区；破坏性操作使用 antd 确认；抽屉只用于日志、筛选等辅助内容；
+- **信息架构**：日志为全高控制台；WAF 为安全控制台（状态条 + 配置/规则/事件/测试分区）；设置为左侧分组 + 右侧内容；
+- 颜色和间距使用 antd token（`theme.useToken()`），不写死主题色；明暗由 ConfigProvider 算法切换；
+- 共享设计原语在 `src/components.tsx` 与 `src/components/Workspace.tsx`。
 
 ### 7.2 技术栈与硬约束
 
-- **React 19 + TypeScript**（函数组件 + hooks）+ **HeroUI v3** + **Tailwind CSS 4** + **Vite 8**；
+- **React 19 + TypeScript**（函数组件 + hooks）+ **Ant Design 5** + **Vite 8**；
 - 只有一个入口：`frontend/src/main.tsx` → `ThemeProvider` → `AuthProvider` → HashRouter；
 - 构建输出固定为 `internal/webui/assets/{index.html,static/*}`。**改了源码必须重新构建并提交产物**，
   CI 会重跑构建并检查 `git diff --exit-code internal/webui/assets`；
 - 运行时不允许外部请求：字体、图标（`lucide-react`）、样式全部来自包内；CSP 保持
-  `script-src 'self'`、`style-src 'self' 'unsafe-inline'`（Tailwind/HeroUI 的少量内联样式）；
-- 主题：根元素 `.dark` class 切换，持久化在 `localStorage['nunt.theme']`；页面使用 HeroUI 组件与
-  Tailwind 语义色（`bg-background`、`text-foreground`、`text-muted`、`border-border` 等），不写死颜色。
+  `script-src 'self'`、`style-src 'self' 'unsafe-inline'`（antd 的 CSS-in-JS 内联样式）；
+- 主题：三态（light/dark/system），持久化在 `localStorage['nunt.theme.mode']`；页面使用 antd 组件与
+  `theme.useToken()`，不写死颜色。
 
 ### 7.3 目录
 
@@ -139,18 +135,19 @@ frontend/
     ├── router.tsx          # HashRouter + 鉴权守卫 + 页面懒加载
     ├── api.ts              # fetch 封装：JSON、CSRF、401 事件
     ├── session.tsx         # 登录态 Context、bootstrap、改密
-    ├── theme.tsx           # 明暗主题 Context
-    ├── menu.tsx            # 侧栏导航（lucide 图标）
-    ├── ui.tsx              # 统一 UI 层（Page/DataTable/FormModal/输入组件/Toast）
+    ├── theme.tsx           # 三态主题（light/dark/system）
+    ├── menu.tsx            # 顶部导航
+    ├── components.tsx      # PageHeader/Panel/DataTable/StatusTag 等
+    ├── components/         # Workspace 主从布局、命令面板、主题菜单
     ├── layout/AppLayout.tsx
-    └── views/*.tsx         # 9 个页面 + Login + PasswordChange
+    └── pages/*.tsx         # 9 个页面 + Login + PasswordChange
 ```
 
 ### 7.4 页面契约
 
 - 每个页面一个函数组件（默认导出），路由用 `lazy(() => import('./views/Xxx'))`；
-- 页面结构统一：`Page` → `PageHeader`（标题 + `.page-sub` + 操作按钮）→ `Panel`/`DataTable`；
-- 数据请求只用 `api.get/post/put/del`，错误用 `errorText(err)` 后 `toast.danger`；
+- 页面结构统一：紧凑工具栏 → `Workspace`（列表 + 详情）或全高控制台；不要再使用大标题 + 表格 + 弹窗的旧结构；
+- 数据请求只用 `api.get/post/put/del`，错误用 `errorText(err)` 后通过 antd `App.useApp()` 提示；
 - 写操作由 `api.ts` 自动带上 `X-CSRF-Token`；401 会触发 `nunt:unauthorized` 事件回到登录页；
 - 表单必须有 label，表格列必须有标题，按钮必须有可读文字（可访问性基线）。
 

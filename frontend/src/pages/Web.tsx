@@ -1,14 +1,11 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Alert,
   App,
   Button,
-  Col,
-  Dropdown,
   Empty,
-  Grid,
   Input,
-  Row,
+  Segmented,
   Select,
   Space,
   Spin,
@@ -17,21 +14,8 @@ import {
   Tooltip,
   Typography,
   theme,
-  type TableColumnsType,
 } from 'antd'
-import {
-  ArrowDownOutlined,
-  ArrowUpOutlined,
-  DeleteOutlined,
-  EditOutlined,
-  FileTextOutlined,
-  MoreOutlined,
-  PlusOutlined,
-  ReloadOutlined,
-  SearchOutlined,
-  WarningOutlined,
-  HolderOutlined,
-} from '@ant-design/icons'
+import { HolderOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import {
   DndContext,
   PointerSensor,
@@ -40,19 +24,23 @@ import {
   useSensors,
   type DragEndEvent,
 } from '@dnd-kit/core'
-import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { api, errorText } from '../api'
-import { DataTable, Muted, PageHeader, Panel, Toolbar, useIsMobile } from '../components'
-import ListenerModal from './web/ListenerModal'
-import LogsModal from './web/LogsModal'
-import RouteModal from './web/RouteModal'
-import { AccessTag, ListenAddresses, RouteTypeTag, TlsTag } from './web/ui'
+import { Muted } from '../components'
+import { EntityRow, PaneTitle, Workspace, type ItemStatus } from '../components/Workspace'
+import ListenerForm, { type ListenerPayload } from './web/ListenerForm'
+import RouteForm, { type RoutePayload } from './web/RouteForm'
+import { AccessTag, RouteTypeTag, TlsTag } from './web/ui'
 import {
   TYPE_OPTIONS,
   listenerName,
   normalizeAccessMode,
-  targetText,
   tlsModeOf,
   type Certificate,
   type ListResponse,
@@ -60,11 +48,25 @@ import {
   type WebRule,
 } from './web/types'
 
+type Mode = 'listeners' | 'rules'
+
+const NEW_ID = '__new__'
 const numberFormat = new Intl.NumberFormat('zh-CN')
 
 function fmtCount(value: unknown): string {
   const n = Number(value)
   return Number.isFinite(n) && n > 0 ? numberFormat.format(n) : '0'
+}
+
+function listenerStatus(listener: WebListenerView): ItemStatus {
+  if (listener.disabled) return 'off'
+  return Array.isArray(listener.listen) && listener.listen.length ? 'ok' : 'warn'
+}
+
+function routeStatus(rule: WebRule): ItemStatus {
+  if (rule.configError) return 'error'
+  if (!rule.enable) return 'off'
+  return rule.active ? 'ok' : 'warn'
 }
 
 /**
@@ -88,28 +90,29 @@ function mergeVisibleOrder(all: WebRule[], visibleIds: string[]): WebRule[] {
   return out
 }
 
-function SortableTableRow(props: any) {
-  const id = String(props['data-row-key'] ?? '')
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
-  return (
-    <tr
-      {...props}
-      ref={setNodeRef}
-      {...attributes}
-      {...listeners}
-      style={{
-        ...props.style,
-        transform: CSS.Transform.toString(transform),
-        transition,
-        opacity: isDragging ? 0.55 : 1,
-        cursor: 'grab',
-      }}
-    />
-  )
-}
+/** One list row wired to dnd-kit; the handle is passed into the row actions. */
+function SortableEntity({
+  id,
+  label,
+  disabled,
+  children,
+}: {
+  id: string
+  label: string
+  disabled?: boolean
+  children: (handle: ReactNode) => ReactNode
+}) {
+  const { token } = theme.useToken()
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id, disabled })
 
-function SortableCard({ id, children }: { id: string; children: (handle: ReactNode) => ReactNode }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
   return (
     <div
       ref={setNodeRef}
@@ -117,19 +120,26 @@ function SortableCard({ id, children }: { id: string; children: (handle: ReactNo
         transform: CSS.Transform.toString(transform),
         transition,
         opacity: isDragging ? 0.55 : 1,
-        background: 'var(--ant-color-bg-container)',
+        background: token.colorBgContainer,
+        position: isDragging ? 'relative' : undefined,
+        zIndex: isDragging ? 2 : undefined,
       }}
     >
       {children(
-        <Button
-          type="text"
-          size="small"
-          icon={<HolderOutlined />}
-          aria-label="拖动排序"
-          style={{ cursor: 'grab', touchAction: 'none' }}
-          {...attributes}
-          {...listeners}
-        />,
+        <Tooltip title="拖动排序">
+          <Button
+            ref={setActivatorNodeRef}
+            type="text"
+            size="small"
+            icon={<HolderOutlined />}
+            aria-label={`拖动排序 ${label}`}
+            disabled={disabled}
+            onClick={(event) => event.stopPropagation()}
+            style={{ cursor: 'grab', touchAction: 'none' }}
+            {...attributes}
+            {...listeners}
+          />
+        </Tooltip>,
       )}
     </div>
   )
@@ -138,53 +148,58 @@ function SortableCard({ id, children }: { id: string; children: (handle: ReactNo
 export default function Web() {
   const { message, modal } = App.useApp()
   const { token } = theme.useToken()
-  const screens = Grid.useBreakpoint()
-  const isMobile = useIsMobile()
-  const sideBySide = !!screens.xl
 
+  const [mode, setMode] = useState<Mode>('listeners')
   const [listeners, setListeners] = useState<WebListenerView[]>([])
   const [rules, setRules] = useState<WebRule[]>([])
   const [certificates, setCertificates] = useState<Certificate[]>([])
 
-  const [selectedListenerId, setSelectedListenerId] = useState('all')
+  const [selectedListenerId, setSelectedListenerId] = useState('')
+  const [selectedRuleId, setSelectedRuleId] = useState('')
+  const [listenerFilter, setListenerFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
-  const [search, setSearch] = useState('')
+  const [ruleSearch, setRuleSearch] = useState('')
 
   const [listenerLoading, setListenerLoading] = useState(true)
   const [rulesLoading, setRulesLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [listenerError, setListenerError] = useState('')
   const [ruleError, setRuleError] = useState('')
+
+  const [savingListener, setSavingListener] = useState(false)
+  const [savingRule, setSavingRule] = useState(false)
   const [busyListenerId, setBusyListenerId] = useState('')
   const [busyRuleId, setBusyRuleId] = useState('')
   const [reordering, setReordering] = useState(false)
+  const [listenerRevision, setListenerRevision] = useState(0)
+  const [routeRevision, setRouteRevision] = useState(0)
+  const dirtyRef = useRef(false)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
 
-  const [listenerModal, setListenerModal] = useState<{
-    open: boolean
-    listener: WebListenerView | null
-  }>({ open: false, listener: null })
-  const [routeModal, setRouteModal] = useState<{ open: boolean; rule: WebRule | null }>({
-    open: false,
-    rule: null,
-  })
-  const [logsRule, setLogsRule] = useState<WebRule | null>(null)
-
   const loadListeners = useCallback(
-    async (silent = false) => {
+    async (silent = false): Promise<WebListenerView[] | null> => {
       if (!silent) setListenerLoading(true)
       try {
         const data = await api.get<ListResponse<WebListenerView>>('/api/v1/web/listeners')
         const items = Array.isArray(data?.items) ? data.items : []
         setListeners(items)
-        setSelectedListenerId((current) =>
+        setSelectedListenerId((current) => {
+          if (current && current !== NEW_ID && !items.some((item) => item.id === current)) {
+            dirtyRef.current = false
+            return ''
+          }
+          return current
+        })
+        setListenerFilter((current) =>
           current !== 'all' && !items.some((item) => item.id === current) ? 'all' : current,
         )
         setListenerError('')
+        return items
       } catch (err) {
         const text = errorText(err)
         setListenerError(text)
         message.error(text)
+        return null
       } finally {
         if (!silent) setListenerLoading(false)
       }
@@ -193,16 +208,26 @@ export default function Web() {
   )
 
   const loadRules = useCallback(
-    async (silent = false) => {
+    async (silent = false): Promise<WebRule[] | null> => {
       if (!silent) setRulesLoading(true)
       try {
         const data = await api.get<ListResponse<WebRule>>('/api/v1/web/rules')
-        setRules(Array.isArray(data?.items) ? data.items : [])
+        const items = Array.isArray(data?.items) ? data.items : []
+        setRules(items)
+        setSelectedRuleId((current) => {
+          if (current && current !== NEW_ID && !items.some((item) => item.id === current)) {
+            dirtyRef.current = false
+            return ''
+          }
+          return current
+        })
         setRuleError('')
+        return items
       } catch (err) {
         const text = errorText(err)
         setRuleError(text)
         message.error(text)
+        return null
       } finally {
         if (!silent) setRulesLoading(false)
       }
@@ -221,11 +246,11 @@ export default function Web() {
 
   const refreshAll = useCallback(
     async (silent = false) => {
-      if (!silent) setRefreshing(true)
+      setRefreshing(true)
       try {
         await Promise.all([loadListeners(silent), loadRules(silent), loadCertificates()])
       } finally {
-        if (!silent) setRefreshing(false)
+        setRefreshing(false)
       }
     },
     [loadListeners, loadRules, loadCertificates],
@@ -235,8 +260,16 @@ export default function Web() {
     void refreshAll()
   }, [refreshAll])
 
-  const listenerOf = (listenerId: string): WebListenerView | null =>
-    listeners.find((item) => item.id === listenerId) || null
+  const selectedListener =
+    selectedListenerId && selectedListenerId !== NEW_ID
+      ? listeners.find((item) => item.id === selectedListenerId) || null
+      : null
+  const selectedRule =
+    selectedRuleId && selectedRuleId !== NEW_ID
+      ? rules.find((item) => item.id === selectedRuleId) || null
+      : null
+  const isNewListener = selectedListenerId === NEW_ID
+  const isNewRule = selectedRuleId === NEW_ID
 
   const listenerRouteCount = (listener: WebListenerView): number => {
     if (listener.routeCount !== undefined && Number.isFinite(Number(listener.routeCount))) {
@@ -246,9 +279,9 @@ export default function Web() {
   }
 
   const filteredRules = useMemo(() => {
-    const keyword = search.trim().toLowerCase()
+    const keyword = ruleSearch.trim().toLowerCase()
     return rules.filter((rule) => {
-      if (selectedListenerId !== 'all' && rule.listenerId !== selectedListenerId) return false
+      if (listenerFilter !== 'all' && rule.listenerId !== listenerFilter) return false
       if (typeFilter !== 'all' && rule.type !== typeFilter) return false
       if (!keyword) return true
       const hay = [
@@ -268,28 +301,208 @@ export default function Web() {
         .toLowerCase()
       return hay.includes(keyword)
     })
-  }, [rules, selectedListenerId, typeFilter, search, listeners])
+  }, [rules, listenerFilter, typeFilter, ruleSearch, listeners])
 
+  const activeListeners = listeners.filter((listener) => !listener.disabled).length
+  const runningRules = rules.filter((rule) => rule.enable && rule.active).length
+  const filtersActive =
+    listenerFilter !== 'all' || typeFilter !== 'all' || ruleSearch.trim().length > 0
 
-  const routeEmptyText = useMemo(() => {
-    if (!listeners.length) return '还没有监听器，请先新建监听器'
-    if (!rules.length) return '还没有 Web 路由，点击右上角「新建路由」'
-    if (!filteredRules.length) {
-      return selectedListenerId === 'all' ? '没有匹配的路由' : '该监听器下没有匹配的路由'
+  const defaultListenerId = (() => {
+    const candidate =
+      selectedListenerId && selectedListenerId !== NEW_ID
+        ? selectedListenerId
+        : listenerFilter !== 'all'
+          ? listenerFilter
+          : listeners.length === 1
+            ? listeners[0].id
+            : ''
+    return listeners.some((listener) => listener.id === candidate) ? candidate : ''
+  })()
+
+  const markDirty = useCallback((dirty: boolean) => {
+    dirtyRef.current = dirty
+  }, [])
+
+  const guard = useCallback(
+    (action: () => void) => {
+      if (!dirtyRef.current) {
+        action()
+        return
+      }
+      modal.confirm({
+        title: '放弃未保存的修改？',
+        content: '当前表单有未保存的内容，继续操作会丢失这些修改。',
+        okText: '放弃修改',
+        okButtonProps: { danger: true },
+        cancelText: '继续编辑',
+        onOk() {
+          dirtyRef.current = false
+          action()
+        },
+      })
+    },
+    [modal],
+  )
+
+  const selectListener = (id: string) => {
+    if (id === selectedListenerId) return
+    guard(() => {
+      dirtyRef.current = false
+      setSelectedListenerId(id)
+    })
+  }
+
+  const selectRule = (id: string) => {
+    if (id === selectedRuleId) return
+    guard(() => {
+      dirtyRef.current = false
+      setSelectedRuleId(id)
+    })
+  }
+
+  const changeMode = (next: Mode) => {
+    if (next === mode) return
+    guard(() => {
+      dirtyRef.current = false
+      if (mode === 'listeners' && selectedListenerId === NEW_ID) setSelectedListenerId('')
+      if (mode === 'rules' && selectedRuleId === NEW_ID) setSelectedRuleId('')
+      setMode(next)
+    })
+  }
+
+  const startNewListener = () => {
+    guard(() => {
+      dirtyRef.current = false
+      setMode('listeners')
+      setSelectedListenerId(NEW_ID)
+    })
+  }
+
+  const startNewRule = () => {
+    if (!listeners.length) {
+      guard(() => {
+        dirtyRef.current = false
+        setMode('listeners')
+        setSelectedListenerId(NEW_ID)
+        message.info('请先新建监听器，保存后再创建路由')
+      })
+      return
     }
-    return '暂无数据'
-  }, [listeners.length, rules.length, filteredRules.length, selectedListenerId])
+    guard(() => {
+      dirtyRef.current = false
+      setMode('rules')
+      setSelectedRuleId(NEW_ID)
+    })
+  }
 
-  // ------------------------------------------------------------------ 操作
+  const cancelListenerEdit = () => {
+    dirtyRef.current = false
+    setSelectedListenerId('')
+  }
+
+  const cancelRuleEdit = () => {
+    dirtyRef.current = false
+    setSelectedRuleId('')
+  }
+
+  const goBack = () => {
+    guard(() => {
+      dirtyRef.current = false
+      if (mode === 'listeners') setSelectedListenerId('')
+      else setSelectedRuleId('')
+    })
+  }
+
+  const saveListener = async (payload: ListenerPayload) => {
+    setSavingListener(true)
+    try {
+      const saved =
+        selectedListenerId === NEW_ID
+          ? await api.post<WebListenerView>('/api/v1/web/listeners', payload)
+          : await api.put<WebListenerView>(
+              `/api/v1/web/listeners/${encodeURIComponent(selectedListenerId)}`,
+              payload,
+            )
+      if (saved) {
+        setListeners((current) => {
+          const exists = current.some((item) => item.id === saved.id)
+          return exists
+            ? current.map((item) => (item.id === saved.id ? saved : item))
+            : [saved, ...current]
+        })
+      }
+      if (saved?.disabled) {
+        message.warning('端口被占用，监听器已保存但自动停用；释放端口后可手动启用')
+      } else {
+        message.success('监听器已保存')
+      }
+      dirtyRef.current = false
+      const targetId = saved?.id || (selectedListenerId !== NEW_ID ? selectedListenerId : '')
+      await loadListeners(true)
+      await loadRules(true)
+      if (targetId) setSelectedListenerId(targetId)
+      setListenerRevision((value) => value + 1)
+    } catch (err) {
+      message.error(errorText(err))
+    } finally {
+      setSavingListener(false)
+    }
+  }
+
+  const saveRule = async (payload: RoutePayload) => {
+    setSavingRule(true)
+    try {
+      let id = selectedRuleId
+      if (selectedRuleId === NEW_ID) {
+        const created = await api.post<{ id: string }>('/api/v1/web/rules', payload)
+        id = created?.id || NEW_ID
+        if (id !== NEW_ID) {
+          const optimistic: WebRule = { ...payload, id, active: false, requests: 0 }
+          setRules((current) => [optimistic, ...current.filter((item) => item.id !== id)])
+          // Make sure the route that was just created is visible in the list.
+          setRuleSearch('')
+          setTypeFilter('all')
+          setListenerFilter('all')
+        }
+      } else {
+        await api.put(`/api/v1/web/rules/${encodeURIComponent(selectedRuleId)}`, payload)
+        setRules((current) =>
+          current.map((item) =>
+            item.id === selectedRuleId ? { ...item, ...payload } : item,
+          ),
+        )
+      }
+      message.success('路由已保存')
+      dirtyRef.current = false
+      await loadRules(true)
+      await loadListeners(true)
+      if (id && id !== NEW_ID) {
+        setSelectedRuleId(id)
+        setRouteRevision((value) => value + 1)
+      }
+    } catch (err) {
+      message.error(errorText(err))
+    } finally {
+      setSavingRule(false)
+    }
+  }
 
   const toggleListener = async (listener: WebListenerView, enabled: boolean) => {
     if (busyListenerId) return
+    const previous = !!listener.disabled
     setBusyListenerId(listener.id)
+    setListeners((current) =>
+      current.map((item) => (item.id === listener.id ? { ...item, disabled: !enabled } : item)),
+    )
     try {
       await api.post(`/api/v1/web/listeners/${encodeURIComponent(listener.id)}/toggle`)
       message.success(enabled ? '监听器已启用' : '监听器已停用')
       await Promise.all([loadListeners(true), loadRules(true)])
     } catch (err) {
+      setListeners((current) =>
+        current.map((item) => (item.id === listener.id ? { ...item, disabled: previous } : item)),
+      )
       message.error(errorText(err))
       await loadListeners(true)
     } finally {
@@ -297,32 +510,60 @@ export default function Web() {
     }
   }
 
-  const toggleRule = async (rule: WebRule, enabled: boolean) => {
+  const toggleRule = (rule: WebRule, enabled: boolean) => {
     if (busyRuleId) return
-    const previous = rule.enable
-    setBusyRuleId(rule.id)
-    setRules((current) =>
-      current.map((item) => (item.id === rule.id ? { ...item, enable: enabled } : item)),
-    )
-    try {
-      const data = await api.post<{ id: string; enable: boolean }>(
-        `/api/v1/web/rules/${encodeURIComponent(rule.id)}/toggle`,
-      )
-      const next = !!data?.enable
-      message.success(next ? '路由已启用' : '路由已停用')
-      await loadRules(true)
-    } catch (err) {
+
+    const run = async () => {
+      const previous = rule.enable
+      setBusyRuleId(rule.id)
       setRules((current) =>
-        current.map((item) => (item.id === rule.id ? { ...item, enable: previous } : item)),
+        current.map((item) => (item.id === rule.id ? { ...item, enable: enabled } : item)),
       )
-      message.error(errorText(err))
-    } finally {
-      setBusyRuleId('')
+      try {
+        await api.post<{ id: string; enable: boolean }>(
+          `/api/v1/web/rules/${encodeURIComponent(rule.id)}/toggle`,
+        )
+        message.success(enabled ? '路由已启用' : '路由已停用')
+        await loadRules(true)
+        // Reload the open editor so its enable switch cannot overwrite the
+        // toggle on the next save.
+        if (selectedRuleId === rule.id) {
+          dirtyRef.current = false
+          setRouteRevision((value) => value + 1)
+        }
+      } catch (err) {
+        setRules((current) =>
+          current.map((item) => (item.id === rule.id ? { ...item, enable: previous } : item)),
+        )
+        message.error(errorText(err))
+      } finally {
+        setBusyRuleId('')
+      }
     }
+
+    if (selectedRuleId === rule.id && dirtyRef.current) {
+      modal.confirm({
+        title: '放弃未保存的修改？',
+        content: '切换该路由的状态会重新加载编辑表单，未保存的修改将丢失。',
+        okText: '放弃并切换',
+        okButtonProps: { danger: true },
+        cancelText: '继续编辑',
+        onOk() {
+          dirtyRef.current = false
+          void run()
+        },
+      })
+      return
+    }
+    void run()
   }
 
-  const persistListenerOrder = async (next: WebListenerView[]) => {
-    if (reordering) return
+  const onListenerDragEnd = async ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id || reordering) return
+    const oldIndex = listeners.findIndex((item) => item.id === String(active.id))
+    const newIndex = listeners.findIndex((item) => item.id === String(over.id))
+    if (oldIndex < 0 || newIndex < 0) return
+    const next = arrayMove(listeners, oldIndex, newIndex)
     setListeners(next)
     setReordering(true)
     try {
@@ -335,8 +576,13 @@ export default function Web() {
     }
   }
 
-  const persistRuleOrder = async (nextVisible: string[]) => {
-    if (reordering) return
+  const onRuleDragEnd = async ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id || reordering) return
+    const visibleIds = filteredRules.map((rule) => rule.id)
+    const oldIndex = visibleIds.indexOf(String(active.id))
+    const newIndex = visibleIds.indexOf(String(over.id))
+    if (oldIndex < 0 || newIndex < 0) return
+    const nextVisible = arrayMove(visibleIds, oldIndex, newIndex)
     const nextAll = mergeVisibleOrder(rules, nextVisible)
     setRules(nextAll)
     setReordering(true)
@@ -349,44 +595,6 @@ export default function Web() {
       setReordering(false)
     }
   }
-
-  const moveListener = (id: string, direction: -1 | 1) => {
-    const index = listeners.findIndex((item) => item.id === id)
-    const target = index + direction
-    if (index < 0 || target < 0 || target >= listeners.length) return
-    void persistListenerOrder(arrayMove(listeners, index, target))
-  }
-
-
-  const onListenerDragEnd = ({ active, over }: DragEndEvent) => {
-    if (!over || active.id === over.id) return
-    const oldIndex = listeners.findIndex((item) => item.id === active.id)
-    const newIndex = listeners.findIndex((item) => item.id === over.id)
-    if (oldIndex < 0 || newIndex < 0) return
-    void persistListenerOrder(arrayMove(listeners, oldIndex, newIndex))
-  }
-
-  const onRuleDragEnd = ({ active, over }: DragEndEvent) => {
-    if (!over || active.id === over.id) return
-    const ids = filteredRules.map((rule) => rule.id)
-    const oldIndex = ids.indexOf(String(active.id))
-    const newIndex = ids.indexOf(String(over.id))
-    if (oldIndex < 0 || newIndex < 0) return
-    void persistRuleOrder(arrayMove(ids, oldIndex, newIndex))
-  }
-
-  const openCreateListener = () => setListenerModal({ open: true, listener: null })
-  const openEditListener = (listener: WebListenerView) =>
-    setListenerModal({ open: true, listener })
-
-  const openCreateRule = () => {
-    if (!listeners.length) {
-      message.warning('请先新建一个监听器，路由需要绑定监听器')
-      return
-    }
-    setRouteModal({ open: true, rule: null })
-  }
-  const openEditRule = (rule: WebRule) => setRouteModal({ open: true, rule })
 
   const askDeleteListener = (listener: WebListenerView) => {
     modal.confirm({
@@ -404,7 +612,8 @@ export default function Web() {
         try {
           await api.del(`/api/v1/web/listeners/${encodeURIComponent(listener.id)}`)
           message.success('监听器已删除')
-          if (selectedListenerId === listener.id) setSelectedListenerId('all')
+          dirtyRef.current = false
+          setSelectedListenerId('')
           await refreshAll(true)
         } catch (err) {
           message.error(errorText(err))
@@ -416,11 +625,7 @@ export default function Web() {
   const askDeleteRule = (rule: WebRule) => {
     modal.confirm({
       title: '删除 Web 路由',
-      content: (
-        <span>
-          确定删除路由「{rule.name || rule.id}」吗？该操作不可撤销。
-        </span>
-      ),
+      content: <span>确定删除路由「{rule.name || rule.id}」吗？该操作不可撤销。</span>,
       okText: '删除',
       okButtonProps: { danger: true },
       cancelText: '取消',
@@ -428,6 +633,8 @@ export default function Web() {
         try {
           await api.del(`/api/v1/web/rules/${encodeURIComponent(rule.id)}`)
           message.success('路由已删除')
+          dirtyRef.current = false
+          setSelectedRuleId('')
           await refreshAll(true)
         } catch (err) {
           message.error(errorText(err))
@@ -436,386 +643,23 @@ export default function Web() {
     })
   }
 
-  // ------------------------------------------------------------------ 监听器
+  const clearRouteFilters = () => {
+    setRuleSearch('')
+    setTypeFilter('all')
+    setListenerFilter('all')
+  }
 
-  const listenerMenu = (listener: WebListenerView, index: number) => ({
-    items: [
-      { key: 'edit', icon: <EditOutlined />, label: '编辑' },
-      {
-        key: 'up',
-        icon: <ArrowUpOutlined />,
-        label: '上移',
-        disabled: index <= 0 || reordering,
-      },
-      {
-        key: 'down',
-        icon: <ArrowDownOutlined />,
-        label: '下移',
-        disabled: index >= listeners.length - 1 || reordering,
-      },
-      { type: 'divider' as const },
-      { key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true },
-    ],
-    onClick: ({ key }: { key: string }) => {
-      if (key === 'edit') openEditListener(listener)
-      if (key === 'up') void moveListener(listener.id, -1)
-      if (key === 'down') void moveListener(listener.id, 1)
-      if (key === 'delete') askDeleteListener(listener)
-    },
-  })
-
-  const listenerColumns: TableColumnsType<WebListenerView> = [
-    {
-      key: 'sort',
-      title: '排序',
-      width: 48,
-      render: () => (
-        <Tooltip title="拖动或使用菜单排序">
-          <HolderOutlined style={{ cursor: 'grab', color: 'rgba(0,0,0,0.35)' }} />
-        </Tooltip>
-      ),
-    },
-    {
-      key: 'listener',
-      title: '监听器',
-      render: (_value, row) => (
-        <div style={{ minWidth: 0 }}>
-          <Space size={[4, 4]} wrap>
-            <Typography.Text strong>{row.name || row.id}</Typography.Text>
-            <TlsTag
-              mode={tlsModeOf(row)}
-              clientAuth={row.tls?.clientAuth}
-              hsts={row.tls?.hsts}
-            />
-            {row.disabled ? <Tag color="orange">已停用</Tag> : null}
-          </Space>
-          <div style={{ marginTop: 4 }}>
-            <ListenAddresses addresses={row.listen} />
-          </div>
-          <div style={{ marginTop: 4 }}>
-            <Muted>
-              {listenerRouteCount(row)} 条路由
-              {row.remark ? ` · ${row.remark}` : ''}
-            </Muted>
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: 'status',
-      title: '状态',
-      width: 72,
-      render: (_value, row) => (
-        <Tooltip title={row.disabled ? '已停用，点击启用' : '运行中，点击停用'}>
-          <Switch
-            size="small"
-            checked={!row.disabled}
-            loading={busyListenerId === row.id}
-            onChange={(checked) => void toggleListener(row, checked)}
-            aria-label={`启停监听器 ${row.name || row.id}`}
-          />
-        </Tooltip>
-      ),
-    },
-    {
-      key: 'actions',
-      title: '操作',
-      width: 48,
-      render: (_value, row, index) => (
-        <Dropdown menu={listenerMenu(row, index)} trigger={['click']} placement="bottomRight">
-          <Button
-            type="text"
-            size="small"
-            icon={<MoreOutlined />}
-            aria-label={`监听器操作 ${row.name || row.id}`}
-          />
-        </Dropdown>
-      ),
-    },
-  ]
-
-  // ------------------------------------------------------------------ 路由
-
-  const routeMenu = (rule: WebRule) => ({
-    items: [
-      { key: 'logs', icon: <FileTextOutlined />, label: '访问日志' },
-      { key: 'edit', icon: <EditOutlined />, label: '编辑路由' },
-      { type: 'divider' as const },
-      { key: 'delete', icon: <DeleteOutlined />, label: '删除路由', danger: true },
-    ],
-    onClick: ({ key }: { key: string }) => {
-      if (key === 'logs') setLogsRule(rule)
-      if (key === 'edit') openEditRule(rule)
-      if (key === 'delete') askDeleteRule(rule)
-    },
-  })
-
-  const routeColumns: TableColumnsType<WebRule> = [
-    {
-      key: 'sort',
-      title: '排序',
-      width: 48,
-      render: () => (
-        <Tooltip title="拖动或使用菜单排序">
-          <HolderOutlined style={{ cursor: 'grab', color: 'rgba(0,0,0,0.35)' }} />
-        </Tooltip>
-      ),
-    },
-    {
-      key: 'site',
-      title: '站点',
-      render: (_value, row) => {
-        const domains = Array.isArray(row.domains) ? row.domains : []
-        return (
-          <div style={{ minWidth: 0, maxWidth: 260 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-              {domains.length ? (
-                <Typography.Text
-                  strong
-                  ellipsis={{
-                    tooltip: (
-                      <span style={{ whiteSpace: 'pre-line' }}>{domains.join('\n')}</span>
-                    ),
-                  }}
-                  style={{ maxWidth: 200 }}
-                >
-                  {domains[0]}
-                </Typography.Text>
-              ) : (
-                <Typography.Text type="secondary">全部域名</Typography.Text>
-              )}
-              {domains.length > 1 ? <Tag>+{domains.length - 1}</Tag> : null}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
-              <Typography.Text className="mono" style={{ fontSize: 12 }}>
-                {row.path || '/'}
-              </Typography.Text>
-              <Typography.Text
-                type="secondary"
-                ellipsis={{ tooltip: row.name || row.id }}
-                style={{ fontSize: 12, maxWidth: 170 }}
-              >
-                {row.name || row.id}
-              </Typography.Text>
-            </div>
-            {selectedListenerId === 'all' ? (
-              <Tag color="geekblue" style={{ marginTop: 4 }}>
-                {listenerName(listeners, row.listenerId)}
-              </Tag>
-            ) : null}
-          </div>
-        )
-      },
-    },
-    {
-      key: 'target',
-      title: '类型 / 上游',
-      width: 220,
-      render: (_value, row) => (
-        <div style={{ minWidth: 0, maxWidth: 220 }}>
-          <RouteTypeTag type={row.type} />
-          <Typography.Text
-            type="secondary"
-            className="mono"
-            ellipsis={{ tooltip: targetText(row) }}
-            style={{ display: 'block', fontSize: 12, marginTop: 2 }}
-          >
-            {targetText(row)}
-          </Typography.Text>
-        </div>
-      ),
-    },
-    {
-      key: 'security',
-      title: '安全',
-      width: 180,
-      responsive: ['lg'],
-      render: (_value, row) => {
-        const listener = listenerOf(row.listenerId)
-        return (
-          <Space size={[4, 4]} wrap>
-            <TlsTag
-              mode={tlsModeOf(listener)}
-              clientAuth={listener?.tls?.clientAuth}
-              hsts={listener?.tls?.hsts}
-            />
-            <Tag color={row.waf ? 'volcano' : 'default'}>WAF {row.waf ? '开' : '关'}</Tag>
-          </Space>
-        )
-      },
-    },
-    {
-      key: 'access',
-      title: '访问',
-      width: 110,
-      responsive: ['lg'],
-      render: (_value, row) => (
-        <Space size={[4, 4]} wrap>
-          <AccessTag mode={normalizeAccessMode(row.access?.mode)} />
-          {row.basicAuth?.enable ? <Tag color="purple">认证</Tag> : null}
-        </Space>
-      ),
-    },
-    {
-      key: 'status',
-      title: '状态',
-      width: 150,
-      render: (_value, row) => (
-        <div>
-          <Space size={6} align="center" wrap>
-            <Switch
-              size="small"
-              checked={row.enable}
-              loading={busyRuleId === row.id}
-              onChange={(checked) => void toggleRule(row, checked)}
-              aria-label={`启停路由 ${row.name || row.id}`}
-            />
-            {!row.enable ? (
-              <Muted>已停用</Muted>
-            ) : row.active ? (
-              <Tag color="green">运行中</Tag>
-            ) : (
-              <Tooltip title={row.configError || '监听器未运行或配置尚未生效'}>
-                <Tag color="orange" icon={<WarningOutlined />}>
-                  未生效
-                </Tag>
-              </Tooltip>
-            )}
-          </Space>
-          <div style={{ marginTop: 2 }}>
-            <Muted>{fmtCount(row.requests)} 次请求</Muted>
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: 'actions',
-      title: '操作',
-      width: 48,
-      render: (_value, row) => (
-        <Dropdown menu={routeMenu(row)} trigger={['click']} placement="bottomRight">
-          <Button
-            type="text"
-            size="small"
-            icon={<MoreOutlined />}
-            aria-label={`路由操作 ${row.name || row.id}`}
-          />
-        </Dropdown>
-      ),
-    },
-  ]
-
-  // ------------------------------------------------------------------ 渲染
-
-  const listenerTable = (
-    <DataTable<WebListenerView>
-      rowKey={(row) => row.id}
-      columns={listenerColumns}
-      dataSource={listeners}
-      loading={listenerLoading}
-      pagination={false}
-      scroll={{}}
-      components={{ body: { row: SortableTableRow } }}
-      locale={{
-        emptyText: (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有监听器">
-            <Button size="small" type="primary" onClick={openCreateListener}>
-              新建监听器
-            </Button>
-          </Empty>
-        ),
-      }}
-    />
-  )
-
-  const listenerCards = (
-    <div>
-      {listenerLoading && !listeners.length ? (
-        <div style={{ padding: 24, textAlign: 'center' }}>
-          <Spin />
-        </div>
-      ) : listeners.length ? (
-        listeners.map((listener, index) => (
-          <SortableCard key={listener.id} id={listener.id}>
-            {(handle) => (
-          <div
-            style={{
-              padding: '10px 12px',
-              borderBottom:
-                index < listeners.length - 1 ? `1px solid ${token.colorBorderSecondary}` : undefined,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <Space size={[4, 4]} wrap>
-                  <Typography.Text strong>{listener.name || listener.id}</Typography.Text>
-                  <TlsTag
-                    mode={tlsModeOf(listener)}
-                    clientAuth={listener.tls?.clientAuth}
-                    hsts={listener.tls?.hsts}
-                  />
-                  {listener.disabled ? <Tag color="orange">已停用</Tag> : null}
-                </Space>
-                <div style={{ marginTop: 4 }}>
-                  <ListenAddresses addresses={listener.listen} />
-                </div>
-                <div style={{ marginTop: 4 }}>
-                  <Muted>
-                    {listenerRouteCount(listener)} 条路由
-                    {listener.remark ? ` · ${listener.remark}` : ''}
-                  </Muted>
-                </div>
-              </div>
-              <Space size={2} align="start">
-                {handle}
-                <Tooltip title={listener.disabled ? '已停用，点击启用' : '运行中，点击停用'}>
-                  <Switch
-                    size="small"
-                    checked={!listener.disabled}
-                    loading={busyListenerId === listener.id}
-                    onChange={(checked) => void toggleListener(listener, checked)}
-                    aria-label={`启停监听器 ${listener.name || listener.id}`}
-                  />
-                </Tooltip>
-                <Dropdown
-                  menu={listenerMenu(listener, index)}
-                  trigger={['click']}
-                  placement="bottomRight"
-                >
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<MoreOutlined />}
-                    aria-label={`监听器操作 ${listener.name || listener.id}`}
-                  />
-                </Dropdown>
-              </Space>
-            </div>
-          </div>
-            )}
-          </SortableCard>
-        ))
-      ) : (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有监听器" style={{ padding: 24 }}>
-          <Button size="small" type="primary" onClick={openCreateListener}>
-            新建监听器
-          </Button>
-        </Empty>
-      )}
-    </div>
-  )
-
-  const listenerPanel = (
-    <Panel
-      title="监听器"
-      extra={<Muted>{listeners.length} 个</Muted>}
-      bodyStyle={{ padding: 0 }}
-    >
+  const listenerList = (
+    <>
+      <PaneTitle
+        title="监听器"
+        subtitle={`${listeners.length} 个 · ${activeListeners} 个运行中`}
+      />
       {listenerError ? (
         <Alert
           type="error"
           showIcon
-          style={{ margin: 12 }}
+          style={{ margin: 8 }}
           message="加载监听器失败"
           description={listenerError}
           action={
@@ -825,35 +669,120 @@ export default function Web() {
           }
         />
       ) : null}
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onListenerDragEnd}>
-        <SortableContext items={listeners.map((listener) => listener.id)} strategy={verticalListSortingStrategy}>
-          {isMobile ? listenerCards : listenerTable}
-        </SortableContext>
-      </DndContext>
-    </Panel>
+      <Spin spinning={listenerLoading}>
+        <div style={{ minHeight: 120 }}>
+          {isNewListener ? (
+            <EntityRow
+              title="新建监听器"
+              subtitle="尚未保存"
+              status="warn"
+              selected
+            />
+          ) : null}
+          {listeners.length ? (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={(event) => void onListenerDragEnd(event)}
+            >
+              <SortableContext
+                items={listeners.map((listener) => listener.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                {listeners.map((listener) => (
+                  <SortableEntity
+                    key={listener.id}
+                    id={listener.id}
+                    label={listener.name || listener.id}
+                    disabled={reordering}
+                  >
+                    {(handle) => (
+                      <EntityRow
+                        title={listener.name || listener.id}
+                        subtitle={
+                          (Array.isArray(listener.listen) ? listener.listen : []).join(' · ') ||
+                          '未配置监听地址'
+                        }
+                        status={listenerStatus(listener)}
+                        selected={selectedListenerId === listener.id}
+                        onClick={() => selectListener(listener.id)}
+                        meta={
+                          <Space size={[4, 4]} wrap>
+                            <TlsTag
+                              mode={tlsModeOf(listener)}
+                              clientAuth={listener.tls?.clientAuth}
+                              hsts={listener.tls?.hsts}
+                            />
+                            {listener.disabled ? <Tag>已停用</Tag> : null}
+                            <Muted>{listenerRouteCount(listener)} 条路由</Muted>
+                          </Space>
+                        }
+                        actions={
+                          <div
+                            onClick={(event) => event.stopPropagation()}
+                            style={{ display: 'flex', alignItems: 'center', gap: 2 }}
+                          >
+                            {handle}
+                            <Switch
+                              size="small"
+                              checked={!listener.disabled}
+                              loading={busyListenerId === listener.id}
+                              onChange={(checked) => void toggleListener(listener, checked)}
+                              aria-label={`启停监听器 ${listener.name || listener.id}`}
+                            />
+                          </div>
+                        }
+                      />
+                    )}
+                  </SortableEntity>
+                ))}
+              </SortableContext>
+            </DndContext>
+          ) : !isNewListener ? (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="还没有监听器"
+              style={{ padding: 24 }}
+            >
+              <Button type="primary" size="small" onClick={startNewListener}>
+                新建监听器
+              </Button>
+            </Empty>
+          ) : null}
+        </div>
+      </Spin>
+    </>
   )
 
-  const routePanel = (
-    <Panel
-      title="路由"
-      extra={
-        <Muted>
-          共 {rules.length} 条 · 显示 {filteredRules.length} 条
-        </Muted>
-      }
-      bodyStyle={{ padding: 0 }}
-    >
+  const routeList = (
+    <>
+      <PaneTitle
+        title="路由"
+        subtitle={`${filteredRules.length} / ${rules.length} 条`}
+      />
       <div
         style={{
-          padding: 12,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+          padding: 8,
           borderBottom: `1px solid ${token.colorBorderSecondary}`,
         }}
       >
-        <Toolbar>
+        <Input
+          size="small"
+          allowClear
+          prefix={<SearchOutlined />}
+          placeholder="搜索域名 / 路径 / 上游"
+          value={ruleSearch}
+          onChange={(event) => setRuleSearch(event.target.value)}
+        />
+        <div style={{ display: 'flex', gap: 6 }}>
           <Select
+            size="small"
             aria-label="按监听器筛选"
-            value={selectedListenerId}
-            onChange={setSelectedListenerId}
+            value={listenerFilter}
+            onChange={setListenerFilter}
             options={[
               { value: 'all', label: '全部监听器' },
               ...listeners.map((listener) => ({
@@ -861,31 +790,23 @@ export default function Web() {
                 label: listener.name || listener.id,
               })),
             ]}
-            style={{ width: isMobile ? '100%' : 160 }}
+            style={{ flex: 1, minWidth: 0 }}
           />
           <Select
+            size="small"
             aria-label="按类型筛选"
             value={typeFilter}
             onChange={setTypeFilter}
             options={[{ value: 'all', label: '全部类型' }, ...TYPE_OPTIONS]}
-            style={{ width: isMobile ? '100%' : 130 }}
+            style={{ width: 100 }}
           />
-          <Input
-            allowClear
-            prefix={<SearchOutlined />}
-            placeholder="搜索域名 / 路径 / 上游"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            style={{ width: isMobile ? '100%' : 240 }}
-          />
-        </Toolbar>
+        </div>
       </div>
-
       {ruleError ? (
         <Alert
           type="error"
           showIcon
-          style={{ margin: 12 }}
+          style={{ margin: 8 }}
           message="加载路由失败"
           description={ruleError}
           action={
@@ -895,104 +816,262 @@ export default function Web() {
           }
         />
       ) : null}
-
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onRuleDragEnd}>
-        <SortableContext items={filteredRules.map((rule) => rule.id)} strategy={verticalListSortingStrategy}>
-      <DataTable<WebRule>
-        rowKey={(row) => row.id}
-        columns={routeColumns}
-        dataSource={filteredRules}
-        loading={rulesLoading}
-        pagination={false}
-        components={{ body: { row: SortableTableRow } }}
-        locale={{
-          emptyText: (
+      <Spin spinning={rulesLoading}>
+        <div style={{ minHeight: 120 }}>
+          {isNewRule ? (
+            <EntityRow
+              title="新建路由"
+              subtitle="尚未保存"
+              status="warn"
+              selected
+            />
+          ) : null}
+          {filteredRules.length ? (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={(event) => void onRuleDragEnd(event)}
+            >
+              <SortableContext
+                items={filteredRules.map((rule) => rule.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                {filteredRules.map((rule) => {
+                  const domains = Array.isArray(rule.domains) ? rule.domains : []
+                  return (
+                    <SortableEntity
+                      key={rule.id}
+                      id={rule.id}
+                      label={rule.name || rule.id}
+                      disabled={reordering}
+                    >
+                      {(handle) => (
+                        <EntityRow
+                          title={rule.name || rule.id}
+                          subtitle={`${domains[0] || '全部域名'}${rule.path || '/'} · ${listenerName(listeners, rule.listenerId)}`}
+                          status={routeStatus(rule)}
+                          selected={selectedRuleId === rule.id}
+                          onClick={() => selectRule(rule.id)}
+                          meta={
+                            <Space size={[4, 4]} wrap>
+                              <RouteTypeTag type={rule.type} />
+                              <AccessTag mode={normalizeAccessMode(rule.access?.mode)} />
+                              {rule.waf ? <Tag color="volcano">WAF</Tag> : null}
+                              <Muted>{fmtCount(rule.requests)} 次</Muted>
+                            </Space>
+                          }
+                          actions={
+                            <div
+                              onClick={(event) => event.stopPropagation()}
+                              style={{ display: 'flex', alignItems: 'center', gap: 2 }}
+                            >
+                              {handle}
+                              <Switch
+                                size="small"
+                                checked={rule.enable}
+                                loading={busyRuleId === rule.id}
+                                onChange={(checked) => void toggleRule(rule, checked)}
+                                aria-label={`启停路由 ${rule.name || rule.id}`}
+                              />
+                            </div>
+                          }
+                        />
+                      )}
+                    </SortableEntity>
+                  )
+                })}
+              </SortableContext>
+            </DndContext>
+          ) : !isNewRule ? (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={rulesLoading ? '加载中…' : routeEmptyText}
+              description={
+                rules.length
+                  ? '没有匹配的路由'
+                  : listeners.length
+                    ? '还没有 Web 路由'
+                    : '还没有监听器，先创建监听器再建路由'
+              }
+              style={{ padding: 24 }}
             >
-              {!listeners.length ? (
-                <Button size="small" type="primary" onClick={openCreateListener}>
-                  新建监听器
+              {filtersActive ? (
+                <Button size="small" onClick={clearRouteFilters}>
+                  清除筛选
                 </Button>
-              ) : rules.length ? null : (
-                <Button size="small" type="primary" onClick={openCreateRule}>
+              ) : listeners.length ? (
+                <Button type="primary" size="small" onClick={startNewRule}>
                   新建路由
+                </Button>
+              ) : (
+                <Button type="primary" size="small" onClick={startNewListener}>
+                  新建监听器
                 </Button>
               )}
             </Empty>
-          ),
-        }}
-      />
-        </SortableContext>
-      </DndContext>
-    </Panel>
+          ) : null}
+        </div>
+      </Spin>
+    </>
   )
+
+  const listenerDetail = isNewListener ? (
+    <ListenerForm
+      key={`listener-new-${listenerRevision}`}
+      listener={null}
+      certificates={certificates}
+      saving={savingListener}
+      onSave={(payload) => void saveListener(payload)}
+      onCancel={cancelListenerEdit}
+      onDirtyChange={markDirty}
+    />
+  ) : selectedListener ? (
+    <ListenerForm
+      key={`listener-${selectedListener.id}-${listenerRevision}`}
+      listener={selectedListener}
+      certificates={certificates}
+      saving={savingListener}
+      onSave={(payload) => void saveListener(payload)}
+      onCancel={cancelListenerEdit}
+      onDelete={() => askDeleteListener(selectedListener)}
+      onDirtyChange={markDirty}
+    />
+  ) : (
+    <Empty
+      image={Empty.PRESENTED_IMAGE_SIMPLE}
+      description={
+        selectedListenerId ? '该监听器已不存在，请刷新后重试' : '选择左侧监听器进行编辑'
+      }
+      style={{ padding: 40 }}
+    >
+      <Button type="primary" icon={<PlusOutlined />} onClick={startNewListener}>
+        新建监听器
+      </Button>
+    </Empty>
+  )
+
+  const ruleDetail = isNewRule ? (
+    <RouteForm
+      key={`rule-new-${routeRevision}`}
+      rule={null}
+      listeners={listeners}
+      defaultListenerId={defaultListenerId}
+      saving={savingRule}
+      onSave={(payload) => void saveRule(payload)}
+      onCancel={cancelRuleEdit}
+      onDirtyChange={markDirty}
+    />
+  ) : selectedRule ? (
+    <RouteForm
+      key={`rule-${selectedRule.id}-${routeRevision}`}
+      rule={selectedRule}
+      listeners={listeners}
+      defaultListenerId={defaultListenerId}
+      saving={savingRule}
+      onSave={(payload) => void saveRule(payload)}
+      onCancel={cancelRuleEdit}
+      onDelete={() => askDeleteRule(selectedRule)}
+      onDirtyChange={markDirty}
+    />
+  ) : (
+    <Empty
+      image={Empty.PRESENTED_IMAGE_SIMPLE}
+      description={
+        !listeners.length
+          ? '还没有监听器，先创建监听器再建路由'
+          : selectedRuleId
+            ? '该路由已不存在，请刷新后重试'
+            : '选择左侧路由进行编辑'
+      }
+      style={{ padding: 40 }}
+    >
+      {listeners.length ? (
+        <Button type="primary" icon={<PlusOutlined />} onClick={startNewRule}>
+          新建路由
+        </Button>
+      ) : (
+        <Button type="primary" icon={<PlusOutlined />} onClick={startNewListener}>
+          新建监听器
+        </Button>
+      )}
+    </Empty>
+  )
+
+  const detailSelected =
+    mode === 'listeners' ? selectedListenerId !== '' : selectedRuleId !== ''
 
   return (
     <div>
-      <PageHeader
-        title="Web 服务"
-        subtitle="监听器负责端口与 TLS，路由按域名/路径选择上游"
-        extra={
-          <>
-            <Button
-              icon={<ReloadOutlined />}
-              loading={refreshing}
-              onClick={() => void refreshAll()}
-            >
-              刷新
-            </Button>
-            <Button icon={<PlusOutlined />} onClick={openCreateListener}>
-              新建监听器
-            </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateRule}>
-              新建路由
-            </Button>
-          </>
-        }
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 12,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
+          <Typography.Text strong style={{ fontSize: 16 }}>
+            Web 服务
+          </Typography.Text>
+          <Space size={[4, 4]} wrap>
+            <Tag bordered={false} style={{ marginInlineEnd: 0 }}>
+              监听器 {listeners.length}
+            </Tag>
+            <Tag bordered={false} style={{ marginInlineEnd: 0 }}>
+              路由 {rules.length}
+            </Tag>
+            {runningRules > 0 ? (
+              <Tag color="green" bordered={false} style={{ marginInlineEnd: 0 }}>
+                运行中 {runningRules}
+              </Tag>
+            ) : null}
+          </Space>
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            flexWrap: 'wrap',
+            marginLeft: 'auto',
+          }}
+        >
+          <Segmented
+            size="small"
+            value={mode}
+            onChange={(value) => changeMode(value as Mode)}
+            options={[
+              { label: '监听器', value: 'listeners' },
+              { label: '路由', value: 'rules' },
+            ]}
+          />
+          <Button
+            size="small"
+            icon={<ReloadOutlined />}
+            loading={refreshing}
+            onClick={() => void refreshAll(true)}
+          >
+            刷新
+          </Button>
+          <Button
+            size="small"
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={mode === 'listeners' ? startNewListener : startNewRule}
+          >
+            {mode === 'listeners' ? '新建监听器' : '新建路由'}
+          </Button>
+        </div>
+      </div>
+
+      <Workspace
+        listWidth={360}
+        list={mode === 'listeners' ? listenerList : routeList}
+        detail={mode === 'listeners' ? listenerDetail : ruleDetail}
+        selected={detailSelected}
+        onBack={goBack}
       />
-
-      {sideBySide ? (
-        <Row gutter={[16, 16]}>
-          <Col xs={24} xl={8} xxl={7}>
-            {listenerPanel}
-          </Col>
-          <Col xs={24} xl={16} xxl={17}>
-            {routePanel}
-          </Col>
-        </Row>
-      ) : (
-        <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          {listenerPanel}
-          {routePanel}
-        </Space>
-      )}
-
-      <ListenerModal
-        open={listenerModal.open}
-        listener={listenerModal.listener}
-        certificates={certificates}
-        onClose={() => setListenerModal({ open: false, listener: null })}
-        onSaved={() => void refreshAll(true)}
-      />
-
-      <RouteModal
-        open={routeModal.open}
-        rule={routeModal.rule}
-        listeners={listeners}
-        defaultListenerId={
-          selectedListenerId !== 'all'
-            ? selectedListenerId
-            : listeners.length === 1
-              ? listeners[0].id
-              : ''
-        }
-        onClose={() => setRouteModal({ open: false, rule: null })}
-        onSaved={() => void refreshAll(true)}
-      />
-
-      <LogsModal open={!!logsRule} rule={logsRule} onClose={() => setLogsRule(null)} />
     </div>
   )
 }
