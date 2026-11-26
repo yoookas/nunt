@@ -1,183 +1,166 @@
 import { useEffect, useState } from 'react'
-import { Button, Drawer, Dropdown, Menu } from '@heroui/react'
-import { CircleUserRound, KeyRound, LogOut, Menu as MenuIcon, TriangleAlert } from 'lucide-react'
-import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { api } from '../api'
-import ThemeSwitch from '../ThemeSwitch'
+import { Avatar, Button, Drawer, Dropdown, Layout, Menu, Space, Typography, theme } from 'antd'
+import { LogoutOutlined, MenuOutlined, SearchOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { menu } from '../menu'
 import { useAuth } from '../session'
-import { usePolling } from '../usePolling'
+import CommandPalette from '../components/CommandPalette'
+import ThemeMenu from '../components/ThemeMenu'
 
-function Navigation({ onNavigate }: { onNavigate?: () => void }) {
-  const location = useLocation()
-  const navigate = useNavigate()
-  const active = menu.find((item) => (item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path)))
-
-  return (
-    <Menu
-      aria-label="主导航"
-      selectionMode="single"
-      selectedKeys={active ? [active.path] : []}
-      onSelectionChange={(keys) => {
-        const next = [...keys][0]
-        if (next != null) {
-          navigate(String(next))
-          onNavigate?.()
-        }
-      }}
-      className="px-2"
-    >
-      {menu.map((item) => {
-        const Icon = item.icon
-        return (
-          <Menu.Item key={item.path} id={item.path} textValue={item.title}>
-            <Icon size={18} />
-            <span>{item.title}</span>
-          </Menu.Item>
-        )
-      })}
-    </Menu>
-  )
-}
-
-interface HealthProblem {
-  level: 'danger' | 'warning' | string
-  title: string
-  detail: string
-}
+const { Header, Content } = Layout
 
 export default function AppLayout() {
   const { logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const [mobileOpen, setMobileOpen] = useState(false)
-  const [problems, setProblems] = useState<HealthProblem[]>([])
-  const current = menu.find((item) => (item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path)))
-
-
-  // Surface certificate, module and renewal failures on every page: they used
-  // to appear only on the overview, so a failed issuance stayed invisible
-  // until somebody happened to open it.
-  const refreshHealth = async () => {
-    const data = await api.get<{ problems?: HealthProblem[] }>('/api/v1/system/health')
-    setProblems(Array.isArray(data?.problems) ? data.problems : [])
-  }
+  const { token } = theme.useToken()
+  const [drawer, setDrawer] = useState(false)
+  const [palette, setPalette] = useState(false)
+  const isMobile = useIsMobile()
 
   useEffect(() => {
-    void refreshHealth().catch(() => undefined)
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setPalette(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
   }, [])
-  usePolling(refreshHealth, 30000)
 
-  const onAction = async (key: string) => {
-    if (key === 'password') {
-      navigate('/account/password')
-      return
-    }
-    if (key === 'logout') {
-      await logout()
-      navigate('/login')
-    }
-  }
+  const active = location.pathname === '/' ? '/' : menu.find((m) => m.path !== '/' && location.pathname.startsWith(m.path))?.path || '/'
 
   return (
-    <div className="flex h-full min-h-screen bg-background text-foreground">
-      {/* Desktop sidebar */}
-      <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-surface md:flex">
-        <div className="flex-1 overflow-y-auto py-3">
-          <Navigation />
-        </div>
-      </aside>
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 shrink-0 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur sm:px-6">
-          <Button
-            isIconOnly
-            variant="ghost"
-            className="md:hidden"
-            aria-label="打开导航"
-            onPress={() => setMobileOpen(true)}
+    <Layout style={{ minHeight: '100dvh', background: token.colorBgLayout }}>
+      <Header
+        style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 20,
+          height: 60,
+          lineHeight: '60px',
+          padding: '0 16px',
+          background: token.colorBgContainer,
+          borderBottom: `1px solid ${token.colorBorderSecondary}`,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+        }}
+      >
+        {isMobile ? (
+          <Button type="text" icon={<MenuOutlined />} aria-label="打开导航" onClick={() => setDrawer(true)} />
+        ) : null}
+        <NavLink to="/" style={{ display: 'inline-flex', alignItems: 'center', gap: 10, color: 'inherit' }}>
+          <span
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: 8,
+              display: 'grid',
+              placeItems: 'center',
+              background: token.colorPrimary,
+              color: '#fff',
+              fontWeight: 700,
+              fontSize: 14,
+              lineHeight: 1,
+            }}
           >
-            <MenuIcon size={18} />
+            n
+          </span>
+          <Typography.Text strong style={{ fontSize: 16, letterSpacing: 0.5 }}>
+            nunt
+          </Typography.Text>
+        </NavLink>
+
+        {!isMobile ? (
+          <nav style={{ display: 'flex', gap: 2, flex: 1, marginLeft: 12 }}>
+            {menu.map((item) => (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                style={({ isActive }) => ({
+                  padding: '0 12px',
+                  height: 60,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  color: isActive ? token.colorPrimary : 'rgba(0,0,0,0.62)',
+                  borderBottom: `2px solid ${isActive ? token.colorPrimary : 'transparent'}`,
+                  fontWeight: isActive ? 600 : 400,
+                  fontSize: 13,
+                })}
+              >
+                {item.icon}
+                {item.title}
+              </NavLink>
+            ))}
+          </nav>
+        ) : (
+          <div style={{ flex: 1 }} />
+        )}
+
+        <Space size={2}>
+          <Button
+            type="text"
+            icon={<SearchOutlined />}
+            onClick={() => setPalette(true)}
+            aria-label="搜索或跳转"
+          >
+            {!isMobile ? '搜索' : null}
           </Button>
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold">{current?.title || '概览'}</div>
-          </div>
-          <div className="flex-1" />
-          {problems.length > 0 ? (
-            <Dropdown>
-              <Dropdown.Trigger>
-                <Button
-                  isIconOnly
-                  variant="danger-soft"
-                  aria-label={`${problems.length} 个需要处理的问题`}
-                >
-                  <TriangleAlert size={18} />
-                </Button>
-              </Dropdown.Trigger>
-              <Dropdown.Popover>
-                <Dropdown.Menu onAction={() => navigate('/')}>
-                  {problems.slice(0, 8).map((problem, index) => (
-                    <Dropdown.Item
-                      key={`${problem.title}-${index}`}
-                      id={`problem-${index}`}
-                      textValue={problem.title}
-                    >
-                      <div className="flex max-w-72 flex-col gap-0.5">
-                        <span className={problem.level === 'danger' ? 'text-danger' : 'text-warning'}>
-                          {problem.title}
-                        </span>
-                        <span className="whitespace-normal text-[11px] text-muted">{problem.detail}</span>
-                      </div>
-                    </Dropdown.Item>
-                  ))}
-                  <Dropdown.Item id="overview" textValue="查看概览">
-                    查看概览
-                  </Dropdown.Item>
-                </Dropdown.Menu>
-              </Dropdown.Popover>
-            </Dropdown>
-          ) : null}
-          <ThemeSwitch />
-          <Dropdown>
-            <Dropdown.Trigger>
-              <Button isIconOnly variant="ghost" aria-label="账户菜单">
-                <CircleUserRound size={18} />
-              </Button>
-            </Dropdown.Trigger>
-            <Dropdown.Popover>
-              <Dropdown.Menu onAction={(key) => onAction(String(key))}>
-                <Dropdown.Item id="password" textValue="修改密码">
-                  <KeyRound size={14} className="mr-2 inline" />
-                  修改密码
-                </Dropdown.Item>
-                <Dropdown.Item id="logout" textValue="退出登录">
-                  <LogOut size={14} className="mr-2 inline" />
-                  退出登录
-                </Dropdown.Item>
-              </Dropdown.Menu>
-            </Dropdown.Popover>
+          <ThemeMenu />
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'password', icon: <SettingOutlined />, label: '修改密码' },
+                { type: 'divider' },
+                { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true },
+              ],
+              onClick: async ({ key }) => {
+                if (key === 'password') navigate('/password')
+                if (key === 'logout') {
+                  await logout()
+                  navigate('/login')
+                }
+              },
+            }}
+          >
+            <Button type="text" icon={<Avatar size={24} icon={<UserOutlined />} />} aria-label="账户" />
           </Dropdown>
-        </header>
+        </Space>
+      </Header>
 
-        <main className="min-h-0 min-w-0 flex-1 overflow-auto">
+      <Content style={{ padding: isMobile ? 12 : 24, overflow: 'auto' }}>
+        <div style={{ maxWidth: 1440, margin: '0 auto' }}>
           <Outlet />
-        </main>
-      </div>
+        </div>
+      </Content>
 
-      <Drawer isOpen={mobileOpen} onOpenChange={setMobileOpen}>
-        <Drawer.Backdrop>
-          <Drawer.Content placement="left">
-            <Drawer.Dialog>
-              <Drawer.Header>
-                <Drawer.Heading>nunt</Drawer.Heading>
-              </Drawer.Header>
-              <Drawer.Body className="p-0">
-                <Navigation onNavigate={() => setMobileOpen(false)} />
-              </Drawer.Body>
-            </Drawer.Dialog>
-          </Drawer.Content>
-        </Drawer.Backdrop>
+      <Drawer open={drawer} onClose={() => setDrawer(false)} placement="left" width={260} title="nunt" styles={{ body: { padding: 8 } }}>
+        <Menu
+          mode="inline"
+          selectedKeys={[active]}
+          items={menu.map((item) => ({ key: item.path, icon: item.icon, label: item.title }))}
+          onClick={({ key }) => {
+            navigate(key)
+            setDrawer(false)
+          }}
+          style={{ borderInlineEnd: 0 }}
+        />
       </Drawer>
-    </div>
+      <CommandPalette open={palette} onClose={() => setPalette(false)} />
+    </Layout>
   )
+}
+
+function useIsMobile() {
+  const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches)
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 767px)')
+    const onChange = (event: MediaQueryListEvent) => setMobile(event.matches)
+    media.addEventListener('change', onChange)
+    return () => media.removeEventListener('change', onChange)
+  }, [])
+  return mobile
 }

@@ -1,0 +1,455 @@
+/* Logs page layout: the page itself never scrolls, only the list body does. */
+
+.page {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tabs {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tabs :global(.ant-tabs-nav) {
+  flex: none;
+  margin: 0 0 8px;
+}
+
+.tabs :global(.ant-tabs-content-holder) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.tabs :global(.ant-tabs-content) {
+  height: 100%;
+  min-height: 0;
+}
+
+.tabs :global(.ant-tabs-tabpane) {
+  height: 100%;
+  min-height: 0;
+}
+
+.pane {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--logs-bg, #fff);
+  border: 1px solid var(--logs-border, #f0f0f0);
+  border-radius: 8px;
+}
+
+/* ------------------------------------------------------------------ */
+/* toolbars                                                            */
+/* ------------------------------------------------------------------ */
+
+.toolbar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--logs-border, #f0f0f0);
+}
+
+.toolbarEnd {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fieldLabel {
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--logs-text-secondary, #8c8c8c);
+  white-space: nowrap;
+}
+
+.mobileBar {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--logs-border, #f0f0f0);
+}
+
+.mobileFilters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.actionScroller {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 1px;
+}
+
+.actionScroller::-webkit-scrollbar {
+  display: none;
+}
+
+.actionScroller > * {
+  flex: 0 0 auto;
+}
+
+.counter {
+  font-size: 12px;
+  color: var(--logs-text-secondary, #8c8c8c);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  padding: 0 2px;
+}
+
+.switchLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--logs-text-secondary, #8c8c8c);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ */
+/* notices, stats and meta lines                                       */
+/* ------------------------------------------------------------------ */
+
+.notice {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.noticeWarn {
+  background: var(--logs-warn-bg, #fffbe6);
+  color: var(--logs-warn-text, #d48806);
+}
+
+.noticeError {
+  background: var(--logs-error-bg, #fff2f0);
+  color: var(--logs-error-text, #cf1322);
+}
+
+.noticeIcon {
+  margin-top: 2px;
+  flex: none;
+}
+
+.statsLine {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--logs-border, #f0f0f0);
+  font-size: 12px;
+  color: var(--logs-text-secondary, #8c8c8c);
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+
+.statsLine::-webkit-scrollbar {
+  display: none;
+}
+
+.statItem {
+  flex: 0 0 auto;
+}
+
+.statValue {
+  color: var(--logs-text, rgba(0, 0, 0, 0.88));
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.statWarn {
+  color: var(--logs-warn-text, #d48806);
+}
+
+.statError {
+  color: var(--logs-error-text, #cf1322);
+}
+
+.metaLine {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-top: 1px solid var(--logs-border, #f0f0f0);
+  font-size: 11px;
+  color: var(--logs-text-secondary, #8c8c8c);
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+
+.metaLine::-webkit-scrollbar {
+  display: none;
+}
+
+.metaItem {
+  flex: 0 0 auto;
+}
+
+/* ------------------------------------------------------------------ */
+/* virtualized table / list                                           */
+/* ------------------------------------------------------------------ */
+
+.tableArea {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.vScrollWrap {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+}
+
+.vScroll {
+  height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  outline: none;
+}
+
+.vContent {
+  position: relative;
+  min-width: 100%;
+}
+
+.vHeader {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background-color: var(--logs-bg, #fff);
+  background-image: linear-gradient(
+    var(--logs-head-tint, rgba(0, 0, 0, 0.02)),
+    var(--logs-head-tint, rgba(0, 0, 0, 0.02))
+  );
+  border-bottom: 1px solid var(--logs-border, #f0f0f0);
+}
+
+.vBody {
+  position: relative;
+}
+
+.vRow {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: var(--logs-bg, #fff);
+  border-bottom: 1px solid var(--logs-border, #f0f0f0);
+}
+
+.vRow:hover {
+  background: var(--logs-hover, rgba(0, 0, 0, 0.04));
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.clickable:focus-visible {
+  outline: 2px solid var(--logs-primary, #1677ff);
+  outline-offset: -2px;
+}
+
+.vEmpty {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--logs-text-secondary, #8c8c8c);
+  font-size: 13px;
+  line-height: 20px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.hFade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 22px;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.hFadeLeft {
+  left: 0;
+  background: linear-gradient(to right, var(--logs-bg, #fff), transparent);
+}
+
+.hFadeRight {
+  right: 0;
+  background: linear-gradient(to left, var(--logs-bg, #fff), transparent);
+}
+
+/* ------------------------------------------------------------------ */
+/* rows and cells                                                     */
+/* ------------------------------------------------------------------ */
+
+.grid {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.gridRow {
+  height: 100%;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.gridHead {
+  height: 100%;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--logs-text-secondary, #8c8c8c);
+}
+
+.stack {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+}
+
+.line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.muted {
+  color: var(--logs-text-secondary, #8c8c8c);
+}
+
+.tiny {
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--logs-text-secondary, #8c8c8c);
+}
+
+.dangerText {
+  color: var(--logs-error-text, #cf1322);
+}
+
+.warnText {
+  color: var(--logs-warn-text, #d48806);
+}
+
+.msgError {
+  color: var(--logs-error-text, #cf1322);
+}
+
+.msgWarn {
+  color: var(--logs-warn-text, #d48806);
+}
+
+.msgDebug {
+  color: var(--logs-text-secondary, #8c8c8c);
+}
+
+/* ------------------------------------------------------------------ */
+/* modals and drawers (rendered in a portal, vars set on the wrapper)  */
+/* ------------------------------------------------------------------ */
+
+.modalBody {
+  max-height: min(62vh, 560px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.drawerFilters {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.detailStack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.detailValue {
+  min-width: 0;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.detailMono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.sectionTitle {
+  display: block;
+  margin: 12px 0 6px;
+  font-size: 12px;
+  color: var(--logs-text-secondary, #8c8c8c);
+}
+

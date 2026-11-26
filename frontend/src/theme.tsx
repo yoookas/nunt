@@ -1,79 +1,79 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { App as AntdApp, ConfigProvider, theme as antdTheme } from 'antd'
+import zhCN from 'antd/locale/zh_CN'
 
-export type ThemeMode = 'system' | 'light' | 'dark'
-type ResolvedTheme = 'light' | 'dark'
+export type ThemeMode = 'light' | 'dark' | 'system'
 
-const STORAGE_KEY = 'nunt.theme'
-const MEDIA = '(prefers-color-scheme: dark)'
-
-interface ThemeContextValue {
-  /** What the user picked, including "follow the system". */
-  theme: ThemeMode
-  /** What is actually painted right now. */
-  resolved: ResolvedTheme
-  setTheme: (theme: ThemeMode) => void
-  toggle: () => void
+interface ThemeValue {
+  mode: ThemeMode
+  effective: 'light' | 'dark'
+  setMode: (mode: ThemeMode) => void
 }
 
-const ThemeContext = createContext<ThemeContextValue | null>(null)
+const ThemeContext = createContext<ThemeValue | null>(null)
+const STORAGE_KEY = 'nunt.theme.mode'
 
-function prefersDark(): boolean {
-  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-    ? window.matchMedia(MEDIA).matches
-    : false
+function savedMode(): ThemeMode {
+  const saved = localStorage.getItem(STORAGE_KEY)
+  return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system'
 }
 
-function resolve(mode: ThemeMode): ResolvedTheme {
-  if (mode === 'system') return prefersDark() ? 'dark' : 'light'
-  return mode
-}
-
-function apply(theme: ResolvedTheme) {
-  const root = document.documentElement
-  root.classList.toggle('dark', theme === 'dark')
-  root.dataset.theme = theme
-  root.style.colorScheme = theme
+function systemPrefersDark(): boolean {
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  // "system" is the default so a fresh browser follows the OS out of the box.
-  const [theme, setThemeState] = useState<ThemeMode>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system'
-  })
-  const [resolved, setResolved] = useState<ResolvedTheme>(() => resolve(theme))
+  const [mode, setMode] = useState<ThemeMode>(savedMode)
+  const [systemDark, setSystemDark] = useState(systemPrefersDark)
 
   useEffect(() => {
-    const next = resolve(theme)
-    setResolved(next)
-    apply(next)
-    localStorage.setItem(STORAGE_KEY, theme)
-    if (theme !== 'system' || typeof window.matchMedia !== 'function') return
-    // Follow the OS live: switching the system theme repaints without a reload.
-    const media = window.matchMedia(MEDIA)
-    const onChange = () => {
-      const value: ResolvedTheme = media.matches ? 'dark' : 'light'
-      setResolved(value)
-      apply(value)
-    }
-    media.addEventListener('change', onChange)
-    return () => media.removeEventListener('change', onChange)
-  }, [theme])
+    const media = window.matchMedia?.('(prefers-color-scheme: dark)')
+    if (!media) return
+    const onChange = (event: MediaQueryListEvent) => setSystemDark(event.matches)
+    media.addEventListener?.('change', onChange)
+    return () => media.removeEventListener?.('change', onChange)
+  }, [])
 
-  const setTheme = useCallback((next: ThemeMode) => setThemeState(next), [])
-  const toggle = useCallback(
-    () => setThemeState((prev) => (resolve(prev) === 'dark' ? 'light' : 'dark')),
-    [],
-  )
-  const value = useMemo(
-    () => ({ theme, resolved, setTheme, toggle }),
-    [theme, resolved, setTheme, toggle],
-  )
+  const effective: 'light' | 'dark' = mode === 'system' ? (systemDark ? 'dark' : 'light') : mode
 
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, mode)
+    document.documentElement.dataset.theme = effective
+  }, [mode, effective])
+
+  const value = useMemo<ThemeValue>(() => ({ mode, effective, setMode }), [mode, effective])
+
+  return (
+    <ThemeContext.Provider value={value}>
+      <ConfigProvider
+        locale={zhCN}
+        theme={{
+          algorithm: effective === 'dark' ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+          token: {
+            colorPrimary: '#2f54eb',
+            colorInfo: '#2f54eb',
+            borderRadius: 10,
+            colorBgLayout: effective === 'dark' ? '#0f1115' : '#f6f7f9',
+            colorBorderSecondary: effective === 'dark' ? '#232733' : '#e8eaef',
+            fontSize: 14,
+            fontFamily:
+              '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif',
+          },
+          components: {
+            Layout: { headerBg: effective === 'dark' ? '#14161b' : '#ffffff' },
+            Menu: { itemBorderRadius: 8 },
+            Card: { borderRadiusLG: 12 },
+            Table: { headerBg: effective === 'dark' ? '#1a1d24' : '#fafbfc' },
+          },
+        }}
+      >
+        <AntdApp>{children}</AntdApp>
+      </ConfigProvider>
+    </ThemeContext.Provider>
+  )
 }
 
-export function useTheme(): ThemeContextValue {
+export function useTheme(): ThemeValue {
   const value = useContext(ThemeContext)
   if (!value) throw new Error('useTheme must be used inside ThemeProvider')
   return value
