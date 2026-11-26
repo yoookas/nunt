@@ -437,7 +437,15 @@ function RunLogs() {
           </Notice>
         ) : null}
 
-        <Panel title="运行日志" extra={<span className="text-xs text-muted">{counter}</span>}>
+        <Panel
+          title="运行日志"
+          extra={
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted">{counter}</span>
+              <SwitchInput label="自动滚动" value={autoScroll} onChange={onAutoScrollChange} />
+            </div>
+          }
+        >
           <div className="flex flex-wrap items-end gap-3 border-b border-border p-3">
             <div className="w-full sm:w-40">
               <SelectInput
@@ -463,8 +471,6 @@ function RunLogs() {
               <Trash2 size={14} />
               清屏
             </Button>
-            <div className="flex-1" />
-            <SwitchInput label="自动滚动" value={autoScroll} onChange={onAutoScrollChange} />
           </div>
 
           <div
