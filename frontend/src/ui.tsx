@@ -477,7 +477,7 @@ export function DataTable<T>({
   const table = (
     <Table variant={variant}>
       <Table.Content aria-label={ariaLabel} className={tableClassName}>
-        <Table.Header className={virtualized ? 'sticky top-0 z-10 bg-surface' : undefined}>
+        <Table.Header>
           {draggable ? (
             <Table.Column className="w-8">
               <span className="sr-only">排序</span>
@@ -487,7 +487,9 @@ export function DataTable<T>({
             <Table.Column
               key={column.key}
               isRowHeader={index === 0}
-              className={['whitespace-nowrap', column.className].filter(Boolean).join(' ')}
+              className={['whitespace-nowrap', virtualized ? 'sticky top-0 z-20' : '', column.className]
+                .filter(Boolean)
+                .join(' ')}
             >
               {column.title}
             </Table.Column>

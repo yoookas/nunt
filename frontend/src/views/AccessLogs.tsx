@@ -500,17 +500,13 @@ export default function AccessLogs() {
                 empty="没有匹配的访问记录"
               />
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
               <span>
                 已显示 {rows.length} 条
                 {meta ? ` · SQLite ${meta.keepDays} 天 / ${meta.maxFileMb} MB · 占用 ${fmtBytes(meta.totalBytes)}` : ''}
                 {meta?.dropped ? ` · 丢弃 ${meta.dropped}` : ''}
               </span>
-              {hasMore ? (
-                <Button size="sm" variant="secondary" isDisabled={more} onPress={() => void load('more')}>
-                  {more ? '加载中…' : '加载更多'}
-                </Button>
-              ) : null}
+              {more ? <span>正在加载…</span> : null}
             </div>
           </div>
         )}
