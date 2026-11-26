@@ -24,6 +24,7 @@ import (
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/netutil"
+	"github.com/nunt/nunt/internal/reqmeta"
 )
 
 // WAF is the web application firewall module.
@@ -447,12 +448,20 @@ func (w *WAF) record(out outcome, ruleName string, r *http.Request, clientIP, ac
 		ids = append(ids, hit.ID)
 	}
 
+	// A web request already has an access record; the WAF verdict is merged
+	// into it instead of being written as a second row. The admin WAF has no
+	// such record, so its interceptions are still persisted on their own.
+	info := reqmeta.From(r.Context())
 	if len(out.Matched) == 0 {
 		base.RuleID = out.RuleID
 		base.Message = truncate(out.Message, maxURILen)
 		base.RuleIDs = ids
 		w.rec.add(base)
-		w.persistEvent(base)
+		if info != nil {
+			info.SetWAF(action, base.RuleID, base.Message)
+		} else {
+			w.persistEvent(base)
+		}
 		return
 	}
 	for i, hit := range out.Matched {
@@ -466,6 +475,12 @@ func (w *WAF) record(out outcome, ruleName string, r *http.Request, clientIP, ac
 		ev.Tags = hit.Tags
 		ev.RuleIDs = ids
 		w.rec.add(ev)
+		if info != nil {
+			if i == 0 {
+				info.SetWAF(action, ev.RuleID, ev.Message)
+			}
+			continue
+		}
 		w.persistEvent(ev)
 	}
 }
@@ -476,7 +491,7 @@ func (w *WAF) persistEvent(ev Event) {
 	if w.deps == nil || w.deps.Logs == nil {
 		return
 	}
-	w.deps.Logs.Append(logstore.Entry{
+	entry := logstore.Entry{
 		Time:      ev.Time,
 		Source:    logstore.SourceWAF,
 		Rule:      ev.Rule,
@@ -486,12 +501,21 @@ func (w *WAF) persistEvent(ev Event) {
 		Status:    ev.Status,
 		ClientIP:  ev.ClientIP,
 		Result:    ev.Action,
+		WAFAction: ev.Action,
 		WAFRuleID: ev.RuleID,
 		Message:   ev.Message,
 		RequestID: ev.RequestID,
 		Proto:     ev.Proto,
 		TLS:       ev.TLS,
-	})
+	}
+	if w.deps.Geo != nil {
+		if ip := net.ParseIP(ev.ClientIP); ip != nil {
+			if record, err := w.deps.Geo.Lookup(ip); err == nil {
+				entry.Country, entry.Province, entry.City = record.Country, record.Province, record.City
+			}
+		}
+	}
+	w.deps.Logs.Append(entry)
 }
 
 // blockPage is a static page: no part of the request is echoed back, so a

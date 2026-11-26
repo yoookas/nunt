@@ -103,13 +103,14 @@ func (f *Forward) persist(e accessEntry) {
 	if requestID == "" {
 		requestID = newConnectionID()
 	}
-	f.deps.Logs.Append(logstore.Entry{
+	client := bareHost(e.Client)
+	entry := logstore.Entry{
 		Time:       e.Time,
 		Source:     logstore.SourceForward,
 		RuleID:     e.RuleID,
 		Rule:       e.Rule,
 		Protocol:   e.Protocol,
-		ClientIP:   bareHost(e.Client),
+		ClientIP:   client,
 		Upstream:   e.Target,
 		Result:     e.Result,
 		DurationMs: e.Duration.Milliseconds(),
@@ -117,7 +118,15 @@ func (f *Forward) persist(e accessEntry) {
 		BytesIn:    e.BytesIn,
 		BytesOut:   e.BytesOut,
 		RequestID:  requestID,
-	})
+	}
+	if f.deps.Geo != nil {
+		if ip := net.ParseIP(client); ip != nil {
+			if record, err := f.deps.Geo.Lookup(ip); err == nil {
+				entry.Country, entry.Province, entry.City = record.Country, record.Province, record.City
+			}
+		}
+	}
+	f.deps.Logs.Append(entry)
 }
 
 // newConnectionID creates the correlation id of one forward connection.

@@ -81,9 +81,15 @@ type Entry struct {
 	Result string `json:"result,omitempty"`
 	Reason string `json:"reason,omitempty"`
 	Error  string `json:"error,omitempty"`
-	// WAFRuleID and Message describe a WAF verdict.
+	// WAFAction, WAFRuleID and Message describe a WAF verdict.
+	WAFAction string `json:"wafAction,omitempty"`
 	WAFRuleID int    `json:"wafRuleId,omitempty"`
 	Message   string `json:"message,omitempty"`
+	// Country/Province/City are resolved from ClientIP when the address
+	// database is loaded; they stay empty for private or reserved addresses.
+	Country  string `json:"country,omitempty"`
+	Province string `json:"province,omitempty"`
+	City     string `json:"city,omitempty"`
 }
 
 // Options controls persistence and retention.
@@ -241,7 +247,11 @@ CREATE TABLE IF NOT EXISTS access_log (
 	reason TEXT NOT NULL DEFAULT '',
 	error TEXT NOT NULL DEFAULT '',
 	waf_rule_id INTEGER NOT NULL DEFAULT 0,
-	message TEXT NOT NULL DEFAULT ''
+	message TEXT NOT NULL DEFAULT '',
+	waf_action TEXT NOT NULL DEFAULT '',
+	country TEXT NOT NULL DEFAULT '',
+	province TEXT NOT NULL DEFAULT '',
+	city TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_access_ts ON access_log(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_access_source_ts ON access_log(source, ts DESC);
@@ -251,6 +261,24 @@ CREATE INDEX IF NOT EXISTS idx_access_client_ts ON access_log(client_ip, ts DESC
 `
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("create access log schema: %w", err)
+	}
+	// Databases created before these fields existed get them added in place;
+	// SQLite has no IF NOT EXISTS for columns.
+	for _, column := range []struct{ name, ddl string }{
+		{"waf_action", "waf_action TEXT NOT NULL DEFAULT ''"},
+		{"country", "country TEXT NOT NULL DEFAULT ''"},
+		{"province", "province TEXT NOT NULL DEFAULT ''"},
+		{"city", "city TEXT NOT NULL DEFAULT ''"},
+	} {
+		var count int
+		if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('access_log') WHERE name = ?", column.name).Scan(&count); err != nil {
+			return fmt.Errorf("inspect access log schema: %w", err)
+		}
+		if count == 0 {
+			if _, err := db.Exec("ALTER TABLE access_log ADD COLUMN " + column.ddl); err != nil {
+				return fmt.Errorf("add access log column %s: %w", column.name, err)
+			}
+		}
 	}
 	return nil
 }
@@ -411,8 +439,9 @@ func (s *Store) write(entries []Entry) error {
 	stmt, err := tx.Prepare(`INSERT INTO access_log (
 		ts, source, rule_id, rule, listen, host, method, path, status, client_ip,
 		user_agent, upstream, upstream_status, attempts, duration_ms, bytes,
-		bytes_in, bytes_out, proto, tls, request_id, result, reason, error, waf_rule_id, message
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+		bytes_in, bytes_out, proto, tls, request_id, result, reason, error, waf_rule_id, message,
+		waf_action, country, province, city
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("prepare access log insert: %w", err)
@@ -423,6 +452,7 @@ func (s *Store) write(entries []Entry) error {
 			e.Status, e.ClientIP, e.UserAgent, e.Upstream, e.UpstreamStatus, e.Attempts,
 			e.DurationMs, e.Bytes, e.BytesIn, e.BytesOut, e.Proto, e.TLS, e.RequestID,
 			e.Result, e.Reason, e.Error, e.WAFRuleID, e.Message,
+			e.WAFAction, e.Country, e.Province, e.City,
 		)
 		if err != nil {
 			_ = stmt.Close()

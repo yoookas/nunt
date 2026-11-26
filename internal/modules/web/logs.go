@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nunt/nunt/internal/logstore"
+	"github.com/nunt/nunt/internal/reqmeta"
 )
 
 // defaultLogKeep is the fallback size of the access log ring buffer.
@@ -43,6 +44,14 @@ type AccessEntry struct {
 	RequestID string `json:"requestId,omitempty"`
 	Reason    string `json:"reason,omitempty"`
 	Error     string `json:"error,omitempty"`
+	// WAF verdict (merged into this record instead of a second source=waf row).
+	WAFAction string `json:"wafAction,omitempty"`
+	WAFRuleID int    `json:"wafRuleId,omitempty"`
+	Message   string `json:"message,omitempty"`
+	// Geography resolved from ClientIP when the database is loaded.
+	Country  string `json:"country,omitempty"`
+	Province string `json:"province,omitempty"`
+	City     string `json:"city,omitempty"`
 }
 
 // logBuffer is a fixed size ring buffer of access log entries.
@@ -228,6 +237,12 @@ func (w *Web) logAccess(r *rule, req *http.Request, rec *accessRecorder, start t
 		status = http.StatusOK
 	}
 	reason, errText, upstreamStatus, attempts := noteFrom(req.Context()).snapshot()
+	clientIP := clientIPString(req, w.trustProxy(w.cfg))
+	country, province, city := w.lookupGeo(clientIP)
+	wafAction, wafRuleID, wafMessage := "", 0, ""
+	if verdict, ok := reqmeta.From(req.Context()).WAF(); ok {
+		wafAction, wafRuleID, wafMessage = verdict.Action, verdict.RuleID, verdict.Message
+	}
 	bytesIn := req.ContentLength
 	if bytesIn < 0 {
 		bytesIn = 0
@@ -243,7 +258,7 @@ func (w *Web) logAccess(r *rule, req *http.Request, rec *accessRecorder, start t
 		Status:         status,
 		Duration:       elapsed.Round(time.Millisecond).String(),
 		DurationMs:     elapsed.Milliseconds(),
-		ClientIP:       clientIPString(req, w.trustProxy(w.cfg)),
+		ClientIP:       clientIP,
 		UserAgent:      req.UserAgent(),
 		Upstream:       upstreamFrom(req.Context()),
 		UpstreamStatus: upstreamStatus,
@@ -256,6 +271,12 @@ func (w *Web) logAccess(r *rule, req *http.Request, rec *accessRecorder, start t
 		RequestID:      requestIDFrom(req.Context()),
 		Reason:         reason,
 		Error:          errText,
+		WAFAction:      wafAction,
+		WAFRuleID:      wafRuleID,
+		Message:        wafMessage,
+		Country:        country,
+		Province:       province,
+		City:           city,
 	}
 	w.logs.add(entry)
 	w.persist(entry)
@@ -296,6 +317,12 @@ func (w *Web) persist(e AccessEntry) {
 		RequestID:      e.RequestID,
 		Reason:         e.Reason,
 		Error:          e.Error,
+		WAFAction:      e.WAFAction,
+		WAFRuleID:      e.WAFRuleID,
+		Message:        e.Message,
+		Country:        e.Country,
+		Province:       e.Province,
+		City:           e.City,
 	})
 }
 
@@ -305,6 +332,23 @@ func (w *Web) Logs(ruleID string, limit int) []AccessEntry {
 		limit = defaultLogKeep
 	}
 	return w.logs.list(ruleID, limit)
+}
+
+// lookupGeo resolves the country/province/city of a client address. Missing or
+// unloaded databases simply leave the fields empty.
+func (w *Web) lookupGeo(addr string) (string, string, string) {
+	if w.deps == nil || w.deps.Geo == nil {
+		return "", "", ""
+	}
+	ip := net.ParseIP(addr)
+	if ip == nil {
+		return "", "", ""
+	}
+	record, err := w.deps.Geo.Lookup(ip)
+	if err != nil {
+		return "", "", ""
+	}
+	return record.Country, record.Province, record.City
 }
 
 // tlsVersionLabel renders the negotiated TLS version of a request.

@@ -172,7 +172,8 @@ func decodeCursor(value string) (int64, int64, bool) {
 
 const entryColumns = `id, ts, source, rule_id, rule, listen, host, method, path, status,
 	client_ip, user_agent, upstream, upstream_status, attempts, duration_ms, bytes,
-	bytes_in, bytes_out, proto, tls, request_id, result, reason, error, waf_rule_id, message`
+	bytes_in, bytes_out, proto, tls, request_id, result, reason, error, waf_rule_id, message,
+	waf_action, country, province, city`
 
 // Query returns one page of records, newest first.
 func (s *Store) Query(q Query) (Result, error) {
@@ -208,7 +209,7 @@ func (s *Store) Query(q Query) (Result, error) {
 			&e.Method, &e.Path, &e.Status, &e.ClientIP, &e.UserAgent, &e.Upstream,
 			&e.UpstreamStatus, &e.Attempts, &e.DurationMs, &e.Bytes, &e.BytesIn,
 			&e.BytesOut, &e.Proto, &e.TLS, &e.RequestID, &e.Result, &e.Reason,
-			&e.Error, &e.WAFRuleID, &e.Message); err != nil {
+			&e.Error, &e.WAFRuleID, &e.Message, &e.WAFAction, &e.Country, &e.Province, &e.City); err != nil {
 			return Result{}, fmt.Errorf("scan access log: %w", err)
 		}
 		e.Time = time.UnixMilli(ts)

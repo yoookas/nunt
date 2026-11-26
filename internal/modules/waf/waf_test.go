@@ -20,6 +20,7 @@ import (
 	"github.com/nunt/nunt/internal/logging"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
+	"github.com/nunt/nunt/internal/reqmeta"
 	"github.com/nunt/nunt/internal/rest"
 )
 
@@ -1005,5 +1006,20 @@ func TestLargeBodyLimitUsesDiskSpool(t *testing.T) {
 	cfg.BodyLimitKB = 1024 * 1024 // 1 GiB, above the cap
 	if got := normalizeWAFConfig(cfg).BodyLimitKB; got != 256*1024 {
 		t.Fatalf("the limit was clamped to %d KB, want %d", got, 256*1024)
+	}
+}
+
+func TestMiddlewareMergesVerdictIntoRequestMeta(t *testing.T) {
+	m := newTestModule(t, baseConfig())
+	info := reqmeta.New("req-1")
+	r := newRequest(t, http.MethodGet, "/?test=../../../../etc/passwd", "")
+	r = r.WithContext(reqmeta.With(r.Context(), info))
+	rec := do(m, "site-a", okHandler("upstream"), r)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("blocked = %d", rec.Code)
+	}
+	verdict, ok := info.WAF()
+	if !ok || verdict.Action == "" || verdict.RuleID == 0 || verdict.Message == "" {
+		t.Fatalf("verdict = %+v ok=%v", verdict, ok)
 	}
 }

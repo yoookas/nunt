@@ -275,3 +275,29 @@ func TestPruneDropsOldRows(t *testing.T) {
 		t.Fatalf("items after prune = %d", len(res.Items))
 	}
 }
+
+func TestGeoAndWAFFieldsRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	seed(t, s, []Entry{entryAt(time.Now(), 0, func(e *Entry) {
+		e.Country = "中国"
+		e.Province = "江苏省"
+		e.City = "南京市"
+		e.WAFAction = "blocked"
+		e.WAFRuleID = 942100
+		e.Message = "SQL Injection"
+	})})
+	res, err := s.Query(Query{})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if len(res.Items) != 1 {
+		t.Fatalf("items = %d", len(res.Items))
+	}
+	got := res.Items[0]
+	if got.Country != "中国" || got.Province != "江苏省" || got.City != "南京市" {
+		t.Fatalf("geo = %+v", got)
+	}
+	if got.WAFAction != "blocked" || got.WAFRuleID != 942100 || got.Message != "SQL Injection" {
+		t.Fatalf("waf = %+v", got)
+	}
+}

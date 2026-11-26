@@ -33,6 +33,10 @@ interface Entry {
   path?: string
   status?: number
   clientIp?: string
+  country?: string
+  province?: string
+  city?: string
+  wafAction?: string
   upstream?: string
   durationMs?: number
   bytes?: number
@@ -350,13 +354,27 @@ export default function AccessLogs() {
               {row.reason || row.error}
             </div>
           ) : null}
+          {row.wafAction ? (
+            <div className="mt-0.5 max-w-48 truncate text-[11px] text-warning" title={row.message}>
+              WAF {row.wafAction}
+              {row.wafRuleId ? ` #${row.wafRuleId}` : ''}
+            </div>
+          ) : null}
         </div>
       ),
     },
     {
       key: 'client',
       title: '客户端',
-      render: (row) => <span className="mono text-xs">{row.clientIp || '-'}</span>,
+      render: (row) => {
+        const geo = [row.country, row.province, row.city].filter(Boolean).join(' · ')
+        return (
+          <div className="min-w-0">
+            <div className="mono text-xs">{row.clientIp || '-'}</div>
+            {geo ? <div className="truncate text-[11px] text-muted">{geo}</div> : null}
+          </div>
+        )
+      },
     },
     {
       key: 'duration',

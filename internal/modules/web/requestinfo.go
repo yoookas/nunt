@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"sync"
+
+	"github.com/nunt/nunt/internal/reqmeta"
 )
 
 // requestNote collects the details of one request that only the handlers know
@@ -65,20 +67,18 @@ func (n *requestNote) snapshot() (reason, errText string, upstreamStatus, attemp
 	return n.reason, n.err, n.upstreamStatus, n.attempts
 }
 
-type requestIDKey struct{}
 type requestNoteKey struct{}
 
 func withRequestInfo(ctx context.Context) (context.Context, string, *requestNote) {
 	id := newRequestID()
 	note := &requestNote{}
-	ctx = context.WithValue(ctx, requestIDKey{}, id)
+	ctx = reqmeta.With(ctx, reqmeta.New(id))
 	ctx = context.WithValue(ctx, requestNoteKey{}, note)
 	return ctx, id, note
 }
 
 func requestIDFrom(ctx context.Context) string {
-	id, _ := ctx.Value(requestIDKey{}).(string)
-	return id
+	return reqmeta.From(ctx).RequestID()
 }
 
 func noteFrom(ctx context.Context) *requestNote {
