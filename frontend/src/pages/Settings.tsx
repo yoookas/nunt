@@ -167,7 +167,7 @@ export default function Settings() {
       style={{
         borderColor: token.colorBorderSecondary,
         position: isMobile ? undefined : 'sticky',
-        top: isMobile ? undefined : 76,
+        top: isMobile ? undefined : 12,
       }}
     >
       {menu}
