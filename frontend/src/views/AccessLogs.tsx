@@ -428,20 +428,21 @@ export default function AccessLogs() {
 
   const actions = (
     <>
-      <Button size="sm" variant="secondary" isDisabled={loading || more} onPress={() => void load('reset')}>
+      <Button size="sm" variant="secondary" isDisabled={loading || more} className="shrink-0" onPress={() => void load('reset')}>
         <RefreshCw size={14} />
         刷新
       </Button>
-      <Button size="sm" variant="secondary" onPress={exportCSV}>
+      <Button size="sm" variant="secondary" className="shrink-0" onPress={exportCSV}>
         <Download size={14} />
         导出
       </Button>
-      <Button size="sm" variant="tertiary" onPress={() => setConfirmClear(true)}>
+      <Button size="sm" variant="tertiary" className="shrink-0" onPress={() => setConfirmClear(true)}>
         <Trash2 size={14} />
         清空
       </Button>
       <Button
         size="sm"
+        className="shrink-0"
         variant={auto ? 'primary' : 'tertiary'}
         onPress={() => {
           setAuto((prev) => !prev)
@@ -462,11 +463,11 @@ export default function AccessLogs() {
       ) : null}
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface">
-        <div className="flex flex-wrap items-center gap-2 border-b border-border p-2.5 md:hidden">
-          <Button size="sm" variant="secondary" onPress={() => setFiltersOpen(true)}>
+        <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border p-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:hidden">
+          <Button size="sm" variant="secondary" className="shrink-0" onPress={() => setFiltersOpen(true)}>
             筛选{activeFilters ? ` (${activeFilters})` : ''}
           </Button>
-          <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">{actions}</div>
+          {actions}
         </div>
         <div className="hidden flex-wrap items-end gap-2 border-b border-border p-2.5 md:flex">
           {filterFields}

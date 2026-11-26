@@ -435,7 +435,7 @@ function RunLogs() {
         ) : null}
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface">
-          <div className="flex flex-wrap items-end gap-3 border-b border-border p-3">
+          <div className="flex flex-wrap items-end gap-2 border-b border-border p-2.5">
             <div className="w-[calc(50%-0.375rem)] sm:w-40">
               <SelectInput
                 label="日志级别"
@@ -452,17 +452,18 @@ function RunLogs() {
                 placeholder="按关键字过滤…"
               />
             </div>
-            <Button variant={paused ? 'primary' : 'secondary'} onPress={togglePause}>
-              {paused ? <Play size={14} /> : <Pause size={14} />}
-              {paused ? '继续' : '暂停'}
-            </Button>
-            <Button variant="tertiary" onPress={clearView}>
-              <Trash2 size={14} />
-              清屏
-            </Button>
-            <div className="flex-1" />
-            <span className="text-xs text-muted">{counter}</span>
-            <SwitchInput label="自动滚动" value={autoScroll} onChange={onAutoScrollChange} />
+            <div className="flex w-full items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:w-auto md:flex-1 md:justify-end md:overflow-visible">
+              <Button variant={paused ? 'primary' : 'secondary'} className="shrink-0" onPress={togglePause}>
+                {paused ? <Play size={14} /> : <Pause size={14} />}
+                {paused ? '继续' : '暂停'}
+              </Button>
+              <Button variant="tertiary" className="shrink-0" onPress={clearView}>
+                <Trash2 size={14} />
+                清屏
+              </Button>
+              <span className="shrink-0 text-xs text-muted">{counter}</span>
+              <SwitchInput label="自动滚动" value={autoScroll} onChange={onAutoScrollChange} />
+            </div>
           </div>
 
           <div
