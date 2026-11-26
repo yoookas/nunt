@@ -96,3 +96,5 @@ if (failures.length) {
   process.exit(1)
 }
 console.log(`frontend smoke ok: ${routes.length} routes mounted without a crash`)
+
+process.exit(0)
