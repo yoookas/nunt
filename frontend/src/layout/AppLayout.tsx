@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Avatar, Button, Drawer, Dropdown, Grid, Layout, Menu, Space, Typography, theme } from 'antd'
-import { LogoutOutlined, MenuOutlined, SearchOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons'
+import { Button, Drawer, Dropdown, Grid, Layout, Menu, Space, Typography, theme } from 'antd'
+import { LogoutOutlined, MenuOutlined, MoreOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { menu } from '../menu'
 import { useAuth } from '../session'
@@ -52,30 +52,14 @@ export default function AppLayout() {
         {isMobile ? (
           <Button type="text" icon={<MenuOutlined />} aria-label="打开导航" onClick={() => setDrawer(true)} />
         ) : null}
-        <NavLink to="/" style={{ display: 'inline-flex', alignItems: 'center', gap: 10, color: 'inherit' }}>
-          <span
-            style={{
-              width: 26,
-              height: 26,
-              borderRadius: 8,
-              display: 'grid',
-              placeItems: 'center',
-              background: token.colorPrimary,
-              color: '#fff',
-              fontWeight: 700,
-              fontSize: 14,
-              lineHeight: 1,
-            }}
-          >
-            n
-          </span>
-          <Typography.Text strong style={{ fontSize: 16, letterSpacing: 0.5 }}>
-            nunt
+        {isMobile ? (
+          <Typography.Text strong style={{ fontSize: 15 }}>
+            {menu.find((item) => item.path !== '/' && location.pathname.startsWith(item.path))?.title || '概览'}
           </Typography.Text>
-        </NavLink>
+        ) : null}
 
         {!isMobile ? (
-          <nav style={{ display: 'flex', gap: 2, flex: 1, marginLeft: 12 }}>
+          <nav style={{ display: 'flex', gap: 2, flex: 1, marginLeft: 4 }}>
             {menu.map((item) => (
               <NavLink
                 key={item.path}
@@ -127,7 +111,7 @@ export default function AppLayout() {
               },
             }}
           >
-            <Button type="text" icon={<Avatar size={24} icon={<UserOutlined />} />} aria-label="账户" />
+            <Button type="text" icon={<MoreOutlined />} aria-label="账户与退出" />
           </Dropdown>
         </Space>
       </Header>
@@ -138,7 +122,7 @@ export default function AppLayout() {
         </div>
       </Content>
 
-      <Drawer open={drawer} onClose={() => setDrawer(false)} placement="left" width={260} title="nunt" styles={{ body: { padding: 8 } }}>
+      <Drawer open={drawer} onClose={() => setDrawer(false)} placement="left" width={260} title="导航" styles={{ body: { padding: 8 } }}>
         <Menu
           mode="inline"
           selectedKeys={[active]}
