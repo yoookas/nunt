@@ -410,7 +410,11 @@ export function DataTable<T>({
             </Table.Column>
           ) : null}
           {columns.map((column, index) => (
-            <Table.Column key={column.key} isRowHeader={index === 0} className={column.className}>
+            <Table.Column
+              key={column.key}
+              isRowHeader={index === 0}
+              className={['whitespace-nowrap', column.className].filter(Boolean).join(' ')}
+            >
               {column.title}
             </Table.Column>
           ))}
@@ -439,24 +443,33 @@ export function DataTable<T>({
   )
 
   return (
-    <div className="relative">
-      <div
-        ref={scrollRef}
-        onScroll={measure}
-        tabIndex={0}
-        className="data-table-scroll w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain"
-        role="region"
-        aria-label={`${ariaLabel}（可横向滚动）`}
-      >
-        <div className={minWidthClass}>
-          {draggable ? (
-            <SortableList ids={ids} onReorder={onReorder}>
-              {table}
-            </SortableList>
-          ) : (
-            table
-          )}
+    <div>
+      <div className="relative">
+        <div
+          ref={scrollRef}
+          onScroll={measure}
+          tabIndex={0}
+          className="data-table-scroll w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]"
+          role="region"
+          aria-label={`${ariaLabel}（可横向滚动）`}
+        >
+          <div className={minWidthClass}>
+            {draggable ? (
+              <SortableList ids={ids} onReorder={onReorder}>
+                {table}
+              </SortableList>
+            ) : (
+              table
+            )}
+          </div>
         </div>
+
+        {overflow && !atStart ? (
+          <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-surface to-transparent" />
+        ) : null}
+        {overflow && !atEnd ? (
+          <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-surface to-transparent" />
+        ) : null}
       </div>
 
       {overflow ? (
