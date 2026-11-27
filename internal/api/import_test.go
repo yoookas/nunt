@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/nunt/nunt/internal/model"
-	"github.com/nunt/nunt/internal/security"
+	"github.com/nunt/nunt/internal/testutil"
 )
 
 // Importing a configuration can replace the administrator (new id, new
@@ -15,10 +15,7 @@ func TestConfigImportDropsSessionsOfTheOldAdmin(t *testing.T) {
 	env := newTestEnv(t)
 	cookies, csrf := login(t, env)
 
-	hash, err := security.HashPassword("another-long-password")
-	if err != nil {
-		t.Fatalf("hash: %v", err)
-	}
+	hash := testutil.PasswordHash("another-long-password")
 	cfg := env.store.Snapshot()
 	cfg.Users = []model.User{{
 		ID:           "imported-admin",

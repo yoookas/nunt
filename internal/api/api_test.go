@@ -17,6 +17,7 @@ import (
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/secret"
 	"github.com/nunt/nunt/internal/security"
+	"github.com/nunt/nunt/internal/testutil"
 )
 
 const testPassword = "test-password-1234"
@@ -31,21 +32,9 @@ type testEnv struct {
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	dir := t.TempDir()
-	store, _, err := config.Load(filepath.Join(dir, "config.json"))
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-	hash, err := security.HashPassword(testPassword)
-	if err != nil {
-		t.Fatalf("hash: %v", err)
-	}
-	if err := store.Update(func(c *model.Config) error {
-		c.Users[0].PasswordHash = hash
-		c.Users[0].MustChangePassword = false
-		return nil
-	}); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
+	// Seeded rather than created by config.Load: a missing file makes the loader
+	// hash a generated password with the 64 MiB production parameters.
+	store := testutil.Config(t, filepath.Join(dir, "config.json"), testPassword)
 
 	hub := logging.New("error", "")
 	t.Cleanup(hub.Close)

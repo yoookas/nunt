@@ -14,17 +14,14 @@ import (
 
 	"golang.org/x/crypto/acme"
 
-	"github.com/nunt/nunt/internal/config"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
+	"github.com/nunt/nunt/internal/testutil"
 )
 
 func newConfigModule(t *testing.T) *ACME {
 	t.Helper()
-	store, _, err := config.Load(filepath.Join(t.TempDir(), "config.json"))
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
+	store := testutil.Config(t, filepath.Join(t.TempDir(), "config.json"), testutil.Password)
 	if err := store.Update(func(c *model.Config) error {
 		c.Users = []model.User{{ID: "u1"}}
 		return nil

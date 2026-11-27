@@ -17,6 +17,7 @@ import (
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/security"
+	"github.com/nunt/nunt/internal/testutil"
 	"github.com/nunt/nunt/internal/vfs"
 )
 
@@ -588,10 +589,7 @@ func TestAccessHandlerIPFilter(t *testing.T) {
 }
 
 func TestBasicAuthHandler(t *testing.T) {
-	hash, err := security.HashPassword("s3cret")
-	if err != nil {
-		t.Fatal(err)
-	}
+	hash := testutil.PasswordHash("s3cret")
 	raw := mkRule(t, "guard", "example.com", "/", 0, model.WebTypeRedirect)
 	raw.BasicAuth = &model.BasicAuth{Enable: true, Users: []model.BasicAuthUser{{Username: "alice", Password: hash}}}
 	compiled, err := compileRule(raw, 0)
@@ -969,10 +967,7 @@ func testConfigStore(t *testing.T, rules ...model.WebRule) *config.Store {
 func testConfigStoreWithListener(t *testing.T, listener model.WebListener, rules ...model.WebRule) *config.Store {
 	t.Helper()
 	dir := t.TempDir()
-	store, _, err := config.Load(filepath.Join(dir, "config.json"))
-	if err != nil {
-		t.Fatalf("config: %v", err)
-	}
+	store := testutil.Config(t, filepath.Join(dir, "config.json"), testutil.Password)
 	for i := range rules {
 		if rules[i].ListenerID == "" {
 			rules[i].ListenerID = listener.ID

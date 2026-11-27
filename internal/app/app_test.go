@@ -17,8 +17,8 @@ import (
 
 	"github.com/nunt/nunt/internal/config"
 	"github.com/nunt/nunt/internal/model"
-	"github.com/nunt/nunt/internal/security"
 	"github.com/nunt/nunt/internal/store"
+	"github.com/nunt/nunt/internal/testutil"
 )
 
 const adminPassword = "integration-password-1"
@@ -71,10 +71,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	}()
 
-	hash, err := security.HashPassword(adminPassword)
-	if err != nil {
-		t.Fatalf("hash: %v", err)
-	}
+	hash := testutil.PasswordHash(adminPassword)
 
 	cfg := model.Config{
 		Version: 1,
@@ -277,10 +274,7 @@ func TestAdminListenRebindKeepsSession(t *testing.T) {
 	addrA := fmt.Sprintf("127.0.0.1:%d", portA)
 	addrB := fmt.Sprintf("127.0.0.1:%d", portB)
 
-	hash, err := security.HashPassword(adminPassword)
-	if err != nil {
-		t.Fatalf("hash: %v", err)
-	}
+	hash := testutil.PasswordHash(adminPassword)
 	cfg := model.Config{
 		Version: 1,
 		System: model.SystemConfig{

@@ -45,14 +45,12 @@ jobs:
         # The proxy, forwarder and WAF all run concurrent goroutines; a data
         # race here is a security bug, not just a flake.
         #
-        # The default ten minute timeout is too tight for internal/api under the
-        # race detector: every test environment hashes a password twice with the
-        # administrator Argon2 parameters (64 MiB), which the instrumentation
-        # slows down by roughly an order of magnitude - measured at 638s for that
-        # package alone. Raising the budget keeps the job honest instead of
-        # letting it flake near the deadline; making the tests cheaper (a test
-        # only parameter set) is the better long term fix.
-        run: go test -race ./... -count=1 -timeout 20m
+        # The test configuration hashes its passwords with a deliberately cheap
+        # Argon2id parameter set (see internal/testutil), so the slowest package
+        # under the instrumentation is the WAF at roughly five minutes. The
+        # default ten minute budget is kept instead of raised: it is a real
+        # signal again rather than a number tuned around the credential cost.
+        run: go test -race ./... -count=1
 
       - name: Build
         run: go build -trimpath -o /tmp/nunt ./cmd/nunt

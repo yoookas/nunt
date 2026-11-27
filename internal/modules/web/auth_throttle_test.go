@@ -11,6 +11,7 @@ import (
 
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/security"
+	"github.com/nunt/nunt/internal/testutil"
 )
 
 // TestStripCookieKeepsOtherCookies checks the outbound filter that keeps the
@@ -107,10 +108,7 @@ func TestAuthThrottleBounds(t *testing.T) {
 // are answered with 401 and the next attempt with 429, even with the correct
 // password.
 func TestBasicAuthHandlerThrottles(t *testing.T) {
-	hash, err := security.HashPasswordRoute("correct horse")
-	if err != nil {
-		t.Fatalf("hash: %v", err)
-	}
+	hash := testutil.PasswordHash("correct horse")
 	w := &Web{
 		log:          slog.New(slog.NewTextHandler(io.Discard, nil)),
 		cfg:          &model.Config{},

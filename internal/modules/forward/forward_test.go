@@ -19,6 +19,7 @@ import (
 	"github.com/nunt/nunt/internal/logging"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
+	"github.com/nunt/nunt/internal/testutil"
 )
 
 // ---------------------------------------------------------------------------
@@ -28,10 +29,7 @@ import (
 func testDeps(t *testing.T) (*module.Deps, *config.Store) {
 	t.Helper()
 	dir := t.TempDir()
-	store, _, err := config.Load(filepath.Join(dir, "config.json"))
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
+	store := testutil.Config(t, filepath.Join(dir, "config.json"), testutil.Password)
 	hub := logging.New("error", "")
 	t.Cleanup(hub.Close)
 	deps := &module.Deps{
