@@ -33,21 +33,35 @@ type WAF struct {
 	deps *module.Deps
 	log  *slog.Logger
 
-	rec        *recorder
-	mu         sync.RWMutex
-	cfg        model.WAFConfig
-	engine     *engine
-	buildErr   error
-	trustProxy bool
-	started    bool
-	wake       chan struct{}
-	done       chan struct{}
-	wg         sync.WaitGroup
+	rec      *recorder
+	mu       sync.RWMutex
+	cfg      model.WAFConfig
+	engine   *engine
+	buildErr error
+	trust    netutil.TrustPolicy
+	started  bool
+	wake     chan struct{}
+	done     chan struct{}
+	wg       sync.WaitGroup
 
 	catalogOnce sync.Once
 	catalog     []ruleFile
 	crsVersion  string
 	catalogErr  error
+}
+
+// trustPolicyFor compiles the forwarded-header policy; an invalid list means
+// "trust nobody", which keeps WAF events honest instead of recording a forged
+// client address.
+func trustPolicyFor(log *slog.Logger, sys model.SystemConfig) netutil.TrustPolicy {
+	policy, err := netutil.ParseTrustPolicy(sys.TrustProxy, sys.TrustedProxies)
+	if err != nil {
+		if log != nil {
+			log.Error("WAF：可信代理配置无效，X-Forwarded-For 将被忽略", "error", err)
+		}
+		return netutil.TrustPolicy{}
+	}
+	return policy
 }
 
 // New creates the module.
@@ -61,7 +75,7 @@ func New(deps *module.Deps) *WAF {
 	if deps != nil && deps.Cfg != nil {
 		snap := deps.Cfg.Snapshot()
 		w.cfg = normalizeWAFConfig(snap.WAF)
-		w.trustProxy = snap.System.TrustProxy
+		w.trust = trustPolicyFor(deps.Logger("waf"), snap.System)
 	}
 	return w
 }
@@ -130,10 +144,11 @@ func (w *WAF) Reload(cfg *model.Config) {
 		return
 	}
 	next := normalizeWAFConfig(cfg.WAF)
+	trust := trustPolicyFor(w.log, cfg.System)
 	w.mu.Lock()
 	same := sameWAFConfig(w.cfg, next)
 	w.cfg = next
-	w.trustProxy = cfg.System.TrustProxy
+	w.trust = trust
 	started, wake := w.started, w.wake
 	w.mu.Unlock()
 	if same || !started || wake == nil {
@@ -234,15 +249,15 @@ func sameWAFConfig(a, b model.WAFConfig) bool {
 
 // requestState is the immutable snapshot the request path needs.
 type requestState struct {
-	engine     *engine
-	cfg        model.WAFConfig
-	trustProxy bool
+	engine *engine
+	cfg    model.WAFConfig
+	trust  netutil.TrustPolicy
 }
 
 func (w *WAF) state() requestState {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
-	return requestState{engine: w.engine, cfg: w.cfg, trustProxy: w.trustProxy}
+	return requestState{engine: w.engine, cfg: w.cfg, trust: w.trust}
 }
 
 // Enabled reports whether the engine inspects traffic.
@@ -317,7 +332,7 @@ func (w *WAF) inspect(st requestState, ruleName string, rw http.ResponseWriter, 
 			err = fmt.Errorf("panic while inspecting the request: %v", rec)
 		}
 	}()
-	clientIP := netutil.ClientIP(r, st.trustProxy)
+	clientIP := st.trust.ClientIP(r)
 	remoteHost, port := splitHostPort(r.RemoteAddr)
 	if clientIP == nil {
 		clientIP = net.ParseIP(remoteHost)

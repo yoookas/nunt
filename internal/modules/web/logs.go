@@ -237,7 +237,7 @@ func (w *Web) logAccess(r *rule, req *http.Request, rec *accessRecorder, start t
 		status = http.StatusOK
 	}
 	reason, errText, upstreamStatus, attempts := noteFrom(req.Context()).snapshot()
-	clientIP := clientIPString(req, w.trustProxy(w.cfg))
+	clientIP := clientIPString(req, w.trustPolicy())
 	country, province, city := w.lookupGeo(clientIP)
 	wafAction, wafRuleID, wafMessage := "", 0, ""
 	if verdict, ok := reqmeta.From(req.Context()).WAF(); ok {

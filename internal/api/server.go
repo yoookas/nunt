@@ -70,6 +70,9 @@ type Server struct {
 	// bindSessionIP mirrors System.SessionBindIP, refreshed by a configuration
 	// subscriber so the request path does not have to clone the configuration.
 	bindSessionIP atomic.Bool
+	// trust is the compiled forwarded-header policy (system.trustProxy plus
+	// system.trustedProxies), refreshed by the same subscriber.
+	trust atomic.Pointer[netutil.TrustPolicy]
 	// bg tracks best effort background work (for example persisting the last
 	// use of an API token) so it can be joined before the data directory goes
 	// away.
@@ -105,9 +108,11 @@ func New(opts Options) *Server {
 	// configuration subscriber, never on the request path.
 	s.allowList.Store(newIPAllowList(log, opts.Cfg.Snapshot().System))
 	s.bindSessionIP.Store(opts.Cfg.Snapshot().System.SessionBindIP)
+	s.storeTrustProvider(log, opts.Cfg.Snapshot().System)
 	opts.Cfg.Subscribe(func(cfg *model.Config) {
 		s.allowList.Store(newIPAllowList(log, cfg.System))
 		s.bindSessionIP.Store(cfg.System.SessionBindIP)
+		s.storeTrustProvider(log, cfg.System)
 		s.loginLimiter.Configure(cfg.System.LoginMaxFail,
 			time.Duration(cfg.System.LoginLockMin)*time.Minute)
 	})
@@ -286,9 +291,36 @@ func (s *Server) sessionMatches(sess *security.Session, r *http.Request) bool {
 	return ip != nil && ip.String() == sess.IP
 }
 
-// clientIP returns the caller address honouring the trust proxy setting.
+// storeTrustProvider compiles the forwarded-header policy and stores it for the
+// request path. A policy that cannot be compiled is replaced by "trust
+// nobody": failing closed is the only acceptable outcome for an address that
+// access rules and rate limits depend on.
+func (s *Server) storeTrustProvider(log *slog.Logger, sys model.SystemConfig) {
+	policy, err := netutil.ParseTrustPolicy(sys.TrustProxy, sys.TrustedProxies)
+	if err != nil {
+		if log != nil {
+			log.Error("可信代理配置无效，X-Forwarded-For 将被忽略", "error", err)
+		}
+		s.trust.Store(&netutil.TrustPolicy{})
+		return
+	}
+	if policy.Enabled && !policy.Active() && log != nil {
+		log.Warn("已开启信任代理但没有配置可信代理地址，X-Forwarded-For 将被忽略")
+	}
+	s.trust.Store(&policy)
+}
+
+// trustPolicy returns the effective forwarded-header policy.
+func (s *Server) trustPolicy() netutil.TrustPolicy {
+	if p := s.trust.Load(); p != nil {
+		return *p
+	}
+	return netutil.TrustPolicy{}
+}
+
+// clientIP returns the caller address honouring the trusted proxy policy.
 func (s *Server) clientIP(r *http.Request) net.IP {
-	return netutil.ClientIP(r, s.opts.Cfg.Snapshot().System.TrustProxy)
+	return s.trustPolicy().ClientIP(r)
 }
 
 func (s *Server) register() {

@@ -389,7 +389,7 @@ func (w *Web) proxySite(r *rule, cfg *model.Config) (*webSite, error) {
 		if !w.capRequestBody(rw, r, req) {
 			return
 		}
-		up := bal.pick(clientIPString(req, w.trustProxy(cfg)))
+		up := bal.pick(clientIPString(req, w.trustPolicy()))
 		bal.begin(up.target)
 		defer bal.end(up.target)
 		ctx, attempt := withAttempt(req.Context(), up.target)
@@ -538,7 +538,7 @@ func buildProxy(w *Web, r *rule, up upstream, target *model.ProxyTarget) *httput
 			// reused when the request came from a declared trusted proxy;
 			// otherwise the chain is rebuilt from the connection, so an
 			// upstream never sees an address the caller made up.
-			trusted := w.trustProxy(w.cfg)
+			trusted := w.trustPolicy().TrustsPeer(pr.In)
 			if !trusted {
 				pr.Out.Header.Del("X-Forwarded-For")
 				pr.Out.Header.Del("X-Forwarded-Proto")
@@ -597,7 +597,7 @@ func buildProxy(w *Web, r *rule, up upstream, target *model.ProxyTarget) *httput
 			// One retry on another healthy upstream for idempotent requests.
 			if bal := balancerFrom(req.Context()); bal != nil && !alreadyRetried(req.Context()) &&
 				retryableRequest(req, err) {
-				if next, ok := bal.pickExcept(clientIPString(req, w.trustProxy(w.cfg)), up.target); ok {
+				if next, ok := bal.pickExcept(clientIPString(req, w.trustPolicy()), up.target); ok {
 					bal.report(up.target, false)
 					if attempt := attemptFrom(req.Context()); attempt != nil {
 						attempt.target = next.target

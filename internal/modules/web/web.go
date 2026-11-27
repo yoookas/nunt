@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nunt/nunt/internal/ipfilter"
@@ -74,6 +75,10 @@ type Web struct {
 	// rebuilds.
 	authThrottle *authThrottle
 	authCache    *basicAuthCache
+
+	// trust is the compiled forwarded-header policy (system.trustProxy plus
+	// system.trustedProxies), refreshed on every Reload.
+	trust atomic.Pointer[netutil.TrustPolicy]
 
 	logs *logBuffer
 }
@@ -188,6 +193,7 @@ func New(deps *module.Deps) *Web {
 	}
 	w.Init(deps, "web", "Web 服务")
 	w.cfg = cfg
+	w.storeTrust(cfg)
 	// Every configuration change is followed by exactly one Reload: the module
 	// API calls it directly, and the settings/import paths go through
 	// app.Reload. Subscribing here as well would rebuild every listener twice.
@@ -287,6 +293,7 @@ func (w *Web) Reload(cfg *model.Config) {
 	w.cfgMu.Lock()
 	w.cfg = cfg
 	w.cfgMu.Unlock()
+	w.storeTrust(cfg)
 	w.logs.resize(cfg.Web.LogKeep)
 
 	w.mu.Lock()
@@ -327,12 +334,29 @@ func (w *Web) baseContext() context.Context {
 	return w.stopCtx
 }
 
-// trustProxy reports whether X-Forwarded-For may be trusted.
-func (w *Web) trustProxy(cfg *model.Config) bool {
+// storeTrust compiles the forwarded-header policy of the live configuration.
+// A policy that cannot be compiled means "trust nobody": access rules and rate
+// limits depend on the address, so failing closed is the only safe choice.
+func (w *Web) storeTrust(cfg *model.Config) {
 	if cfg == nil {
-		return false
+		w.trust.Store(&netutil.TrustPolicy{})
+		return
 	}
-	return cfg.System.TrustProxy
+	policy, err := netutil.ParseTrustPolicy(cfg.System.TrustProxy, cfg.System.TrustedProxies)
+	if err != nil {
+		w.logger().Error("web：可信代理配置无效，X-Forwarded-For 将被忽略", "error", err)
+		w.trust.Store(&netutil.TrustPolicy{})
+		return
+	}
+	w.trust.Store(&policy)
+}
+
+// trustPolicy returns the effective forwarded-header policy.
+func (w *Web) trustPolicy() netutil.TrustPolicy {
+	if p := w.trust.Load(); p != nil {
+		return *p
+	}
+	return netutil.TrustPolicy{}
 }
 
 // accessLogEnabled reads the access log switch of the live configuration.

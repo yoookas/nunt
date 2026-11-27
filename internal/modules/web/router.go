@@ -321,5 +321,5 @@ func withRule(ctx context.Context, r *rule) context.Context {
 
 // clientIPFor exposes the caller address to the rest of the module.
 func (w *Web) clientIPFor(req *http.Request) string {
-	return clientIPString(req, w.trustProxy(w.cfg))
+	return clientIPString(req, w.trustPolicy())
 }

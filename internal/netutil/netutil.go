@@ -94,26 +94,59 @@ func UAAllowed(mode string, patterns []string, ua string) bool {
 	return !hit
 }
 
-// ClientIP returns the address of the peer, honouring X-Forwarded-For only
-// when the caller declares a trusted proxy in front of the service.
-func ClientIP(r *http.Request, trustProxy bool) net.IP {
-	if trustProxy {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			// The nearest proxy appends the address it saw last, so the
-			// rightmost entry is the client. A value the client prepended sits
-			// on the left and must never win.
-			parts := strings.Split(xff, ",")
-			for i := len(parts) - 1; i >= 0; i-- {
-				if ip := net.ParseIP(strings.TrimSpace(parts[i])); ip != nil {
-					return ip
-				}
-			}
+// TrustPolicy decides when the X-Forwarded-For and X-Real-IP headers may be
+// believed. Proxies lists the addresses allowed to assert a client address; an
+// empty list ignores the headers even when Enabled is set, so a leftover
+// "trust proxy" flag can never silently trust every caller.
+type TrustPolicy struct {
+	Enabled bool
+	Proxies []*net.IPNet
+}
+
+// ParseTrustPolicy builds the policy from the configured proxy addresses.
+func ParseTrustPolicy(enabled bool, proxies []string) (TrustPolicy, error) {
+	if !enabled {
+		return TrustPolicy{}, nil
+	}
+	nets, err := ParseIPList(proxies)
+	if err != nil {
+		return TrustPolicy{}, err
+	}
+	return TrustPolicy{Enabled: true, Proxies: nets}, nil
+}
+
+// Active reports whether forwarded headers can ever be trusted.
+func (p TrustPolicy) Active() bool { return p.Enabled && len(p.Proxies) > 0 }
+
+// TrustsPeer reports whether the direct peer of the request is a configured
+// proxy. Only such a peer may speak for the client.
+func (p TrustPolicy) TrustsPeer(r *http.Request) bool {
+	if !p.Active() || r == nil {
+		return false
+	}
+	return matchAny(p.Proxies, PeerIP(r))
+}
+
+// ClientIP returns the address the request should be attributed to. Forwarded
+// headers are used only when the direct peer is a trusted proxy; otherwise the
+// connection address wins, so a client that writes its own X-Forwarded-For can
+// never choose the address seen by access rules, limits or the access log.
+func (p TrustPolicy) ClientIP(r *http.Request) net.IP {
+	if r == nil {
+		return nil
+	}
+	if p.TrustsPeer(r) {
+		if ip := forwardedClientIP(r, p); ip != nil {
+			return ip
 		}
-		if xr := r.Header.Get("X-Real-IP"); xr != "" {
-			if ip := net.ParseIP(strings.TrimSpace(xr)); ip != nil {
-				return ip
-			}
-		}
+	}
+	return PeerIP(r)
+}
+
+// PeerIP returns the address of the TCP peer, without consulting any header.
+func PeerIP(r *http.Request) net.IP {
+	if r == nil {
+		return nil
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -126,6 +159,37 @@ func ClientIP(r *http.Request, trustProxy bool) net.IP {
 		host = host[:i]
 	}
 	return net.ParseIP(host)
+}
+
+// forwardedClientIP reads the client address out of the forwarded headers of a
+// request whose peer is trusted. The chain is walked from the right: the
+// nearest proxy appended the address it saw, so the first entry that is not
+// another trusted proxy is the client. Anything further left was written by
+// the client or an earlier hop and only wins when the whole chain is trusted.
+func forwardedClientIP(r *http.Request, p TrustPolicy) net.IP {
+	var leftmost net.IP
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			ip := net.ParseIP(strings.TrimSpace(parts[i]))
+			if ip == nil {
+				continue
+			}
+			leftmost = ip
+			if !matchAny(p.Proxies, ip) {
+				return ip
+			}
+		}
+	}
+	if leftmost != nil {
+		return leftmost
+	}
+	if xr := strings.TrimSpace(r.Header.Get("X-Real-IP")); xr != "" {
+		if ip := net.ParseIP(xr); ip != nil {
+			return ip
+		}
+	}
+	return nil
 }
 
 // HostOnly strips the port and normalises a Host header value.

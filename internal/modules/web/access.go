@@ -131,8 +131,8 @@ func (t *authThrottle) sweepLocked(now time.Time) {
 // clientIPString renders the caller address for logging and balancing. The
 // X-Forwarded-For header is only honoured when the administrator declared a
 // trusted proxy in front of the service.
-func clientIPString(r *http.Request, trustProxy bool) string {
-	ip := netutil.ClientIP(r, trustProxy)
+func clientIPString(r *http.Request, trust netutil.TrustPolicy) string {
+	ip := trust.ClientIP(r)
 	if ip == nil {
 		return ""
 	}
@@ -142,8 +142,7 @@ func clientIPString(r *http.Request, trustProxy bool) string {
 // accessHandler enforces the IP and User-Agent filter of a rule.
 func (w *Web) accessHandler(r *rule, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		trustProxy := w.trustProxy(w.cfg)
-		ip := netutil.ClientIP(req, trustProxy)
+		ip := w.trustPolicy().ClientIP(req)
 		allowed, reason := r.filter.Allowed(ip)
 		if !allowed {
 			noteFrom(req.Context()).setReason("ip:" + reason)
@@ -178,7 +177,7 @@ func ipString(ip net.IP) string {
 func (w *Web) basicAuthHandler(r *rule, next http.Handler) http.Handler {
 	users := r.spec.BasicAuth.Users
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		ip := clientIPString(req, w.trustProxy(w.cfg))
+		ip := clientIPString(req, w.trustPolicy())
 		key := r.id + "|" + ip
 		if allowed, wait := w.authThrottle.allow(key); !allowed {
 			w.rejectBasicAuthThrottled(rw, req, r, ip, wait)

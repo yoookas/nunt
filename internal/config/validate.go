@@ -55,6 +55,7 @@ func Normalize(c *model.Config) {
 	if c.System.Theme == "" {
 		c.System.Theme = "dark"
 	}
+	c.System.TrustedProxies = normalizeStringList(c.System.TrustedProxies)
 	if c.Web.LogKeep <= 0 {
 		c.Web.LogKeep = 200
 	}
@@ -277,6 +278,9 @@ func Validate(c *model.Config) error {
 	// persist it instead of locking the administrator out later.
 	if u := c.Users[0]; u.TOTP.Enabled && strings.TrimSpace(u.TOTP.Secret) == "" {
 		return fmt.Errorf("TOTP is enabled without a secret")
+	}
+	if _, err := netutil.ParseIPList(c.System.TrustedProxies); err != nil {
+		return fmt.Errorf("system.trustedProxies: %w", err)
 	}
 	if err := validateDatabasePath("IPv4", c.System.IP2RegionDB); err != nil {
 		return err

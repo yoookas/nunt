@@ -31,6 +31,10 @@ func setAdminAccess(t *testing.T, env *testEnv, ips []string, trustProxy bool) {
 	if err := env.store.Update(func(c *model.Config) error {
 		c.System.AdminAllowIPs = ips
 		c.System.TrustProxy = trustProxy
+		if trustProxy {
+			// The test peer that must be recognised as the proxy.
+			c.System.TrustedProxies = []string{"198.51.100.7"}
+		}
 		return nil
 	}); err != nil {
 		t.Fatalf("update admin access settings: %v", err)
@@ -226,6 +230,29 @@ func TestAdminAllowListTrustProxySwitchesForwardedAndPeerAddress(t *testing.T) {
 	}
 	mustDeny(t, doFrom(t, env, http.MethodGet, "/api/v1/system/info", peer, "",
 		map[string]string{"X-Forwarded-For": "203.0.113.10"}, nil), "a forwarded address outside the list")
+
+	// A stray trustProxy flag without a proxy list must not trust anybody:
+	// the forwarded address is ignored and the peer address decides.
+	if err := env.store.Update(func(c *model.Config) error {
+		c.System.AdminAllowIPs = []string{"203.0.113.9"}
+		c.System.TrustProxy = true
+		c.System.TrustedProxies = nil
+		return nil
+	}); err != nil {
+		t.Fatalf("clear the trusted proxy list: %v", err)
+	}
+	mustDeny(t, doFrom(t, env, http.MethodGet, "/api/v1/system/info", peer, "", forwarded, nil),
+		"X-Forwarded-For with trustProxy but no trusted proxies")
+
+	// A peer that is not a configured proxy cannot speak for the client.
+	if err := env.store.Update(func(c *model.Config) error {
+		c.System.TrustedProxies = []string{"10.0.0.1"}
+		return nil
+	}); err != nil {
+		t.Fatalf("replace the trusted proxy list: %v", err)
+	}
+	mustDeny(t, doFrom(t, env, http.MethodGet, "/api/v1/system/info", peer, "", forwarded, nil),
+		"X-Forwarded-For from a peer outside the trusted proxy list")
 
 	// With a trusted proxy the peer address alone no longer matches.
 	setAdminAccess(t, env, []string{"198.51.100.7"}, true)

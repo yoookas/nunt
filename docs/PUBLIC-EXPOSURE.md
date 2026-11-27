@@ -73,9 +73,9 @@
 
 - 该列表**已经在请求路径上强制执行**（`internal/api/allowlist.go`）：它包住整个管理面——REST API、静态资源、登录页；只有 `/healthz` 例外（容器健康检查从容器内部发起，必须放行）。
 - `adminAllowIps` **为空 = 不限制**（保持历史行为）；**非空但一条都解析不出来 = 全拒**（fail-closed，启动时日志会打 error）；列表里的非法条目会被丢弃并记 warning。
-- 客户端地址的取法受 `system.trustProxy` 影响：`trustProxy=true` 时取 `X-Forwarded-For`/`X-Real-IP`。**只有在你确实信任前置代理时才能打开它**——否则任何人都能用伪造的 `X-Forwarded-For` 绕过白名单。
-- 反代到管理面时，若外层是 nunt 自己的 Web 规则，客户端 IP 由 nunt 注入，可信；若外层是第三方反代（Caddy/Nginx/CDN），必须保证它**覆盖**而不是追加客户端传入的 XFF 头，并只在直连该代理的链路上开 `trustProxy`。
-- 概览/系统信息里能看到生效状态（`adminAllowList`：`restricted` / `entries` / `valid` / `failClosed` / `trustProxy` / `blocked`），可用来确认「白名单到底有没有在管事」。
+- 客户端地址的取法受 `system.trustProxy` + `system.trustedProxies` 影响：只有 `trustProxy=true` **且** 直连对端在 `trustedProxies`（IP/CIDR）里时，才采信 `X-Forwarded-For` / `X-Real-IP`；否则一律使用 TCP 对端地址，伪造的请求头不会生效。**开启信任代理却没有填可信代理地址时，转发头会被忽略（fail-closed）**，启动日志会给出 warning。
+- 反代到管理面时，若外层是 nunt 自己的 Web 规则，客户端 IP 由 nunt 注入，可信；若外层是第三方反代（Caddy/Nginx/CDN），必须保证它**追加**而不是透传客户端传入的 XFF 头（nginx 用 `$proxy_add_x_forwarded_for`），并把该代理的地址填进 `trustedProxies`。多级代理时 nunt 会从右往左跳过所有可信代理，取第一个外部地址。
+- 概览/系统信息里能看到生效状态（`adminAllowList`：`restricted` / `entries` / `valid` / `failClosed` / `trustProxy` / `trustedProxies` / `blocked`），可用来确认「白名单到底有没有在管事」。
 
 > 结论：**方案 A + `adminAllowIps`** 是公网场景的底线组合；只靠密码 + 登录锁定不够。
 
@@ -122,7 +122,7 @@
 
 - 源站 IP 一旦暴露，前面套多少层都白搭：**源站只允许 CDN 回源段访问**（用本机防火墙 + 云安全组；nunt 侧可在规则上再加一层 `access.ips` 白名单）；
 - 只放行 CDN 官方公布的回源网段，并随 CDN 更新（部分厂商提供自动更新的源站白名单）；
-- 真实客户端 IP 由 CDN 通过 `X-Forwarded-For`（或 `CF-Connecting-IP` 等）传递：确认 nunt 侧取到的是真实 IP（`system.trustProxy=true` **且**只有 CDN 能直连源站，二者必须同时成立）；
+- 真实客户端 IP 由 CDN 通过 `X-Forwarded-For`（或 `CF-Connecting-IP` 等）传递：确认 nunt 侧取到的是真实 IP（`system.trustProxy=true`、`trustedProxies` 里包含 CDN 回源段 **且**只有 CDN 能直连源站，三者必须同时成立）；
 - 回源建议走 HTTPS + 自定义回源头校验，避免有人直接以源站 IP 发请求；
 - 上 CDN 后，日志与访问控制里的客户端 IP 会变成 CDN 节点地址——白名单、限速、封禁全部要按「CDN 转发后的真实 IP」重新验证一遍。
 

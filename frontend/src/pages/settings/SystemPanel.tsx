@@ -69,6 +69,7 @@ export default function SystemPanel({ refreshToken, onListenMoved }: Props) {
         loginMaxFail: Number(settings?.loginMaxFail) || 5,
         loginLockMinutes: Number(settings?.loginLockMinutes) || 10,
         trustProxy: !!settings?.trustProxy,
+        trustedProxies: toList(settings?.trustedProxies),
         sessionBindIp: !!settings?.sessionBindIp,
         theme: settings?.theme || 'system',
         adminAllowIps: toList(settings?.adminAllowIps),
@@ -136,6 +137,7 @@ export default function SystemPanel({ refreshToken, onListenMoved }: Props) {
       loginMaxFail: Number(values.loginMaxFail),
       loginLockMinutes: Number(values.loginLockMinutes),
       trustProxy: !!values.trustProxy,
+      trustedProxies: toList(values.trustedProxies),
       sessionBindIp: !!values.sessionBindIp,
       theme: values.theme || 'system',
       adminAllowIps: toList(values.adminAllowIps),
@@ -280,7 +282,7 @@ export default function SystemPanel({ refreshToken, onListenMoved }: Props) {
 
           <SettingsSection
             title="代理与会话"
-            description="客户端 IP 的识别方式；只有管理端位于可信代理之后时才需要改动。"
+            description="客户端 IP 的识别方式；开启信任代理时，只有直连对端在可信代理列表中才会采信转发头。"
           >
             <Row gutter={[16, 0]}>
               <Col xs={24} md={12}>
@@ -288,9 +290,36 @@ export default function SystemPanel({ refreshToken, onListenMoved }: Props) {
                   name="trustProxy"
                   label="信任反向代理"
                   valuePropName="checked"
-                  extra="使用 X-Forwarded-For 识别客户端 IP，仅在管理端位于可信代理之后时开启"
+                  extra="使用 X-Forwarded-For 识别客户端 IP；需要同时填写可信代理地址"
                 >
                   <Switch />
+                </Form.Item>
+              </Col>
+              <Col span={24}>
+                <Form.Item
+                  name="trustedProxies"
+                  label="可信代理地址"
+                  extra="只有直连对端在这个列表里时才采信 X-Forwarded-For / X-Real-IP；留空表示不信任任何代理。支持单个 IP 与 CIDR"
+                  rules={[
+                    {
+                      validator: async (_, value: string[] | undefined) => {
+                        const invalid = (value || []).map((item) => item.trim()).filter((item) => item && !ADDRESS_PATTERN.test(item))
+                        if (invalid.length > 0) {
+                          throw new Error(`无效的地址：${invalid.join('、')}`)
+                        }
+                      },
+                    },
+                  ]}
+                >
+                  <Select
+                    mode="tags"
+                    open={false}
+                    suffixIcon={null}
+                    notFoundContent={null}
+                    tokenSeparators={[',', '，', ' ', ';', '；']}
+                    placeholder="例如 127.0.0.1 或 10.0.0.0/8"
+                    style={{ width: '100%' }}
+                  />
                 </Form.Item>
               </Col>
               <Col xs={24} md={12}>

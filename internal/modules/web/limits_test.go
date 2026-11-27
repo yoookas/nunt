@@ -192,6 +192,7 @@ func TestModuleProxyRateLimit(t *testing.T) {
 	// through the trusted proxy is served again.
 	if err := w.deps.Cfg.Update(func(c *model.Config) error {
 		c.System.TrustProxy = true
+		c.System.TrustedProxies = []string{"127.0.0.1"}
 		return nil
 	}); err != nil {
 		t.Fatalf("enable the trusted proxy: %v", err)

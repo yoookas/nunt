@@ -109,46 +109,102 @@ func TestTargetAllowed(t *testing.T) {
 	}
 }
 
-func TestClientIP(t *testing.T) {
+func mustTrust(t *testing.T, enabled bool, proxies ...string) TrustPolicy {
+	t.Helper()
+	p, err := ParseTrustPolicy(enabled, proxies)
+	if err != nil {
+		t.Fatalf("ParseTrustPolicy: %v", err)
+	}
+	return p
+}
+
+func TestTrustPolicyIgnoresForwardedHeadersFromAnUntrustedPeer(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.RemoteAddr = "203.0.113.9:5555"
-	if got := ClientIP(r, false); got.String() != "203.0.113.9" {
-		t.Fatalf("ClientIP = %v", got)
+	r.Header.Set("X-Forwarded-For", "10.9.9.9")
+	r.Header.Set("X-Real-IP", "10.9.9.9")
+
+	// Disabled, and enabled without a proxy list, both ignore the headers.
+	for name, p := range map[string]TrustPolicy{
+		"disabled":      mustTrust(t, false),
+		"empty-proxies": mustTrust(t, true),
+	} {
+		if got := p.ClientIP(r); got == nil || got.String() != "203.0.113.9" {
+			t.Fatalf("%s: ClientIP = %v, want the peer", name, got)
+		}
 	}
-	r.Header.Set("X-Forwarded-For", "198.51.100.7, 10.0.0.1")
-	if got := ClientIP(r, false); got.String() != "203.0.113.9" {
-		t.Fatalf("X-Forwarded-For must be ignored without a trusted proxy, got %v", got)
-	}
-	// The rightmost entry is the one the nearest proxy appended, i.e. the
-	// client as that proxy saw it; anything to its left may be forged.
-	if got := ClientIP(r, true); got.String() != "10.0.0.1" {
-		t.Fatalf("ClientIP with trusted proxy = %v", got)
+
+	// The peer itself is not in the list: the forged header must not win.
+	p := mustTrust(t, true, "10.0.0.2/32")
+	if got := p.ClientIP(r); got == nil || got.String() != "203.0.113.9" {
+		t.Fatalf("untrusted peer: ClientIP = %v, want the peer", got)
 	}
 }
 
-// A client that prepends its own address must not be able to choose the value
-// used by access rules and rate limits: the address appended by the proxy wins.
-func TestClientIPSpoofIsIgnored(t *testing.T) {
+func TestTrustPolicyAcceptsForwardedHeadersFromATrustedPeer(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.RemoteAddr = "10.0.0.2:5555"
-	r.Header.Set("X-Forwarded-For", "203.0.113.7, 198.51.100.9")
-	if got := ClientIP(r, true); got == nil || got.String() != "198.51.100.9" {
-		t.Fatalf("ClientIP = %v, want the proxy-appended 198.51.100.9", got)
+	r.Header.Set("X-Forwarded-For", "203.0.113.7")
+	p := mustTrust(t, true, "10.0.0.2/32")
+	if got := p.ClientIP(r); got == nil || got.String() != "203.0.113.7" {
+		t.Fatalf("ClientIP = %v, want 203.0.113.7", got)
 	}
-	// The rightmost entry is the client even when it is a LAN address.
-	r.Header.Set("X-Forwarded-For", "10.9.9.9, 10.1.2.3")
-	if got := ClientIP(r, true); got == nil || got.String() != "10.1.2.3" {
-		t.Fatalf("ClientIP = %v, want the LAN client 10.1.2.3", got)
+}
+
+// The nearest proxy appends the address it saw last; a value the client
+// prepended sits to its left and must never win.
+func TestTrustPolicyIgnoresASpoofedPrefix(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.2:5555"
+	r.Header.Set("X-Forwarded-For", "10.9.9.9, 198.51.100.9")
+	r.Header.Set("X-Real-IP", "10.9.9.9")
+	p := mustTrust(t, true, "10.0.0.2/32")
+	if got := p.ClientIP(r); got == nil || got.String() != "198.51.100.9" {
+		t.Fatalf("ClientIP = %v, want 198.51.100.9", got)
+	}
+}
+
+// With two proxies in the chain the rightmost entry is the inner proxy, not
+// the client, so trusted hops are skipped until the first foreign address.
+func TestTrustPolicySkipsTrustedHops(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.2:5555"
+	r.Header.Set("X-Forwarded-For", "203.0.113.7, 10.0.0.3")
+	p := mustTrust(t, true, "10.0.0.2/32", "10.0.0.3/32")
+	if got := p.ClientIP(r); got == nil || got.String() != "203.0.113.7" {
+		t.Fatalf("ClientIP = %v, want 203.0.113.7", got)
+	}
+}
+
+// A client that is itself inside the trusted range is still reported: when the
+// whole chain is trusted the leftmost entry is the best answer.
+func TestTrustPolicyKeepsATrustedClient(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.2:5555"
+	r.Header.Set("X-Forwarded-For", "10.0.0.4")
+	p := mustTrust(t, true, "10.0.0.0/24")
+	if got := p.ClientIP(r); got == nil || got.String() != "10.0.0.4" {
+		t.Fatalf("ClientIP = %v, want 10.0.0.4", got)
+	}
+}
+
+func TestTrustPolicyFallsBackToRealIP(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.2:5555"
+	r.Header.Set("X-Real-IP", "203.0.113.7")
+	p := mustTrust(t, true, "10.0.0.2/32")
+	if got := p.ClientIP(r); got == nil || got.String() != "203.0.113.7" {
+		t.Fatalf("ClientIP = %v, want 203.0.113.7", got)
 	}
 }
 
 // A link-local peer with a zone must still resolve to an address, otherwise
 // deny rules see nil and let it through.
-func TestClientIPScopedIPv6(t *testing.T) {
+func TestPeerIPScopedIPv6(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.RemoteAddr = "[fe80::1%eth0]:1234"
-	ip := ClientIP(r, false)
+	ip := PeerIP(r)
 	if ip == nil || ip.String() != "fe80::1" {
-		t.Fatalf("ClientIP = %v, want fe80::1", ip)
+		t.Fatalf("PeerIP = %v, want fe80::1", ip)
 	}
 }

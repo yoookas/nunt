@@ -132,7 +132,7 @@ func (w *Web) rateLimitHandler(r *rule, next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		client := clientIPString(req, w.trustProxy(w.cfg))
+		client := clientIPString(req, w.trustPolicy())
 		ok, retry := limiter.allow(client)
 		if ok {
 			next.ServeHTTP(rw, req)

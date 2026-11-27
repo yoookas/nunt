@@ -90,6 +90,7 @@ func TestRateLimitKeyHonoursTrustProxy(t *testing.T) {
 	}
 	if err := env.store.Update(func(c *model.Config) error {
 		c.System.TrustProxy = true
+		c.System.TrustedProxies = []string{"10.0.0.1"}
 		return nil
 	}); err != nil {
 		t.Fatalf("trust proxy: %v", err)

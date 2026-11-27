@@ -96,9 +96,16 @@ type AppLogConfig struct {
 
 // SystemConfig holds global options.
 type SystemConfig struct {
-	AdminListen     string   `json:"adminListen"`
-	AdminAllowIPs   []string `json:"adminAllowIps,omitempty"`
-	TrustProxy      bool     `json:"trustProxy"`
+	AdminListen   string   `json:"adminListen"`
+	AdminAllowIPs []string `json:"adminAllowIps,omitempty"`
+	// TrustProxy enables reading the client address from X-Forwarded-For /
+	// X-Real-IP. It only takes effect when the direct peer is listed in
+	// TrustedProxies: without that list the headers stay ignored, so a stray
+	// flag can never turn every caller into a trusted proxy.
+	TrustProxy bool `json:"trustProxy"`
+	// TrustedProxies are the proxy addresses (IP or CIDR) whose forwarded
+	// headers may be believed.
+	TrustedProxies  []string `json:"trustedProxies,omitempty"`
 	LogLevel        string   `json:"logLevel"`
 	SessionTTLHours int      `json:"sessionTtlHours"`
 	LoginMaxFail    int      `json:"loginMaxFail"`

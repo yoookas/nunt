@@ -22,7 +22,6 @@ var adminGuardExemptPaths = map[string]bool{
 // (SystemConfig.AdminAllowIPs). It is rebuilt by the configuration subscriber
 // so that no request ever parses the list itself.
 type ipAllowList struct {
-	trustProxy bool         // honour X-Forwarded-For / X-Real-IP
 	entries    int          // configured, non blank entries
 	nets       []*net.IPNet // successfully parsed entries
 	failClosed bool         // entries > 0 but not a single entry parsed
@@ -49,7 +48,7 @@ func (a *ipAllowList) allow(ip net.IP) bool {
 // invalid entries are dropped with a warning, and a non empty list without a
 // single valid entry fails closed (reported as an error).
 func newIPAllowList(log *slog.Logger, sys model.SystemConfig) *ipAllowList {
-	list := &ipAllowList{trustProxy: sys.TrustProxy}
+	list := &ipAllowList{}
 	for _, raw := range sys.AdminAllowIPs {
 		item := strings.TrimSpace(raw)
 		if item == "" {
@@ -91,7 +90,7 @@ func (s *Server) adminGuard(next http.Handler) http.Handler {
 			return
 		}
 		list := s.adminAllowList()
-		ip := netutil.ClientIP(r, list.trustProxy)
+		ip := s.clientIP(r)
 		if list.allow(ip) {
 			next.ServeHTTP(w, r)
 			return
@@ -106,13 +105,15 @@ func (s *Server) adminGuard(next http.Handler) http.Handler {
 // adminAllowListInfo describes the effective allow list for /system/info.
 func (s *Server) adminAllowListInfo() map[string]any {
 	list := s.adminAllowList()
+	trust := s.trustPolicy()
 	return map[string]any{
-		"restricted": list.restricted(),
-		"entries":    list.entries,
-		"valid":      len(list.nets),
-		"failClosed": list.failClosed,
-		"trustProxy": list.trustProxy,
-		"blocked":    s.allowDenied.Load(),
+		"restricted":     list.restricted(),
+		"entries":        list.entries,
+		"valid":          len(list.nets),
+		"failClosed":     list.failClosed,
+		"trustProxy":     trust.Enabled,
+		"trustedProxies": len(trust.Proxies),
+		"blocked":        s.allowDenied.Load(),
 	}
 }
 

@@ -170,13 +170,14 @@ NUNT_ADMIN_LISTEN=127.0.0.1:18080 docker compose up -d
   并记一条 error 日志——避免「写错了等于没设」，此时需要从容器内 / 本机改回配置；
 - 列表在配置变更后立即重新解析生效（解析结果有缓存，不会每个请求重新解析），无需重启；
 - 查看当前状态：`GET /api/v1/system/info` 的 `adminAllowList` 字段返回 `restricted`（是否启用限制）、
-  `entries` / `valid`（配置条目数 / 有效条目数）、`failClosed`、`trustProxy` 和 `blocked`
-  （启动以来被白名单拒绝的请求数）。
+  `entries` / `valid`（配置条目数 / 有效条目数）、`failClosed`、`trustProxy`、`trustedProxies`
+  和 `blocked`（启动以来被白名单拒绝的请求数）。
 
 > **信任反向代理的注意事项**：白名单默认按 TCP 对端地址（`RemoteAddr`）判定。只有当前面确实有一层
 > **你自己控制**的反向代理（Nginx / Caddy / 云厂商负载均衡等）时，才打开「设置 → 信任反向代理」
-> （`system.trustProxy`）；打开后客户端 IP 改从 `X-Forwarded-For`（其次 `X-Real-IP`）读取。
-> 服务直接暴露在公网却开启了信任代理时，任何人都能伪造该请求头绕过白名单。
+> （`system.trustProxy`），并把该代理的地址填进「可信代理地址」（`system.trustedProxies`，IP 或 CIDR）。
+> 只有直连对端命中这个列表时才会读取 `X-Forwarded-For`（其次 `X-Real-IP`）；开启开关但列表为空时
+> 转发头会被忽略。服务直接暴露在公网时，伪造的 XFF 不会生效。
 >
 > **不要把自己锁在外面**：只填写公网出口 IP 时，内网与容器内的访问同样会被拒绝；建议同时保留内网网段
 > （如 `192.168.0.0/16`、`10.0.0.0/8`）。

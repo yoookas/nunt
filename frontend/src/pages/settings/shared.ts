@@ -15,6 +15,7 @@ export interface SystemForm {
   loginMaxFail: number
   loginLockMinutes: number
   trustProxy: boolean
+  trustedProxies: string[]
   sessionBindIp: boolean
   theme: string
   adminAllowIps: string[]
@@ -39,6 +40,7 @@ export interface AdminAllowInfo {
   valid?: number
   blocked?: number
   trustProxy?: boolean
+  trustedProxies?: number
 }
 
 export interface SystemInfo {
@@ -130,6 +132,7 @@ export const EMPTY_SYSTEM: SystemForm = {
   loginMaxFail: 5,
   loginLockMinutes: 10,
   trustProxy: false,
+  trustedProxies: [],
   sessionBindIp: false,
   theme: 'system',
   adminAllowIps: [],

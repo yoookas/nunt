@@ -694,6 +694,7 @@ func TestProxyForwardedHeadersFollowTrust(t *testing.T) {
 		}
 		w := bareWeb()
 		w.cfg = cfg
+		w.storeTrust(cfg)
 		site, err := w.proxySite(compiled, cfg)
 		if err != nil {
 			t.Fatalf("proxySite: %v", err)
@@ -726,12 +727,22 @@ func TestProxyForwardedHeadersFollowTrust(t *testing.T) {
 		t.Fatalf("proto/host = %q/%q, want the observed values", proto, host)
 	}
 
-	call("forwarded-trusted", &model.Config{System: model.SystemConfig{TrustProxy: true}})
+	call("forwarded-trusted", &model.Config{System: model.SystemConfig{TrustProxy: true, TrustedProxies: []string{"127.0.0.1"}}})
 	if !strings.HasPrefix(xff, "203.0.113.9, ") {
 		t.Fatalf("a trusted proxy must keep the chain: %q", xff)
 	}
 	if proto != "https" || host != "made-up.example" {
 		t.Fatalf("a trusted proxy must keep proto/host, got %q/%q", proto, host)
+	}
+
+	// trustProxy without a proxy list trusts nobody: the chain is rebuilt from
+	// the connection like an untrusted request.
+	call("forwarded-flag-without-list", &model.Config{System: model.SystemConfig{TrustProxy: true}})
+	if strings.Contains(xff, "203.0.113.9") {
+		t.Fatalf("trustProxy without trusted proxies must not keep the chain: %q", xff)
+	}
+	if !strings.HasPrefix(xff, "127.0.0.1") {
+		t.Fatalf("X-Forwarded-For = %q, want the connection address", xff)
 	}
 }
 
