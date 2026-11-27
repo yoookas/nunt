@@ -23,7 +23,6 @@ import {
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { Muted } from '../../components'
 import { splitLines, splitList } from '../../format'
-import LogsPanel from './LogsPanel'
 import { RouteTypeTag, SectionTitle, TagInput } from './ui'
 import {
   BALANCE_OPTIONS,
@@ -1039,15 +1038,6 @@ export default function RouteForm({
           },
           { key: 'access', label: '访问', children: accessTab, forceRender: true },
           { key: 'advanced', label: '高级', children: advancedTab, forceRender: true },
-          ...(rule
-            ? [
-                {
-                  key: 'logs',
-                  label: '日志',
-                  children: <LogsPanel rule={rule} active={tab === 'logs'} />,
-                },
-              ]
-            : []),
         ]}
       />
 
