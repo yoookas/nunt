@@ -258,7 +258,7 @@ func (rt *router) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	req = req.WithContext(ctx)
 
 	// HSTS belongs to the listener but is emitted on the matched route.
-	if r.hsts && isTLSRequest(req) {
+	if r.hsts && rt.web.isTLSRequest(req) {
 		rec.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 	}
 	// The chain is built inner to outer: basic auth, WAF, access control and
@@ -298,13 +298,14 @@ func canonicalPath(p string) (string, bool) {
 	return cleaned, true
 }
 
-// isTLSRequest reports whether the request arrived over TLS, honouring a
-// reverse proxy that terminates TLS in front of the service.
-func isTLSRequest(r *http.Request) bool {
-	if r.TLS != nil {
-		return true
-	}
-	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+// isTLSRequest reports whether the request reached the service over TLS,
+// directly or through a proxy that is allowed to assert it. The forwarded
+// header counts only from a configured trusted proxy, exactly like the client
+// address: a caller that writes its own X-Forwarded-Proto must not be able to
+// make the service emit a security header that belongs to a TLS connection it
+// never had.
+func (w *Web) isTLSRequest(r *http.Request) bool {
+	return w.trustPolicy().HTTPS(r)
 }
 
 // ruleFrom returns the rule serving the request.
