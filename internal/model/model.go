@@ -217,7 +217,7 @@ type WebRule struct {
 	Domains    []string     `json:"domains,omitempty"`
 	Path       string       `json:"path"`
 	Priority   int          `json:"priority"`
-	WAFMode string `json:"wafMode,omitempty"`
+	WAFMode    string       `json:"wafMode,omitempty"`
 	Access     Access       `json:"access"`
 	BasicAuth  *BasicAuth   `json:"basicAuth,omitempty"`
 	Proxy      *ProxyTarget `json:"proxy,omitempty"`
