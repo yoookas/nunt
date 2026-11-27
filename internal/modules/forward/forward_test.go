@@ -954,3 +954,38 @@ func TestReloadAutoDisablesBusyPort(t *testing.T) {
 	}
 	f.Stop(context.Background())
 }
+
+// Editing the access rule has to change the proxy fingerprint: a rule that keeps
+// its old fingerprint never gets rebuilt, so the forwarded port would keep using
+// the previous filter. The order of the entries changes the verdict too, so it
+// must not be sorted away.
+func TestFingerprintTracksTheAccessRule(t *testing.T) {
+	base := model.ForwardRule{Protocol: "tcp", SrcAddr: ":8080", DstAddr: "10.0.0.1:80"}
+	withAccess := func(entries ...model.AccessEntry) model.ForwardRule {
+		rule := base
+		rule.Access = model.Access{
+			Mode: model.AccessRules,
+			IP:   model.AccessList{Rest: model.AccessDeny, Entries: entries},
+			UA:   model.AccessList{Rest: model.AccessAllow},
+		}
+		return rule
+	}
+
+	allow := withAccess(model.AccessEntry{Action: model.AccessAllow, Kind: model.AccessKindIP, Value: "10.0.0.0/8"})
+	changed := withAccess(model.AccessEntry{Action: model.AccessAllow, Kind: model.AccessKindIP, Value: "10.1.0.0/16"})
+	reordered := withAccess(
+		model.AccessEntry{Action: model.AccessDeny, Kind: model.AccessKindIP, Value: "10.0.0.66/32"},
+		model.AccessEntry{Action: model.AccessAllow, Kind: model.AccessKindIP, Value: "10.0.0.0/8"},
+	)
+	same := withAccess(model.AccessEntry{Action: model.AccessAllow, Kind: model.AccessKindIP, Value: "10.0.0.0/8"})
+
+	if fingerprint(allow) != fingerprint(same) {
+		t.Fatal("identical rules must share a fingerprint")
+	}
+	if fingerprint(allow) == fingerprint(changed) {
+		t.Fatal("a changed entry must change the fingerprint")
+	}
+	if fingerprint(allow) == fingerprint(reordered) {
+		t.Fatal("the entry order must be part of the fingerprint")
+	}
+}
