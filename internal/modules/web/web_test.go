@@ -2,27 +2,60 @@ package web
 
 import (
 	"context"
-	"io"
-	"net"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync"
-	"testing"
-	"time"
-
 	"github.com/nunt/nunt/internal/config"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/module"
 	"github.com/nunt/nunt/internal/security"
 	"github.com/nunt/nunt/internal/testutil"
 	"github.com/nunt/nunt/internal/vfs"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
 )
 
 // ---------------------------------------------------------------------------
 // routing
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// path rewriting
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// range requests
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// static hosting
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// redirects
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// access control & basic auth
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// reverse proxy
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// conditional requests
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// module lifecycle
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// access log
 // ---------------------------------------------------------------------------
 
 func mkRule(t *testing.T, name, host, path string, priority int, typ string) model.WebRule {
@@ -151,10 +184,6 @@ func TestCompileRejectsInvalidRule(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// path rewriting
-// ---------------------------------------------------------------------------
-
 func TestRewritePath(t *testing.T) {
 	cases := []struct {
 		path, prefix, replace, want string
@@ -243,10 +272,6 @@ func TestBalancerStrategies(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// range requests
-// ---------------------------------------------------------------------------
-
 func TestParseRange(t *testing.T) {
 	cases := []struct {
 		header  string
@@ -285,10 +310,6 @@ func TestParseRange(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// static hosting
-// ---------------------------------------------------------------------------
-
 // bareWeb returns a module with only the logger and the basic auth throttle
 // wired; the handlers under test never touch the listeners or the storage
 // manager because the file system is injected directly.
@@ -317,333 +338,6 @@ func newStaticStore(t *testing.T, root string) *staticFS {
 	})
 	return store
 }
-
-func TestStaticServesIndexAndRange(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("<h1>hello</h1>"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	body := strings.Repeat("abcdefghij", 10) // 100 bytes
-	if err := os.WriteFile(filepath.Join(root, "data.txt"), []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, ".secret"), []byte("hidden"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "sub", "index.html"), []byte("sub"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	store := newStaticStore(t, root)
-	raw := mkRule(t, "static", "example.com", "/", 0, model.WebTypeStatic)
-	raw.Static = &model.StaticTgt{Root: root, Listing: true, CacheSeconds: 60}
-	compiled, err := compileRule(raw, 0)
-	if err != nil {
-		t.Fatalf("compile: %v", err)
-	}
-	site, err := bareWeb().staticSite(compiled)
-	if err != nil {
-		t.Fatalf("staticSite: %v", err)
-	}
-	site.static = store
-
-	handler := bareWeb()
-	if _, gerr := store.get(); gerr != nil {
-		t.Fatalf("test store: %v", gerr)
-	}
-	serve := func(method, target string, headers map[string]string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(method, target, nil)
-		for k, v := range headers {
-			req.Header.Set(k, v)
-		}
-		rw := httptest.NewRecorder()
-		handler.serveStatic(compiled, store, raw.Static, defaultIndexFiles, 60, rw, req)
-		return rw
-	}
-
-	// index file
-	rw := serve(http.MethodGet, "http://example.com/", nil)
-	if rw.Code != http.StatusOK || !strings.Contains(rw.Body.String(), "hello") {
-		t.Fatalf("index: status %d body %q", rw.Code, rw.Body.String())
-	}
-	if ct := rw.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
-		t.Fatalf("index content type = %q", ct)
-	}
-	if cc := rw.Header().Get("Cache-Control"); cc != "public, max-age=60" {
-		t.Fatalf("cache control = %q", cc)
-	}
-
-	// Range request
-	rw = serve(http.MethodGet, "http://example.com/data.txt", map[string]string{"Range": "bytes=10-19"})
-	if rw.Code != http.StatusPartialContent {
-		t.Fatalf("range status = %d", rw.Code)
-	}
-	if got := rw.Body.String(); got != body[10:20] {
-		t.Fatalf("range body = %q, want %q", got, body[10:20])
-	}
-	if cr := rw.Header().Get("Content-Range"); cr != "bytes 10-19/100" {
-		t.Fatalf("content range = %q", cr)
-	}
-
-	// Unsatisfiable range
-	rw = serve(http.MethodGet, "http://example.com/data.txt", map[string]string{"Range": "bytes=500-600"})
-	if rw.Code != http.StatusRequestedRangeNotSatisfiable {
-		t.Fatalf("bad range status = %d", rw.Code)
-	}
-
-	// Hidden files stay hidden.
-	rw = serve(http.MethodGet, "http://example.com/.secret", nil)
-	if rw.Code != http.StatusNotFound {
-		t.Fatalf("hidden file status = %d", rw.Code)
-	}
-
-	// Traversal attempts never escape the root.
-	rw = serve(http.MethodGet, "http://example.com/../config.json", nil)
-	if rw.Code == http.StatusOK && strings.Contains(rw.Body.String(), "users") {
-		t.Fatalf("path traversal was served: %d %q", rw.Code, rw.Body.String())
-	}
-
-	// Directory listing.
-	rw = serve(http.MethodGet, "http://example.com/sub2/", nil)
-	if rw.Code != http.StatusNotFound {
-		t.Fatalf("unknown directory status = %d", rw.Code)
-	}
-	rw = serve(http.MethodGet, "http://example.com/sub", nil)
-	if rw.Code != http.StatusMovedPermanently {
-		t.Fatalf("directory without slash status = %d", rw.Code)
-	}
-	if loc := rw.Header().Get("Location"); loc != "/sub/" {
-		t.Fatalf("directory redirect location = %q", loc)
-	}
-	rw = serve(http.MethodGet, "http://example.com/sub/", nil)
-	if rw.Code != http.StatusOK || !strings.Contains(rw.Body.String(), "sub") {
-		t.Fatalf("sub index: %d %q", rw.Code, rw.Body.String())
-	}
-
-	// Methods other than GET and HEAD are rejected.
-	rw = serve(http.MethodPost, "http://example.com/", nil)
-	if rw.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("post status = %d", rw.Code)
-	}
-}
-
-func TestStaticListing(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(root, "dir"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	store := newStaticStore(t, root)
-	raw := mkRule(t, "static", "example.com", "/", 0, model.WebTypeStatic)
-	raw.Static = &model.StaticTgt{Root: root, Listing: true}
-	compiled, err := compileRule(raw, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
-	rw := httptest.NewRecorder()
-	bareWeb().serveStatic(compiled, store, raw.Static, defaultIndexFiles, 0, rw, req)
-	if rw.Code != http.StatusOK {
-		t.Fatalf("listing status = %d", rw.Code)
-	}
-	body := rw.Body.String()
-	for _, want := range []string{"Index of /", "a.txt", "dir/"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("listing does not contain %q: %s", want, body)
-		}
-	}
-	if cc := rw.Header().Get("Cache-Control"); cc != "no-cache" {
-		t.Fatalf("listing cache control = %q", cc)
-	}
-	if strings.Contains(body, "../") {
-		t.Errorf("the root listing must not link to a parent directory: %s", body)
-	}
-
-	// A sub directory listing links back to its parent.
-	req = httptest.NewRequest(http.MethodGet, "http://example.com/dir/", nil)
-	rw = httptest.NewRecorder()
-	bareWeb().serveStatic(compiled, store, raw.Static, defaultIndexFiles, 0, rw, req)
-	if rw.Code != http.StatusOK {
-		t.Fatalf("sub listing status = %d", rw.Code)
-	}
-	if body := rw.Body.String(); !strings.Contains(body, "Index of /dir") || !strings.Contains(body, "href=\"../\"") {
-		t.Fatalf("sub listing is incomplete: %s", body)
-	}
-}
-
-func TestStaticSPAFallback(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("spa"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	store := newStaticStore(t, root)
-	raw := mkRule(t, "static", "example.com", "/", 0, model.WebTypeStatic)
-	raw.Static = &model.StaticTgt{Root: root, SPA: true}
-	compiled, err := compileRule(raw, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	query := func(target string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, target, nil)
-		rw := httptest.NewRecorder()
-		bareWeb().serveStatic(compiled, store, raw.Static, defaultIndexFiles, 0, rw, req)
-		return rw
-	}
-	if rw := query("http://example.com/some/route"); rw.Code != http.StatusOK || rw.Body.String() != "spa" {
-		t.Fatalf("spa route: %d %q", rw.Code, rw.Body.String())
-	}
-	if rw := query("http://example.com/missing.js"); rw.Code != http.StatusNotFound {
-		t.Fatalf("spa asset fallback should not happen: %d", rw.Code)
-	}
-}
-
-func TestStaticHiddenAndTraversal(t *testing.T) {
-	if !hiddenPath("/.git/config") || !hiddenPath("/a/.env") {
-		t.Fatal("hidden path not detected")
-	}
-	if hiddenPath("/a/b.txt") || hiddenPath("/") {
-		t.Fatal("visible path reported as hidden")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// redirects
-// ---------------------------------------------------------------------------
-
-func TestRedirectHandler(t *testing.T) {
-	raw := mkRule(t, "redir", "example.com", "/", 0, model.WebTypeRedirect)
-	raw.Redirect = &model.RedirectTgt{To: "https://target.example/base", Status: 301, KeepPath: true}
-	compiled, err := compileRule(raw, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	site, err := bareWeb().redirectSite(compiled)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodGet, "http://example.com/docs/page?a=1", nil)
-	rw := httptest.NewRecorder()
-	site.handler.ServeHTTP(rw, req)
-	if rw.Code != http.StatusMovedPermanently {
-		t.Fatalf("status = %d", rw.Code)
-	}
-	if loc := rw.Header().Get("Location"); loc != "https://target.example/base/docs/page?a=1" {
-		t.Fatalf("location = %q", loc)
-	}
-
-	raw.Redirect = &model.RedirectTgt{To: "https://target.example$uri", Status: 308}
-	compiled, _ = compileRule(raw, 0)
-	site, _ = bareWeb().redirectSite(compiled)
-	rw = httptest.NewRecorder()
-	site.handler.ServeHTTP(rw, httptest.NewRequest(http.MethodGet, "http://example.com/a/b?x=2", nil))
-	if loc := rw.Header().Get("Location"); loc != "https://target.example/a/b?x=2" {
-		t.Fatalf("variable location = %q", loc)
-	}
-
-	if safeRedirect("javascript:alert(1)") {
-		t.Fatal("javascript target must be rejected")
-	}
-	if safeRedirect("https://ok.example\r\nX-Evil: 1") {
-		t.Fatal("header injection must be rejected")
-	}
-	if !safeRedirect("https://ok.example/x") {
-		t.Fatal("a plain https target must be accepted")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// access control & basic auth
-// ---------------------------------------------------------------------------
-
-func TestAccessHandlerIPFilter(t *testing.T) {
-	raw := mkRule(t, "guard", "example.com", "/", 0, model.WebTypeRedirect)
-	raw.Access = model.Access{
-		Mode: model.AccessRules,
-		IP: model.AccessList{Rest: model.AccessAllow, Entries: []model.AccessEntry{
-			{Action: model.AccessDeny, Kind: model.AccessKindIP, Value: "203.0.113.0/24"},
-		}},
-		UA: model.AccessList{Rest: model.AccessAllow},
-	}
-	compiled, err := compileRule(raw, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler := bareWeb().accessHandler(compiled, http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
-		rw.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(rw, "ok")
-	}))
-	req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
-	req.RemoteAddr = "203.0.113.9:1234"
-	rw := httptest.NewRecorder()
-	handler.ServeHTTP(rw, req)
-	if rw.Code != http.StatusForbidden {
-		t.Fatalf("denied client status = %d", rw.Code)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
-	req.RemoteAddr = "198.51.100.5:1234"
-	rw = httptest.NewRecorder()
-	handler.ServeHTTP(rw, req)
-	if rw.Code != http.StatusOK {
-		t.Fatalf("allowed client status = %d", rw.Code)
-	}
-}
-
-func TestBasicAuthHandler(t *testing.T) {
-	hash := testutil.PasswordHash("s3cret")
-	raw := mkRule(t, "guard", "example.com", "/", 0, model.WebTypeRedirect)
-	raw.BasicAuth = &model.BasicAuth{Enable: true, Users: []model.BasicAuthUser{{Username: "alice", Password: hash}}}
-	compiled, err := compileRule(raw, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler := bareWeb().basicAuthHandler(compiled, http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(rw, "ok")
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
-	rw := httptest.NewRecorder()
-	handler.ServeHTTP(rw, req)
-	if rw.Code != http.StatusUnauthorized {
-		t.Fatalf("anonymous status = %d", rw.Code)
-	}
-	if !strings.HasPrefix(rw.Header().Get("WWW-Authenticate"), "Basic realm=") {
-		t.Fatalf("missing challenge: %q", rw.Header().Get("WWW-Authenticate"))
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
-	req.SetBasicAuth("alice", "s3cret")
-	rw = httptest.NewRecorder()
-	handler.ServeHTTP(rw, req)
-	if rw.Code != http.StatusOK {
-		t.Fatalf("authenticated status = %d", rw.Code)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
-	req.SetBasicAuth("alice", "wrong")
-	rw = httptest.NewRecorder()
-	handler.ServeHTTP(rw, req)
-	if rw.Code != http.StatusUnauthorized {
-		t.Fatalf("wrong password status = %d", rw.Code)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
-	req.SetBasicAuth("bob", "s3cret")
-	rw = httptest.NewRecorder()
-	handler.ServeHTTP(rw, req)
-	if rw.Code != http.StatusUnauthorized {
-		t.Fatalf("unknown user status = %d", rw.Code)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// reverse proxy
-// ---------------------------------------------------------------------------
 
 // A client can send any X-Forwarded-* chain it likes. Unless the request came
 // through a declared trusted proxy, the headers are rebuilt from the
@@ -675,289 +369,6 @@ func TestBalancerLeastConnPrefersIdleUpstream(t *testing.T) {
 		t.Fatalf("pick = %q after the idle upstream failed, want the busy one", got.target)
 	}
 }
-
-func TestProxyForwardedHeadersFollowTrust(t *testing.T) {
-	var xff, proto, host string
-	backend := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		xff = req.Header.Get("X-Forwarded-For")
-		proto = req.Header.Get("X-Forwarded-Proto")
-		host = req.Header.Get("X-Forwarded-Host")
-		_, _ = io.WriteString(rw, "ok")
-	}))
-	defer backend.Close()
-
-	call := func(name string, cfg *model.Config) {
-		t.Helper()
-		// A fresh rule per call: the reverse proxy cache is keyed by rule, and
-		// a cached handler would keep the previous test's configuration.
-		raw := mkRule(t, name, "example.com", "/", 0, model.WebTypeProxy)
-		raw.Proxy = &model.ProxyTarget{Targets: []string{backend.URL}}
-		compiled, err := compileRule(raw, 0)
-		if err != nil {
-			t.Fatalf("compile: %v", err)
-		}
-		w := bareWeb()
-		w.cfg = cfg
-		w.storeTrust(cfg)
-		site, err := w.proxySite(compiled, cfg)
-		if err != nil {
-			t.Fatalf("proxySite: %v", err)
-		}
-		ctl := httptest.NewServer(site.handler)
-		defer ctl.Close()
-		req, err := http.NewRequest(http.MethodGet, ctl.URL+"/", nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		req.Host = "example.com"
-		req.Header.Set("X-Forwarded-For", "203.0.113.9")
-		req.Header.Set("X-Forwarded-Proto", "https")
-		req.Header.Set("X-Forwarded-Host", "made-up.example")
-		resp, err := ctl.Client().Do(req)
-		if err != nil {
-			t.Fatalf("request: %v", err)
-		}
-		_ = resp.Body.Close()
-	}
-
-	call("forwarded-untrusted", &model.Config{})
-	if strings.Contains(xff, "203.0.113.9") {
-		t.Fatalf("an untrusted proxy must not keep the client chain: %q", xff)
-	}
-	if !strings.HasPrefix(xff, "127.0.0.1") {
-		t.Fatalf("X-Forwarded-For = %q, want the connection address", xff)
-	}
-	if proto != "http" || host != "example.com" {
-		t.Fatalf("proto/host = %q/%q, want the observed values", proto, host)
-	}
-
-	call("forwarded-trusted", &model.Config{System: model.SystemConfig{TrustProxy: true, TrustedProxies: []string{"127.0.0.1"}}})
-	if !strings.HasPrefix(xff, "203.0.113.9, ") {
-		t.Fatalf("a trusted proxy must keep the chain: %q", xff)
-	}
-	if proto != "https" || host != "made-up.example" {
-		t.Fatalf("a trusted proxy must keep proto/host, got %q/%q", proto, host)
-	}
-
-	// trustProxy without a proxy list trusts nobody: the chain is rebuilt from
-	// the connection like an untrusted request.
-	call("forwarded-flag-without-list", &model.Config{System: model.SystemConfig{TrustProxy: true}})
-	if strings.Contains(xff, "203.0.113.9") {
-		t.Fatalf("trustProxy without trusted proxies must not keep the chain: %q", xff)
-	}
-	if !strings.HasPrefix(xff, "127.0.0.1") {
-		t.Fatalf("X-Forwarded-For = %q, want the connection address", xff)
-	}
-}
-
-func TestProxyRoundTrip(t *testing.T) {
-	var gotPath, gotHost, gotXFF, gotProto, gotHeader string
-	var hits int
-	backend := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		hits++
-		gotPath = req.URL.Path + "?" + req.URL.RawQuery
-		gotHost = req.Host
-		gotXFF = req.Header.Get("X-Forwarded-For")
-		gotProto = req.Header.Get("X-Forwarded-Proto")
-		gotHeader = req.Header.Get("X-Rule")
-		rw.Header().Set("X-Upstream", "one")
-		rw.WriteHeader(http.StatusTeapot)
-		_, _ = io.WriteString(rw, "backend")
-	}))
-	defer backend.Close()
-
-	raw := mkRule(t, "proxy", "example.com", "/app", 0, model.WebTypeProxy)
-	raw.Proxy = &model.ProxyTarget{
-		Targets:     []string{backend.URL},
-		Balance:     "roundrobin",
-		HostHeader:  "upstream.internal",
-		Headers:     map[string]string{"X-Rule": "value"},
-		RespHeaders: map[string]string{"X-Added": "yes"},
-		PathPrefix:  "/app",
-		PathReplace: "/backend",
-	}
-	compiled, err := compileRule(raw, 0)
-	if err != nil {
-		t.Fatalf("compile: %v", err)
-	}
-	site, err := bareWeb().proxySite(compiled, &model.Config{})
-	if err != nil {
-		t.Fatalf("proxySite: %v", err)
-	}
-
-	ctl := httptest.NewServer(site.handler)
-	defer ctl.Close()
-	req, err := http.NewRequest(http.MethodGet, ctl.URL+"/app/users?page=2", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Host = "example.com"
-	resp, err := ctl.Client().Do(req)
-	if err != nil {
-		t.Fatalf("request: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != http.StatusTeapot {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	if string(body) != "backend" {
-		t.Fatalf("body = %q", body)
-	}
-	if gotPath != "/backend/users?page=2" {
-		t.Fatalf("upstream path = %q, want /backend/users?page=2", gotPath)
-	}
-	if gotHost != "upstream.internal" {
-		t.Fatalf("upstream host = %q", gotHost)
-	}
-	if gotXFF == "" {
-		t.Fatal("X-Forwarded-For was not set")
-	}
-	if gotProto != "http" {
-		t.Fatalf("X-Forwarded-Proto = %q", gotProto)
-	}
-	if gotHeader != "value" {
-		t.Fatalf("custom request header = %q", gotHeader)
-	}
-	if resp.Header.Get("X-Added") != "yes" {
-		t.Fatalf("custom response header = %q", resp.Header.Get("X-Added"))
-	}
-	if hits != 1 {
-		t.Fatalf("backend hits = %d", hits)
-	}
-}
-
-func TestProxyRoundRobin(t *testing.T) {
-	var mu sync.Mutex
-	seen := []string{}
-	newBackend := func(name string) *httptest.Server {
-		return httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
-			mu.Lock()
-			seen = append(seen, name)
-			mu.Unlock()
-			_, _ = io.WriteString(rw, name)
-		}))
-	}
-	first := newBackend("one")
-	defer first.Close()
-	second := newBackend("two")
-	defer second.Close()
-
-	raw := mkRule(t, "proxy", "example.com", "/", 0, model.WebTypeProxy)
-	raw.Proxy = &model.ProxyTarget{Targets: []string{first.URL, second.URL}, Balance: "roundrobin"}
-	compiled, err := compileRule(raw, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	site, err := bareWeb().proxySite(compiled, &model.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctl := httptest.NewServer(site.handler)
-	defer ctl.Close()
-
-	for i := 0; i < 4; i++ {
-		resp, err := ctl.Client().Get(ctl.URL + "/")
-		if err != nil {
-			t.Fatalf("request %d: %v", i, err)
-		}
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(seen) != 4 {
-		t.Fatalf("backend hits = %d", len(seen))
-	}
-	counts := map[string]int{}
-	for _, name := range seen {
-		counts[name]++
-	}
-	if counts["one"] != 2 || counts["two"] != 2 {
-		t.Fatalf("round robin distribution = %v", counts)
-	}
-}
-
-func TestProxyUpstreamFailure(t *testing.T) {
-	// Bind and close a port so the upstream refuses the connection.
-	dead, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := dead.Addr().String()
-	_ = dead.Close()
-
-	raw := mkRule(t, "proxy", "example.com", "/", 0, model.WebTypeProxy)
-	raw.Proxy = &model.ProxyTarget{Targets: []string{"http://" + addr}, TimeoutSec: 2}
-	compiled, err := compileRule(raw, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	site, err := bareWeb().proxySite(compiled, &model.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctl := httptest.NewServer(site.handler)
-	defer ctl.Close()
-	resp, err := ctl.Client().Get(ctl.URL + "/")
-	if err != nil {
-		t.Fatalf("request: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502", resp.StatusCode)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// conditional requests
-// ---------------------------------------------------------------------------
-
-func TestStaticConditionalRequest(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "app.js"), []byte("console.log(1)"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	store := newStaticStore(t, root)
-	raw := mkRule(t, "static", "example.com", "/", 0, model.WebTypeStatic)
-	raw.Static = &model.StaticTgt{Root: root}
-	compiled, err := compileRule(raw, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	get := func(headers map[string]string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, "http://example.com/app.js", nil)
-		for k, v := range headers {
-			req.Header.Set(k, v)
-		}
-		rw := httptest.NewRecorder()
-		bareWeb().serveStatic(compiled, store, raw.Static, defaultIndexFiles, 0, rw, req)
-		return rw
-	}
-	first := get(nil)
-	if first.Code != http.StatusOK {
-		t.Fatalf("status = %d", first.Code)
-	}
-	if ct := first.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/javascript") {
-		t.Fatalf("content type = %q", ct)
-	}
-	etag := first.Header().Get("ETag")
-	if etag == "" {
-		t.Fatal("no etag")
-	}
-	second := get(map[string]string{"If-None-Match": etag})
-	if second.Code != http.StatusNotModified {
-		t.Fatalf("conditional status = %d", second.Code)
-	}
-	if second.Body.Len() != 0 {
-		t.Fatalf("conditional body = %q", second.Body.String())
-	}
-}
-
-// ---------------------------------------------------------------------------
-// module lifecycle
-// ---------------------------------------------------------------------------
 
 // testConfigStore builds a configuration store in a temporary directory.
 // testListener builds a listener for the module tests.
@@ -1222,10 +633,6 @@ func TestPrepareRuleHashesPassword(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// access log
-// ---------------------------------------------------------------------------
-
 func TestLogBufferRingAndFilter(t *testing.T) {
 	buf := newLogBuffer(3)
 	for i := 0; i < 5; i++ {
@@ -1304,73 +711,4 @@ func mustCanonical(t *testing.T, p string) string {
 		t.Fatalf("canonicalPath(%q) rejected", p)
 	}
 	return got
-}
-
-// A listener that requires a client certificate must not start when its CA
-// bundle cannot be parsed.
-func TestMTLSRequiresAValidCA(t *testing.T) {
-	w := &Web{deps: &module.Deps{}}
-	cfg := &model.Config{Web: model.WebConfig{
-		Listeners: []model.WebListener{{
-			ID:     "l1",
-			Name:   "mtls",
-			Listen: []string{":18443"},
-			TLS:    model.WebTLS{Mode: model.TLSModeOff, ClientAuth: model.ClientAuthRequire, ClientCA: "not a pem"},
-		}},
-	}}
-	_, plans, errs := w.compileWeb(cfg)
-	if len(errs) == 0 {
-		t.Fatal("an invalid client CA must be reported")
-	}
-	if _, ok := plans[":18443"]; ok {
-		t.Fatal("the listener must not start without client certificate verification")
-	}
-}
-
-// A route with mode inherit uses the access rule of its listener; a route with
-// its own mode overrides it.
-func TestRouteInheritsListenerAccess(t *testing.T) {
-	cfg := &model.Config{Web: model.WebConfig{
-		Listeners: []model.WebListener{{
-			ID: "l1", Name: "http", Listen: []string{":18080"},
-			Access: model.Access{Mode: model.AccessRules, IP: model.AccessList{Rest: model.AccessDeny, Entries: []model.AccessEntry{{Action: model.AccessAllow, Kind: model.AccessKindIP, Value: "10.0.0.0/8"}}}, UA: model.AccessList{Rest: model.AccessAllow}},
-		}},
-		Rules: []model.WebRule{{
-			ID: "r1", Name: "inherit", Enable: true, Type: model.WebTypeProxy,
-			ListenerID: "l1", Path: "/", Domains: []string{"a.example.com"},
-			Access: model.Access{Mode: model.AccessInherit},
-			Proxy:  &model.ProxyTarget{Targets: []string{"http://127.0.0.1:9000"}},
-		}},
-	}}
-	w := &Web{deps: &module.Deps{}}
-	compiled, _, errs := w.compileWeb(cfg)
-	if len(errs) != 0 {
-		t.Fatalf("compileWeb: %v", errs)
-	}
-	if len(compiled) != 1 {
-		t.Fatalf("compiled = %d", len(compiled))
-	}
-	rule := compiled[0]
-	if rule.spec.Access.Mode != model.AccessRules || len(rule.spec.Access.IP.Entries) != 1 {
-		t.Fatalf("the listener access was not inherited: %+v", rule.spec.Access)
-	}
-	if ok, _ := rule.filter.Allowed(net.ParseIP("10.1.2.3"), ""); !ok {
-		t.Fatal("an address from the listener allow list must pass")
-	}
-	if ok, _ := rule.filter.Allowed(net.ParseIP("192.168.1.1"), ""); ok {
-		t.Fatal("an address outside the listener allow list must be refused")
-	}
-
-	// A route's own rule replaces the listener rule.
-	cfg.Web.Rules[0].Access = model.Access{Mode: model.AccessRules, IP: model.AccessList{Rest: model.AccessDeny, Entries: []model.AccessEntry{{Action: model.AccessAllow, Kind: model.AccessKindIP, Value: "192.168.1.0/24"}}}, UA: model.AccessList{Rest: model.AccessAllow}}
-	compiled, _, errs = w.compileWeb(cfg)
-	if len(errs) != 0 || len(compiled) != 1 {
-		t.Fatalf("compileWeb: %v", errs)
-	}
-	if ok, _ := compiled[0].filter.Allowed(net.ParseIP("192.168.1.5"), ""); !ok {
-		t.Fatal("the route's own allow list must win")
-	}
-	if ok, _ := compiled[0].filter.Allowed(net.ParseIP("10.1.2.3"), ""); ok {
-		t.Fatal("the listener list must not leak into a custom route")
-	}
 }
