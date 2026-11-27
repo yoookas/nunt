@@ -1,9 +1,7 @@
+import AccessEditor from '../../components/AccessEditor'
 import { useMemo } from 'react'
-import { Alert, Button, Col, Form, Input, InputNumber, Row, Select, Space, Tag } from 'antd'
-import { Muted } from '../../components'
+import { Button, Col, Form, Input, InputNumber, Row, Select } from 'antd'
 import {
-  ACCESS_LABEL,
-  ACCESS_OPTIONS,
   buildRulePayload,
   listenError,
   PROTOCOL_OPTIONS,
@@ -40,10 +38,6 @@ export default function ForwardRuleForm({
 }: ForwardRuleFormProps) {
   const [form] = Form.useForm<RuleFormValues>()
   const initial = useMemo(() => ruleFormValues(rule), [rule])
-  const accessMode = Form.useWatch('accessMode', form) ?? initial.accessMode
-
-  const originalUaMode = rule?.access?.uaMode || 'off'
-  const originalUas = Array.isArray(rule?.access?.uas) ? rule?.access?.uas ?? [] : []
 
   const submit = () => {
     // getFieldsValue(true) keeps values of the access fields that unmount while
@@ -149,55 +143,13 @@ export default function ForwardRuleForm({
 
         <Col xs={24}>
           <Form.Item
-            name="accessMode"
-            label="IP 访问控制"
-            extra="白名单为空时拒绝所有来源；黑名单为空时不拒绝任何来源。地区列表仅在白名单 / 黑名单模式下保存；私有 / 回环地址没有地区数据。"
+            name="access"
+            label="访问控制"
+            extra="从上到下匹配，第一条命中的规则生效；端口转发没有 User-Agent，因此不提供客户端规则。"
           >
-            <Select options={ACCESS_OPTIONS} />
+            <AccessEditor allowUA={false} allowInherit={false} />
           </Form.Item>
         </Col>
-
-        {accessMode !== 'off' ? (
-          <Col xs={24}>
-            <Row gutter={16}>
-              <Col xs={24} md={12}>
-                <Form.Item name="accessIps" label="IP 列表" extra="每行一条，支持 CIDR。">
-                  <Input.TextArea rows={4} placeholder={'192.168.1.0/24\n10.0.0.5'} className="mono" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} md={12}>
-                <Form.Item
-                  name="accessGeo"
-                  label="国家 / 省份 / 城市"
-                  extra="命中任意一项即匹配，与 IP 列表取并集。"
-                >
-                  <Select
-                    mode="tags"
-                    tokenSeparators={[',', '，']}
-                    placeholder="输入后回车，例如 中国、浙江、杭州"
-                    notFoundContent={<Muted>直接输入后回车</Muted>}
-                  />
-                </Form.Item>
-              </Col>
-            </Row>
-          </Col>
-        ) : null}
-
-        {originalUas.length || originalUaMode !== 'off' ? (
-          <Col xs={24}>
-            <Alert
-              type="info"
-              showIcon
-              message="已保存的 User-Agent 过滤将被原样保留"
-              description={
-                <Space size={4} wrap>
-                  <Tag>{ACCESS_LABEL[originalUaMode] || originalUaMode}</Tag>
-                  <Muted>共 {originalUas.length} 条规则；端口转发不评估 User-Agent，本表单不修改该列表。</Muted>
-                </Space>
-              }
-            />
-          </Col>
-        ) : null}
       </Row>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>

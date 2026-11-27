@@ -162,10 +162,12 @@ export default function AccessEditor({
   value,
   onChange,
   allowUA = true,
+  allowInherit = true,
 }: {
   value?: Access
   onChange?: (next: Access) => void
   allowUA?: boolean
+  allowInherit?: boolean
 }) {
   const access = normalizeAccess(value ?? emptyAccess())
   const update = (next: Partial<Access>) => onChange?.({ ...access, ...next })
@@ -179,7 +181,7 @@ export default function AccessEditor({
         options={[
           { value: 'off', label: '关闭（不过滤）' },
           { value: 'rules', label: '自定义规则' },
-          ...(allowUA ? [{ value: 'inherit', label: '继承监听器' }] : []),
+          ...(allowInherit ? [{ value: 'inherit', label: '继承监听器' }] : []),
         ]}
       />
       {access.mode === 'rules' ? (

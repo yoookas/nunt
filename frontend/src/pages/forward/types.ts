@@ -1,7 +1,7 @@
+import { emptyAccess, normalizeAccess, type Access } from '../../access'
 // Types and small helpers for the port forwarding page. The shapes mirror the
 // Go API in internal/modules/forward and internal/model so the page can stay
 // typed without reaching for `any` on every response.
-import { splitLines } from '../../format'
 
 export interface SelectOption {
   value: string
@@ -103,9 +103,7 @@ export interface RuleFormValues {
   timeoutSec: number
   maxConns: number
   maxConnsPerIP: number
-  accessMode: string
-  accessIps: string
-  accessGeo: string[]
+  access: Access
   remark: string
 }
 
@@ -129,9 +127,7 @@ export function emptyRuleForm(): RuleFormValues {
     timeoutSec: 0,
     maxConns: 0,
     maxConnsPerIP: 0,
-    accessMode: 'off',
-    accessIps: '',
-    accessGeo: [],
+    access: emptyAccess(),
     remark: '',
   }
 }
@@ -147,9 +143,7 @@ export function ruleFormValues(rule?: ForwardRule | null): RuleFormValues {
     timeoutSec: num(rule.timeoutSec),
     maxConns: num(rule.maxConns),
     maxConnsPerIP: num(rule.maxConnsPerIP),
-    accessMode: normalizeMode(access.mode),
-    accessIps: Array.isArray(access.ips) ? access.ips.join('\n') : '',
-    accessGeo: Array.isArray(access.geo) ? [...access.geo] : [],
+    access: normalizeAccess(access),
     remark: rule.remark || '',
   }
 }
@@ -165,8 +159,6 @@ export function buildRulePayload(
   values: RuleFormValues,
   options: { enable: boolean; originalAccess?: ForwardAccess | null },
 ): Record<string, unknown> {
-  const mode = normalizeMode(values.accessMode)
-  const original = options.originalAccess
   const protocol = PROTOCOL_LABEL[values.protocol || ''] ? values.protocol : 'tcp'
   return {
     name: String(values.name ?? '').trim(),
@@ -177,13 +169,7 @@ export function buildRulePayload(
     timeoutSec: num(values.timeoutSec),
     maxConns: num(values.maxConns),
     maxConnsPerIP: num(values.maxConnsPerIP),
-    access: {
-      mode,
-      ips: splitLines(values.accessIps || ''),
-      geo: mode === 'off' || !Array.isArray(values.accessGeo) ? [] : values.accessGeo,
-      uaMode: normalizeMode(original?.uaMode),
-      uas: Array.isArray(original?.uas) ? original?.uas ?? [] : [],
-    },
+    access: normalizeAccess(values.access),
     remark: String(values.remark ?? '').trim(),
   }
 }

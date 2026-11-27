@@ -49,7 +49,6 @@ import { AccessTag, RouteTypeTag, TlsTag } from './web/ui'
 import {
   TYPE_OPTIONS,
   listenerName,
-  normalizeAccessMode,
   tlsModeOf,
   type Certificate,
   type ListResponse,
@@ -931,7 +930,7 @@ export default function Web() {
                           meta={
                             <Space size={[4, 4]} wrap>
                               <RouteTypeTag type={rule.type} />
-                              <AccessTag mode={normalizeAccessMode(rule.access?.mode)} />
+                              <AccessTag access={rule.access} />
                               {rule.waf ? <Tag color="volcano">WAF</Tag> : null}
                               <Muted>{fmtCount(rule.requests)} 次</Muted>
                             </Space>

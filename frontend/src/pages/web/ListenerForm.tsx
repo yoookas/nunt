@@ -1,22 +1,24 @@
+import AccessEditor from '../../components/AccessEditor'
+import { emptyAccess, normalizeAccess, type Access } from '../../access'
 import { Alert, Button, Col, Form, Input, Row, Select, Switch, Tag, Typography, theme } from 'antd'
 import { DeleteOutlined } from '@ant-design/icons'
 import { Link } from 'react-router-dom'
 import { Muted } from '../../components'
 import { SectionTitle, TagInput } from './ui'
 import {
-  ACCESS_OPTIONS,
+
   CLIENT_AUTH_OPTIONS,
   TLS_OPTIONS,
   certOptions,
-  normalizeAccessMode,
+
   normalizeClientAuth,
   normalizeTLSMode,
-  normalizeUAMode,
-  type AccessMode,
+
+
   type Certificate,
   type ClientAuthMode,
   type TLSMode,
-  type UAMode,
+
   type WebListenerView,
 } from './types'
 
@@ -30,13 +32,7 @@ export interface ListenerPayload {
     clientAuth: ClientAuthMode
     clientCa: string
   }
-  access: {
-    mode: AccessMode
-    ips: string[]
-    geo: string[]
-    uaMode: UAMode
-    uas: string[]
-  }
+  access: Access
   remark: string
 }
 
@@ -48,11 +44,7 @@ interface ListenerFormValues {
   hsts: boolean
   clientAuth: ClientAuthMode
   clientCa: string
-  accessMode: AccessMode
-  accessIps: string
-  accessGeo: string[]
-  uaMode: UAMode
-  uaList: string
+  access: Access
   remark: string
 }
 
@@ -65,40 +57,21 @@ function blankForm(): ListenerFormValues {
     hsts: false,
     clientAuth: 'off',
     clientCa: '',
-    accessMode: 'off',
-    accessIps: '',
-    accessGeo: [],
-    uaMode: 'off',
-    uaList: '',
+    access: emptyAccess(),
     remark: '',
   }
-}
-
-function lines(list: unknown): string {
-  return (Array.isArray(list) ? list : []).map((item) => String(item)).join('\n')
-}
-
-function splitLines(value: string): string[] {
-  return String(value ?? '')
-    .split('\n')
-    .map((item) => item.trim())
-    .filter(Boolean)
 }
 
 function listenerToForm(listener: WebListenerView): ListenerFormValues {
   return {
     name: listener.name || '',
-    listen: (Array.isArray(listener.listen) ? listener.listen : []).map((item) => String(item)),
+    listen: Array.isArray(listener.listen) ? [...listener.listen] : [],
     tlsMode: normalizeTLSMode(listener.tls?.mode),
     certId: listener.tls?.certId || '',
     hsts: !!listener.tls?.hsts,
     clientAuth: normalizeClientAuth(listener.tls?.clientAuth),
     clientCa: listener.tls?.clientCa || '',
-    accessMode: normalizeAccessMode(listener.access?.mode),
-    accessIps: lines(listener.access?.ips),
-    accessGeo: Array.isArray(listener.access?.geo) ? [...(listener.access?.geo ?? [])] : [],
-    uaMode: normalizeUAMode(listener.access?.uaMode),
-    uaList: lines(listener.access?.uas),
+    access: normalizeAccess(listener.access),
     remark: listener.remark || '',
   }
 }
@@ -125,8 +98,6 @@ export default function ListenerForm({
 
   const tlsMode = (Form.useWatch('tlsMode', form) ?? 'off') as TLSMode
   const clientAuth = (Form.useWatch('clientAuth', form) ?? 'off') as ClientAuthMode
-  const accessMode = (Form.useWatch('accessMode', form) ?? 'off') as AccessMode
-  const uaMode = (Form.useWatch('uaMode', form) ?? 'off') as UAMode
   const certs = Array.isArray(certificates) ? certificates : []
   const listen = (Array.isArray(listener?.listen) ? listener?.listen ?? [] : []).join(' · ')
 
@@ -138,13 +109,6 @@ export default function ListenerForm({
     const auth = mode === 'off' ? 'off' : normalizeClientAuth(values.clientAuth)
     // A section hidden from the start never registers its fields, so use the
     // stored listener as a fallback instead of sending empty lists.
-    const accessIps = values.accessIps !== undefined ? values.accessIps : lines(listener?.access?.ips)
-    const uaList = values.uaList !== undefined ? values.uaList : lines(listener?.access?.uas)
-    const accessGeo = Array.isArray(values.accessGeo)
-      ? values.accessGeo
-      : Array.isArray(listener?.access?.geo)
-        ? listener?.access?.geo ?? []
-        : []
     const payload: ListenerPayload = {
       name: String(values.name || '').trim(),
       listen,
@@ -155,13 +119,7 @@ export default function ListenerForm({
         clientAuth: auth,
         clientCa: auth === 'off' ? '' : String(values.clientCa || '').trim(),
       },
-      access: {
-        mode: normalizeAccessMode(values.accessMode),
-        ips: splitLines(accessIps),
-        geo: accessGeo.map((item) => String(item).trim()).filter(Boolean),
-        uaMode: normalizeUAMode(values.uaMode),
-        uas: splitLines(uaList),
-      },
+      access: normalizeAccess(values.access ?? listener?.access),
       remark: String(values.remark || '').trim(),
     }
     onSave(payload)
@@ -348,47 +306,13 @@ export default function ListenerForm({
         title="访问过滤（监听器默认）"
         hint="这里配置的规则作用于本监听器下所有「继承监听器」的路由；路由也可以自定义规则来覆盖它。"
       />
-      <Row gutter={16}>
-        <Col xs={24} md={12}>
-          <Form.Item name="accessMode" label="访问策略">
-            <Select options={ACCESS_OPTIONS} style={{ width: '100%' }} />
-          </Form.Item>
-        </Col>
-        <Col xs={24} md={12}>
-          <Form.Item name="uaMode" label="UA 策略">
-            <Select options={ACCESS_OPTIONS} style={{ width: '100%' }} />
-          </Form.Item>
-        </Col>
-        {accessMode !== 'off' ? (
-          <>
-            <Col span={24}>
-              <Form.Item
-                name="accessIps"
-                label="IP 列表"
-                extra="每行一条，支持 CIDR，例如 192.168.1.0/24；与地区列表取并集"
-              >
-                <Input.TextArea rows={2} className="mono" placeholder="192.168.1.0/24" />
-              </Form.Item>
-            </Col>
-            <Col span={24}>
-              <Form.Item
-                name="accessGeo"
-                label="国家 / 省份 / 城市"
-                extra="同一个列表，命中任意一项即匹配；私有/回环地址没有地区数据；服务在反向代理后面时需开启信任代理"
-              >
-                <TagInput placeholder="输入后回车，例如 中国、浙江、杭州" ariaLabel="地区列表" />
-              </Form.Item>
-            </Col>
-          </>
-        ) : null}
-        {uaMode !== 'off' ? (
-          <Col span={24}>
-            <Form.Item name="uaList" label="UA 列表" extra="每行一条，支持 * 通配，例如 *bot*">
-              <Input.TextArea rows={2} className="mono" placeholder="*bot*" />
-            </Form.Item>
-          </Col>
-        ) : null}
-      </Row>
+      <Form.Item
+        name="access"
+        label="访问控制"
+        extra="作用于本监听器下所有“继承监听器”的路由；从上到下匹配，最后一行是兜底。"
+      >
+        <AccessEditor allowInherit={false} />
+      </Form.Item>
 
       <div
         style={{

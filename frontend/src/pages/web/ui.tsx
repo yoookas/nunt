@@ -1,13 +1,13 @@
 // Small presentational pieces shared by the Web service page and its dialogs.
 // Everything here is Ant Design; the old HeroUI chips and tag inputs have no
 // equivalent outside this folder.
+import { accessSummary, type Access } from '../../access'
 import { Select, Space, Tag, Tooltip, Typography, theme } from 'antd'
 import type { ReactNode } from 'react'
 import { Muted } from '../../components'
 import {
   TLS_LABEL,
   ruleTypeLabel,
-  type AccessMode,
   type ClientAuthMode,
   type RouteType,
   type TLSMode,
@@ -100,20 +100,21 @@ export function TlsTag({
   )
 }
 
-const ACCESS_TAG: Record<AccessMode, { color: string; label: string; title: string }> = {
-  off: { color: 'default', label: '关闭', title: '不启用 IP / 地区 / UA 过滤' },
-  allow: { color: 'green', label: '白名单', title: '仅允许列表中的 IP / 地区 / UA' },
-  deny: { color: 'red', label: '黑名单', title: '拒绝列表中的 IP / 地区 / UA' },
-  inherit: { color: 'blue', label: '继承', title: '使用所属监听器的访问过滤规则' },
-}
-
 /** Access policy chip. `inherit` only makes sense on a route. */
-export function AccessTag({ mode }: { mode: AccessMode }) {
-  const item = ACCESS_TAG[mode] || ACCESS_TAG.off
+export function AccessTag({ access }: { access?: Access | null }) {
+  const summary = accessSummary(access)
+  const color =
+    !access || access.mode === 'off'
+      ? undefined
+      : access.mode === 'inherit'
+        ? 'geekblue'
+        : access.ip?.rest === 'deny'
+          ? 'volcano'
+          : 'orange'
   return (
-    <Tooltip title={item.title}>
-      <Tag color={item.color} style={{ marginInlineEnd: 0 }}>
-        {item.label}
+    <Tooltip title="从上到下匹配，第一条命中的生效">
+      <Tag color={color} style={{ marginInlineEnd: 0 }}>
+        {summary}
       </Tag>
     </Tooltip>
   )

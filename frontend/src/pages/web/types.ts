@@ -2,6 +2,7 @@
 // API in internal/modules/web and internal/model so the page can stay typed
 // without reaching for `any` on every response.
 import { fmtTime } from '../../format'
+import type { Access } from '../../access'
 
 export interface SelectOption {
   value: string
@@ -107,7 +108,7 @@ export interface WebRule {
   path: string
   priority: number
   waf: boolean
-  access: AccessFilter
+  access: Access
   basicAuth?: BasicAuth | null
   proxy?: ProxyTarget | null
   redirect?: RedirectTarget | null

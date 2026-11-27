@@ -1,3 +1,5 @@
+import AccessEditor from '../../components/AccessEditor'
+import { emptyAccess, normalizeAccess, type Access } from '../../access'
 import { useState } from 'react'
 import {
   Alert,
@@ -26,22 +28,22 @@ import { RouteTypeTag, SectionTitle, TagInput } from './ui'
 import {
   BALANCE_OPTIONS,
   REDIRECT_STATUS_OPTIONS,
-  ROUTE_ACCESS_OPTIONS,
+
   TYPE_OPTIONS,
   balanceValue,
   kvToText,
   listenerName,
   listenerOptions,
-  normalizeAccessMode,
-  normalizeUAMode,
+
+
   textToKV,
-  type AccessMode,
+
   type BasicAuthUser,
   type ProxyTarget,
   type RedirectTarget,
   type RouteType,
   type StaticTarget,
-  type UAMode,
+
   type WebListenerView,
   type WebRule,
 } from './types'
@@ -61,11 +63,7 @@ interface RouteFormValues {
   priority: number
   remark: string
   waf: boolean
-  accessMode: AccessMode
-  accessIps: string
-  accessGeo: string[]
-  uaMode: UAMode
-  uaList: string
+  access: Access
   authEnable: boolean
   authUsers: AuthUserForm[]
   proxyTargets: string
@@ -108,11 +106,7 @@ function blankForm(listenerId = ''): RouteFormValues {
     priority: 0,
     remark: '',
     waf: false,
-    accessMode: 'off',
-    accessIps: '',
-    accessGeo: [],
-    uaMode: 'off',
-    uaList: '',
+    access: emptyAccess(),
     authEnable: false,
     authUsers: [],
     proxyTargets: '',
@@ -171,11 +165,7 @@ function ruleToForm(rule: WebRule, fallbackListenerId: string): RouteFormValues 
     priority: num(rule.priority, 0),
     remark: rule.remark || '',
     waf: !!rule.waf,
-    accessMode: normalizeAccessMode(access?.mode),
-    accessIps: lines(access?.ips),
-    accessGeo: Array.isArray(access?.geo) ? [...(access?.geo ?? [])] : [],
-    uaMode: normalizeUAMode(access?.uaMode),
-    uaList: lines(access?.uas),
+    access: normalizeAccess(access),
     authEnable: !!auth?.enable,
     authUsers: (Array.isArray(auth?.users) ? auth?.users ?? [] : []).map((user) => ({
       username: user.username || '',
@@ -246,11 +236,7 @@ const FIELD_TAB: Record<string, string> = {
   staticListing: 'target',
   staticSPA: 'target',
   staticCache: 'target',
-  accessMode: 'access',
-  accessIps: 'access',
-  accessGeo: 'access',
-  uaMode: 'access',
-  uaList: 'access',
+  access: 'access',
   authEnable: 'access',
   authUsers: 'access',
   priority: 'advanced',
@@ -267,7 +253,7 @@ export interface RoutePayload {
   path: string
   priority: number
   waf: boolean
-  access: { mode: AccessMode; ips: string[]; geo: string[]; uaMode: UAMode; uas: string[] }
+  access: Access
   basicAuth: { enable: boolean; users: BasicAuthUser[] }
   proxy: ProxyTarget | null
   redirect: RedirectTarget | null
@@ -300,9 +286,6 @@ export default function RouteForm({
   const [tab, setTab] = useState('basic')
 
   const type = (Form.useWatch('type', form) ?? rule?.type ?? 'proxy') as RouteType
-  const listenerId = String(Form.useWatch('listenerId', form) ?? rule?.listenerId ?? '')
-  const accessMode = (Form.useWatch('accessMode', form) ?? 'off') as AccessMode
-  const uaMode = (Form.useWatch('uaMode', form) ?? 'off') as UAMode
   const authEnable = !!Form.useWatch('authEnable', form)
   const corsEnable = !!Form.useWatch('corsEnable', form)
 
@@ -328,15 +311,6 @@ export default function RouteForm({
     // Fields hidden by the current mode are not registered and therefore
     // absent from the submitted values. Fall back to the stored rule so an
     // unrelated save never drops the lists the backend still holds.
-    const accessIps =
-      values.accessIps !== undefined ? values.accessIps : lines(rule?.access?.ips)
-    const uaList = values.uaList !== undefined ? values.uaList : lines(rule?.access?.uas)
-    const accessGeo = Array.isArray(values.accessGeo)
-      ? values.accessGeo
-      : Array.isArray(rule?.access?.geo)
-        ? rule?.access?.geo ?? []
-        : []
-    const geo = accessGeo.map((item) => String(item).trim()).filter(Boolean)
 
     const authUsers: BasicAuthUser[] = (Array.isArray(values.authUsers) ? values.authUsers : [])
       .map((user) => ({
@@ -354,16 +328,7 @@ export default function RouteForm({
       path: String(values.path || '').trim() || '/',
       priority: num(values.priority, 0),
       waf: !!values.waf,
-      access: {
-        mode: normalizeAccessMode(values.accessMode),
-        ips: splitLines(accessIps),
-        geo,
-        uaMode:
-          values.uaMode !== undefined
-            ? normalizeUAMode(values.uaMode)
-            : normalizeUAMode(rule?.access?.uaMode),
-        uas: splitLines(uaList),
-      },
+      access: normalizeAccess(values.access ?? rule?.access),
       // Disabled BasicAuth keeps the accounts that already exist (with an
       // empty password, which means "keep the stored hash" server side).
       basicAuth: {
@@ -861,69 +826,19 @@ export default function RouteForm({
     </>
   )
 
-  const selectedListener = listeners.find((item) => item.id === listenerId)
-
   const accessTab = (
     <>
       <SectionTitle
         title="IP / 地区 / UA 过滤"
         hint="继承监听器：使用所属监听器的规则；自定义：本条路由覆盖监听器规则。"
       />
-      <Row gutter={16}>
-        <Col xs={24} md={12}>
-          <Form.Item name="accessMode" label="访问策略">
-            <Select options={ROUTE_ACCESS_OPTIONS} style={{ width: '100%' }} />
-          </Form.Item>
-        </Col>
-      </Row>
-      {accessMode === 'inherit' ? (
-        <Alert
-          type="info"
-          showIcon
-          style={{ marginBottom: 16 }}
-          message={`使用监听器「${selectedListener ? selectedListener.name || selectedListener.id : listenerName(listeners, listenerId)}」的 IP / 地区 / UA 过滤规则`}
-        />
-      ) : accessMode !== 'off' ? (
-        <Row gutter={16}>
-          <Col span={24}>
-            <Form.Item
-              name="accessIps"
-              label="IP 列表"
-              extra="每行一条，支持 CIDR，例如 192.168.1.0/24；与地区列表取并集"
-            >
-              <Input.TextArea rows={2} className="mono" placeholder="192.168.1.0/24" />
-            </Form.Item>
-          </Col>
-          <Col span={24}>
-            <Form.Item
-              name="accessGeo"
-              label="国家 / 省份 / 城市"
-              extra="同一个列表：国家、省份、城市混写，命中任意一项即匹配；私有/回环地址没有地区数据"
-            >
-              <TagInput placeholder="输入后回车，例如 中国、浙江、杭州" ariaLabel="地区列表" />
-            </Form.Item>
-          </Col>
-          <Col xs={24} md={12}>
-            <Form.Item name="uaMode" label="UA 策略">
-              <Select
-                options={ROUTE_ACCESS_OPTIONS.filter((item) => item.value !== 'inherit')}
-                style={{ width: '100%' }}
-              />
-            </Form.Item>
-          </Col>
-          {uaMode !== 'off' ? (
-            <Col span={24}>
-              <Form.Item
-                name="uaList"
-                label="UA 列表"
-                extra="每行一条，支持 * 通配，例如 *bot*"
-              >
-                <Input.TextArea rows={2} className="mono" placeholder="*bot*" />
-              </Form.Item>
-            </Col>
-          ) : null}
-        </Row>
-      ) : null}
+      <Form.Item
+        name="access"
+        label="访问控制"
+        extra="从上到下匹配，第一条命中的规则生效；最后一行“其余流量”是兜底，不可移动或删除。"
+      >
+        <AccessEditor />
+      </Form.Item>
 
       <SectionTitle
         title="BasicAuth"
