@@ -44,7 +44,34 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := s.opts.Cfg.Admin()
-	if user == nil || !security.VerifyPassword(user.PasswordHash, req.Password) {
+	if user == nil {
+		rest.FailCode(w, http.StatusUnauthorized, "invalid_credentials", "密码错误")
+		return
+	}
+
+	// Hashing is memory hard (64 MiB with the administrator parameters) and a
+	// burst of parallel requests used to run every verification at once. Wait
+	// for the single global slot, then check the limiter again: requests that
+	// queued behind a burst may have been locked out in the meantime, and they
+	// must not burn a hash before saying so.
+	release, err := security.AcquirePasswordSlot(r.Context())
+	if err != nil {
+		// Either the client went away while queueing or the server is shutting
+		// down; answer 503 instead of the empty 200 a bare return would send.
+		rest.Fail(w, http.StatusServiceUnavailable, "服务繁忙或正在关闭，请稍后重试")
+		return
+	}
+	if ok, wait := s.loginLimiter.Allow(ip); !ok {
+		release()
+		s.log.Warn("登录被限流拒绝", "ip", ip, "retryAfter", wait.Round(time.Second).String())
+		rest.FailCode(w, http.StatusTooManyRequests, "locked",
+			"失败次数过多，请在 %s 后重试", wait.Round(time.Second))
+		return
+	}
+	valid := security.VerifyPasswordHeld(user.PasswordHash, req.Password)
+	release()
+
+	if !valid {
 		lock := s.loginLimiter.Fail(ip)
 		args := []any{"ip", ip}
 		if lock > 0 {

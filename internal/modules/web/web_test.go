@@ -288,10 +288,10 @@ func TestParseRange(t *testing.T) {
 // static hosting
 // ---------------------------------------------------------------------------
 
-// bareWeb returns a module with only the logger wired; the handlers under test
-// never touch the listeners or the storage manager because the file system is
-// injected directly.
-func bareWeb() *Web { return &Web{} }
+// bareWeb returns a module with only the logger and the basic auth throttle
+// wired; the handlers under test never touch the listeners or the storage
+// manager because the file system is injected directly.
+func bareWeb() *Web { return &Web{authThrottle: newAuthThrottle(), authCache: newBasicAuthCache()} }
 
 // newStaticStore prepares the lazily opened storage of a static rule for a
 // test directory.

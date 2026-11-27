@@ -68,6 +68,13 @@ type Web struct {
 	rateLimited  int64
 	bodyRejected int64
 
+	// authThrottle bounds failed basic auth attempts per client address and
+	// rule, and authCache remembers successful ones for a short time so a page
+	// load does not run one Argon2 verification per asset. Both survive rule
+	// rebuilds.
+	authThrottle *authThrottle
+	authCache    *basicAuthCache
+
 	logs *logBuffer
 }
 
@@ -166,16 +173,18 @@ func sharedWAF(deps *module.Deps) *waf.WAF {
 func New(deps *module.Deps) *Web {
 	cfg := deps.Cfg.Snapshot()
 	w := &Web{
-		deps:       deps,
-		log:        deps.Logger("web"),
-		waf:        sharedWAF(deps),
-		bindings:   map[string]*listener{},
-		tlsAddrs:   map[string]bool{},
-		siteCache:  map[string]cachedSite{},
-		rebuildSem: make(chan struct{}, 1),
-		counters:   map[string]int64{},
-		logs:       newLogBuffer(cfg.Web.LogKeep),
-		stopCtx:    context.Background(),
+		deps:         deps,
+		log:          deps.Logger("web"),
+		waf:          sharedWAF(deps),
+		bindings:     map[string]*listener{},
+		tlsAddrs:     map[string]bool{},
+		siteCache:    map[string]cachedSite{},
+		rebuildSem:   make(chan struct{}, 1),
+		counters:     map[string]int64{},
+		logs:         newLogBuffer(cfg.Web.LogKeep),
+		stopCtx:      context.Background(),
+		authThrottle: newAuthThrottle(),
+		authCache:    newBasicAuthCache(),
 	}
 	w.Init(deps, "web", "Web 服务")
 	w.cfg = cfg

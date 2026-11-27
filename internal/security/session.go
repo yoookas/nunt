@@ -7,6 +7,12 @@ import (
 	"time"
 )
 
+// SessionCookieName is the admin session cookie. It is exported because the
+// reverse proxy has to strip it from outbound requests: a browser sends a host
+// scoped cookie to every port of that host, so the admin token would otherwise
+// reach every site the proxy serves on the same hostname.
+const SessionCookieName = "nunt_session"
+
 // Session is an authenticated browser session.
 type Session struct {
 	ID        string    `json:"id"`

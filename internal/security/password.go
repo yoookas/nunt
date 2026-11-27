@@ -3,6 +3,7 @@
 package security
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
@@ -23,11 +24,36 @@ const (
 	argonKeyLen  = 32
 )
 
+// Route level basic auth users are verified on the request path of a public
+// site, so they use a cheaper parameter set than the administrator account:
+// the OWASP minimum recommendation (19 MiB, t=2, p=1). That is still a memory
+// hard hash with roughly a third of the footprint; with one lane instead of
+// four the wall clock cost stays in the same order as the administrator hash.
+// The parameters travel inside the PHC string, so existing 64 MiB hashes keep
+// working and are replaced the next time the password is set.
+const (
+	routeArgonTime    = 2
+	routeArgonMemory  = 19 * 1024
+	routeArgonThreads = 1
+)
+
 // ErrInvalidHash is returned when a stored hash cannot be parsed.
 var ErrInvalidHash = errors.New("invalid password hash")
 
-// HashPassword returns an argon2id PHC string.
+// HashPassword returns an argon2id PHC string for the administrator account.
 func HashPassword(password string) (string, error) {
+	return hashPassword(password, argonMemory, argonTime, argonThreads)
+}
+
+// HashPasswordRoute returns a hash for a route level basic auth user. See the
+// parameter comments above: it trades offline cracking cost for a smaller
+// per-attempt footprint on the request path.
+func HashPasswordRoute(password string) (string, error) {
+	return hashPassword(password, routeArgonMemory, routeArgonTime, routeArgonThreads)
+}
+
+// hashPassword returns an argon2id PHC string with explicit parameters.
+func hashPassword(password string, memory, time uint32, threads uint8) (string, error) {
 	if strings.TrimSpace(password) == "" {
 		return "", errors.New("password must not be empty")
 	}
@@ -35,16 +61,52 @@ func HashPassword(password string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("read random salt: %w", err)
 	}
-	key := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	key := argon2.IDKey([]byte(password), salt, time, memory, threads, argonKeyLen)
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
-		argon2.Version, argonMemory, argonTime, argonThreads,
+		argon2.Version, memory, time, threads,
 		base64.RawStdEncoding.EncodeToString(salt),
 		base64.RawStdEncoding.EncodeToString(key),
 	), nil
 }
 
-// VerifyPassword checks password against an argon2id PHC string.
+// passwordSlot serialises password hashing. One argon2id verification needs up
+// to 64 MiB (administrator parameters), so without a slot a burst of
+// concurrent login or basic auth requests allocates one buffer each and can
+// exhaust the memory of the process. A single slot turns the burst into a
+// queue and caps the footprint at one buffer.
+var passwordSlot = make(chan struct{}, 1)
+
+// AcquirePasswordSlot blocks until the password hashing slot is free or ctx is
+// done. The returned release function must be called exactly once when the
+// caller is done hashing or verifying; it is safe to call on the error path.
+func AcquirePasswordSlot(ctx context.Context) (func(), error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case passwordSlot <- struct{}{}:
+		return func() { <-passwordSlot }, nil
+	case <-ctx.Done():
+		return func() {}, ctx.Err()
+	}
+}
+
+// VerifyPassword checks password against an argon2id PHC string. It waits for
+// the global password slot, so callers that already hold it (for example a
+// handler that re-checks a limiter after queueing) must use
+// VerifyPasswordHeld instead.
 func VerifyPassword(encoded, password string) bool {
+	release, err := AcquirePasswordSlot(context.Background())
+	if err != nil {
+		return false
+	}
+	defer release()
+	return VerifyPasswordHeld(encoded, password)
+}
+
+// VerifyPasswordHeld is VerifyPassword for callers that already hold the
+// password slot. It never blocks.
+func VerifyPasswordHeld(encoded, password string) bool {
 	memory, time, threads, salt, key, err := decodeHash(encoded)
 	if err != nil {
 		return false

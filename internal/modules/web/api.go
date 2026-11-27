@@ -709,7 +709,7 @@ func hashAuthUsers(auth *model.BasicAuth, previous *model.WebRule) error {
 			}
 			user.Password = hash
 		default:
-			hash, err := security.HashPassword(user.Password)
+			hash, err := security.HashPasswordRoute(user.Password)
 			if err != nil {
 				return fmt.Errorf("hash the password of %q: %w", user.Username, err)
 			}

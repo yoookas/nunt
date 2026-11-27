@@ -29,7 +29,7 @@ import (
 )
 
 // SessionCookie is the name of the admin session cookie.
-const SessionCookie = "nunt_session"
+const SessionCookie = security.SessionCookieName
 
 // Options configures the API server.
 type Options struct {

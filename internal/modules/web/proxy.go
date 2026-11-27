@@ -21,6 +21,7 @@ import (
 
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/netutil"
+	"github.com/nunt/nunt/internal/security"
 )
 
 // Balance strategies supported by a proxy rule.
@@ -527,6 +528,11 @@ func buildProxy(w *Web, r *rule, up upstream, target *model.ProxyTarget) *httput
 			// SetURL deletes the inbound Host, so restore the original one and
 			// let the rule override it when configured.
 			pr.Out.Host = outboundHost(pr, target, up)
+			// A host scoped cookie is sent by the browser to every port of
+			// that host, so an upstream on the same hostname would otherwise
+			// receive the admin session token of the console. The proxy never
+			// has a reason to forward it.
+			stripCookie(pr.Out.Header, security.SessionCookieName)
 			// The X-Forwarded-* headers are security sensitive: a client can
 			// send any chain it likes. Like Caddy, incoming values are only
 			// reused when the request came from a declared trusted proxy;
@@ -673,6 +679,42 @@ func removeHopHeaders(h http.Header) {
 	}
 	for _, k := range hopHeaders {
 		h.Del(k)
+	}
+}
+
+// stripCookie removes one cookie from the outbound Cookie header and keeps
+// every other cookie of the request untouched. When the named cookie is not
+// present the header is left byte for byte as it arrived.
+func stripCookie(h http.Header, name string) {
+	values := h.Values("Cookie")
+	if len(values) == 0 {
+		return
+	}
+	kept := make([]string, 0, len(values))
+	removed := false
+	for _, raw := range values {
+		for _, part := range strings.Split(raw, ";") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			key := part
+			if i := strings.IndexByte(part, '='); i >= 0 {
+				key = part[:i]
+			}
+			if strings.EqualFold(strings.TrimSpace(key), name) {
+				removed = true
+				continue
+			}
+			kept = append(kept, part)
+		}
+	}
+	if !removed {
+		return
+	}
+	h.Del("Cookie")
+	if len(kept) > 0 {
+		h.Set("Cookie", strings.Join(kept, "; "))
 	}
 }
 
