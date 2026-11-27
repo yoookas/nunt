@@ -61,12 +61,6 @@ const RANGES: { value: RangeKey; label: string }[] = [
   { value: 'all', label: '全部（按保留天数）' },
 ]
 
-const SOURCES = [
-  { value: 'all', label: '全部来源' },
-  { value: 'web', label: 'Web 服务' },
-  { value: 'forward', label: '端口转发' },
-  { value: 'waf', label: 'WAF' },
-]
 
 const STATUSES = [
   { value: 'all', label: '全部状态' },
@@ -107,7 +101,14 @@ function mono(value?: string | number | null) {
   return <span className={styles.detailMono}>{value}</span>
 }
 
-export default function AccessLogs({ active }: { active: boolean }) {
+export default function AccessLogs({
+  active,
+  source,
+}: {
+  active: boolean
+  /** The log source of this table: the page renders one table per source. */
+  source: 'web' | 'forward'
+}) {
   const { message } = App.useApp()
   const messageRef = useRef(message)
   messageRef.current = message
@@ -117,7 +118,6 @@ export default function AccessLogs({ active }: { active: boolean }) {
   const showExtraColumns = !isMobile && !!screens.xxl
   const vars = useLogThemeVars()
 
-  const [source, setSource] = useState('all')
   const [status, setStatus] = useState('all')
   const [range, setRange] = useState<RangeKey>('24h')
   const [ip, setIP] = useState('')
@@ -152,7 +152,7 @@ export default function AccessLogs({ active }: { active: boolean }) {
 
   const params = useMemo(
     () => ({
-      source: source === 'all' ? '' : source,
+      source,
       status: status === 'all' ? '' : status,
       from: rangeStart(range),
       to: '',
@@ -348,7 +348,6 @@ export default function AccessLogs({ active }: { active: boolean }) {
   }
 
   const resetFilters = () => {
-    setSource('all')
     setStatus('all')
     setRange('24h')
     setIP('')
@@ -356,7 +355,6 @@ export default function AccessLogs({ active }: { active: boolean }) {
   }
 
   const activeFilterCount = [
-    source !== 'all',
     status !== 'all',
     range !== '24h',
     ip.trim() !== '',
@@ -574,17 +572,6 @@ export default function AccessLogs({ active }: { active: boolean }) {
       )
     return (
       <>
-        {field(
-          '来源',
-          <Select
-            size={size}
-            value={source}
-            onChange={setSource}
-            options={SOURCES}
-            style={width(116)}
-            aria-label="来源"
-          />,
-        )}
         {field(
           '状态',
           <Select

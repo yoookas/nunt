@@ -43,9 +43,14 @@ export default function Logs() {
             children: <RunLogs />,
           },
           {
-            key: 'access',
-            label: '访问日志',
-            children: <AccessLogs active={tab === 'access'} />,
+            key: 'web',
+            label: 'Web 访问',
+            children: <AccessLogs active={tab === 'web'} source="web" />,
+          },
+          {
+            key: 'forward',
+            label: '端口转发',
+            children: <AccessLogs active={tab === 'forward'} source="forward" />,
           },
         ]}
       />
