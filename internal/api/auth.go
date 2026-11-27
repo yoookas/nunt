@@ -260,6 +260,9 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
 	type view struct {
 		// ID is the hashed session id; the delete endpoint needs it and it
 		// cannot be turned back into the cookie token.

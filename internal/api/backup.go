@@ -45,6 +45,9 @@ func (s *Server) handleBackupDownload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBackupFiles(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
 	cfg := s.opts.Cfg.Snapshot()
 	dir := s.backupDir(cfg)
 	files, err := backup.List(dir)
@@ -60,6 +63,9 @@ func (s *Server) handleBackupFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetBackupConfig(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
 	rest.OK(w, s.opts.Cfg.Snapshot().Backup)
 }
 
