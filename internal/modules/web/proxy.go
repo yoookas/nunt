@@ -579,6 +579,12 @@ func buildProxy(w *Web, r *rule, up upstream, target *model.ProxyTarget) *httput
 			if resp.StatusCode != http.StatusSwitchingProtocols {
 				removeHopHeaders(resp.Header)
 			}
+			// Cookies are host scoped, not port scoped, so an upstream served on
+			// the same hostname (or on a sibling sub domain through Domain=)
+			// must not be able to plant or replace the administrator session
+			// cookie. The request direction already strips it; this is the same
+			// rule for the answer.
+			stripSessionSetCookie(resp.Header)
 			for k, v := range target.RespHeaders {
 				if k = strings.TrimSpace(k); k != "" {
 					resp.Header.Set(k, v)
@@ -715,6 +721,38 @@ func stripCookie(h http.Header, name string) {
 	h.Del("Cookie")
 	if len(kept) > 0 {
 		h.Set("Cookie", strings.Join(kept, "; "))
+	}
+}
+
+// stripSessionSetCookie removes every Set-Cookie header that would store the
+// administrator session cookie. The request direction already strips it (see
+// stripCookie); without the same rule on the response an upstream could replace
+// the operator's session cookie with a value of its own, because cookies are
+// host scoped and not port scoped. Every other cookie is left byte for byte as
+// the upstream wrote it.
+func stripSessionSetCookie(h http.Header) {
+	values := h.Values("Set-Cookie")
+	if len(values) == 0 {
+		return
+	}
+	kept := make([]string, 0, len(values))
+	dropped := false
+	for _, raw := range values {
+		// Only the name matters here; a header that cannot be parsed is kept
+		// rather than removed, so a malformed but harmless cookie still works.
+		if c, err := http.ParseSetCookie(raw); err == nil &&
+			strings.EqualFold(c.Name, security.SessionCookieName) {
+			dropped = true
+			continue
+		}
+		kept = append(kept, raw)
+	}
+	if !dropped {
+		return
+	}
+	h.Del("Set-Cookie")
+	for _, raw := range kept {
+		h.Add("Set-Cookie", raw)
 	}
 }
 
