@@ -343,19 +343,19 @@
 .grid {
   display: grid;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
 .gridRow {
   height: 100%;
-  padding: 0 12px;
+  padding: 0 10px;
   font-size: 12px;
 }
 
 .gridHead {
   height: 100%;
-  padding: 0 12px;
+  padding: 0 10px;
   font-size: 12px;
   font-weight: 600;
   color: var(--logs-text-secondary, #8c8c8c);

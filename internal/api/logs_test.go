@@ -319,7 +319,7 @@ func TestAccessLogExportColumnsFollowSource(t *testing.T) {
 		},
 		{
 			source:  "forward",
-			present: []string{"监听", "目标", "结果", "总字节"},
+			present: []string{"监听", "协议", "目标", "结果", "总字节"},
 			absent:  []string{"来源", "方法", "路径", "状态", "User-Agent", "WAF 动作"},
 		},
 	}

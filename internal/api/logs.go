@@ -259,9 +259,9 @@ func (s *Server) handleAccessLogExport(w http.ResponseWriter, r *http.Request) {
 func exportColumns(source string) []string {
 	switch source {
 	case logstore.SourceForward:
-		return []string{"时间", "规则", "监听", "客户端 IP", "国家", "省份", "城市",
-			"目标", "结果", "拒绝原因", "错误", "耗时(ms)", "请求字节", "响应字节",
-			"总字节", "消息"}
+		return []string{"时间", "规则", "监听", "协议", "客户端 IP", "国家", "省份",
+			"城市", "目标", "结果", "拒绝原因", "错误", "耗时(ms)", "请求字节",
+			"响应字节", "总字节", "消息"}
 	case logstore.SourceWeb, logstore.SourceWAF:
 		// A web export also carries the WAF interceptions, because that is the
 		// same traffic; the 来源 column tells the two apart.
@@ -279,6 +279,12 @@ func exportColumns(source string) []string {
 
 // exportCells renders every named column; exportColumns picks the subset.
 func exportCells(e logstore.Entry) map[string]string {
+	// A web record carries the HTTP version in Proto, a forward record the
+	// socket protocol in Protocol; both land in the 协议 column.
+	proto := e.Proto
+	if proto == "" {
+		proto = e.Protocol
+	}
 	return map[string]string{
 		"时间":         e.Time.Format("2006-01-02 15:04:05"),
 		"来源":         e.Source,

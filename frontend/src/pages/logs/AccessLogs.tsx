@@ -114,6 +114,31 @@ function downloadName(header: string | null, fallback: string): string {
   }
 }
 
+// One column of an access table. Both tables render from a list of these, so a
+// field is added by naming it once instead of touching the header and the row.
+type Column = {
+  key: string
+  label: string
+  /** grid-template-columns track used on desktop. */
+  track: string
+  /** Track used on the phone layout; a column without one is desktop only. */
+  mobile?: string
+  /** Smallest breakpoint that shows the column; unset means always. */
+  min?: 'lg' | 'xl'
+  className?: string
+  cellClass?: (row: AccessRow) => string
+  title?: (row: AccessRow) => string | undefined
+  value: (row: AccessRow) => ReactNode
+}
+
+// verdictOf describes why a request did not simply succeed.
+function verdictOf(row: AccessRow) {
+  const waf = row.wafAction
+    ? `WAF ${row.wafAction}${row.wafRuleId ? ` #${row.wafRuleId}` : ''}`
+    : ''
+  return [row.reason, row.error, waf].filter(Boolean).join(' · ')
+}
+
 function mono(value?: string | number | null) {
   if (value === undefined || value === null || value === '') return '-'
   return <span className={styles.detailMono}>{value}</span>
@@ -133,7 +158,6 @@ export default function AccessLogs({
 
   const isMobile = useIsMobile()
   const screens = Grid.useBreakpoint()
-  const showExtraColumns = !isMobile && !!screens.xxl
   const vars = useLogThemeVars()
 
   const [status, setStatus] = useState('all')
@@ -456,67 +480,242 @@ export default function AccessLogs({
   const failureRate = stats && stats.total > 0 ? ((failure / stats.total) * 100).toFixed(1) : '0.0'
   const topIP = stats?.topIps?.[0]?.name || '-'
 
-  const template = isMobile
-    ? '62px 56px minmax(150px,1.6fr) 72px minmax(96px,1fr)'
-    : showExtraColumns
-      ? '140px 74px minmax(150px,1.1fr) minmax(220px,1.6fr) 150px minmax(140px,1fr) 72px 80px 86px'
-      : '130px 70px minmax(140px,1.1fr) minmax(200px,1.6fr) 140px minmax(130px,1fr) 66px'
+  // A row is one line: the record in full is one click away in the drawer, so
+  // the table only has to answer what an operator scans for. Each table keeps
+  // its own columns, widths and headings.
+  const webColumns: Column[] = [
+    {
+      key: 'time',
+      label: '时间',
+      track: 'minmax(120px,132px)',
+      mobile: '56px',
+      className: `${styles.mono} ${styles.muted}`,
+      title: (row) => fullTime(row.time),
+      value: (row) => (isMobile ? shortTime(row.time) : fullTime(row.time)),
+    },
+    {
+      key: 'source',
+      label: '来源',
+      track: '54px',
+      mobile: '48px',
+      value: (row) => <SourceTag source={row.source} />,
+    },
+    {
+      key: 'rule',
+      label: '站点 / 规则',
+      track: 'minmax(96px,0.9fr)',
+      min: 'lg',
+      title: (row) =>
+        [row.rule || row.ruleId, row.listen, row.proto, row.tls].filter(Boolean).join(' · ') ||
+        undefined,
+      value: (row) => row.rule || row.ruleId || '-',
+    },
+    {
+      key: 'host',
+      label: '域名',
+      track: 'minmax(96px,0.9fr)',
+      min: 'lg',
+      title: (row) => row.host,
+      value: (row) => row.host || '-',
+    },
+    {
+      key: 'request',
+      label: '请求',
+      track: 'minmax(168px,1.6fr)',
+      mobile: 'minmax(120px,1fr)',
+      className: styles.mono,
+      title: (row) =>
+        [`${row.method || '-'} ${row.path || '-'}`, row.userAgent, row.message]
+          .filter(Boolean)
+          .join(' · ') || undefined,
+      value: (row) => `${row.method || '-'} ${row.path || '-'}`,
+    },
+    {
+      key: 'upstream',
+      label: '上游',
+      track: 'minmax(96px,0.8fr)',
+      min: 'xl',
+      className: `${styles.mono} ${styles.muted}`,
+      title: (row) =>
+        row.upstreamStatus || row.attempts
+          ? `${row.upstream || '-'} · ${row.upstreamStatus ?? '-'} / ${row.attempts ?? 0} 次`
+          : row.upstream,
+      value: (row) => row.upstream || '-',
+    },
+    {
+      key: 'status',
+      label: '状态',
+      track: '62px',
+      mobile: '58px',
+      title: (row) => [row.result, row.wafAction && `WAF ${row.wafAction}`].filter(Boolean).join(' · ') || undefined,
+      value: (row) => (row.status ? <StatusTag status={row.status} /> : row.result || '-'),
+    },
+    {
+      key: 'note',
+      label: '说明',
+      track: 'minmax(88px,0.9fr)',
+      min: 'lg',
+      cellClass: (row) =>
+        row.error ? styles.dangerText : verdictOf(row) ? styles.warnText : styles.muted,
+      title: (row) => verdictOf(row),
+      value: (row) => verdictOf(row) || '-',
+    },
+    {
+      key: 'clientIp',
+      label: '客户端 IP',
+      track: 'minmax(96px,0.9fr)',
+      className: styles.mono,
+      title: (row) => [row.clientIp, geoText(row)].filter(Boolean).join(' · ') || undefined,
+      value: (row) => row.clientIp || '-',
+    },
+    {
+      key: 'geo',
+      label: '地区',
+      track: 'minmax(84px,0.8fr)',
+      min: 'lg',
+      className: styles.muted,
+      title: (row) => geoText(row) || undefined,
+      value: (row) => geoText(row) || '-',
+    },
+    {
+      key: 'size',
+      label: '大小',
+      track: '64px',
+      min: 'lg',
+      className: `${styles.mono} ${styles.muted}`,
+      title: (row) =>
+        row.bytesIn || row.bytesOut
+          ? `请求 ${fmtBytes(row.bytesIn ?? 0)} · 响应 ${fmtBytes(row.bytesOut ?? 0)}`
+          : undefined,
+      value: (row) => bytesText(row),
+    },
+    {
+      key: 'duration',
+      label: '耗时',
+      track: '54px',
+      className: `${styles.mono} ${styles.muted}`,
+      value: (row) => durationText(row.durationMs),
+    },
+  ]
 
-  // The two tables fill the same slots with different things: a forward row is
-  // a connection to a target, a web row is a request to a site.
-  const labels =
-    source === 'web'
-      ? { rule: '站点 / 规则', main: '请求', verdict: '状态 / 结果', duration: '耗时' }
-      : { rule: '规则', main: '连接', verdict: '结果', duration: '连接时长' }
+  const forwardColumns: Column[] = [
+    webColumns[0],
+    webColumns[1],
+    {
+      key: 'rule',
+      label: '规则',
+      track: 'minmax(96px,0.9fr)',
+      min: 'lg',
+      title: (row) => [row.rule || row.ruleId, row.ruleId].filter(Boolean).join(' · ') || undefined,
+      value: (row) => row.rule || row.ruleId || '-',
+    },
+    {
+      key: 'conn',
+      label: '连接',
+      track: 'minmax(168px,1.6fr)',
+      mobile: 'minmax(120px,1fr)',
+      className: styles.mono,
+      title: (row) =>
+        [
+          `${row.listen || '-'} → ${row.upstream || '-'}`,
+          row.protocol,
+          row.bytesIn || row.bytesOut
+            ? `↑ ${fmtBytes(row.bytesIn ?? 0)} ↓ ${fmtBytes(row.bytesOut ?? 0)}`
+            : '',
+        ]
+          .filter(Boolean)
+          .join(' · ') || undefined,
+      value: (row) => `${row.listen || '-'} → ${row.upstream || '-'}`,
+    },
+    {
+      key: 'protocol',
+      label: '协议',
+      track: '44px',
+      min: 'lg',
+      className: `${styles.mono} ${styles.muted}`,
+      value: (row) => row.protocol || '-',
+    },
+    {
+      key: 'result',
+      label: '结果',
+      track: 'minmax(88px,0.8fr)',
+      mobile: '58px',
+      cellClass: (row) => (row.error ? styles.dangerText : ''),
+      title: (row) => [row.result, row.error].filter(Boolean).join(' · ') || undefined,
+      value: (row) => row.result || (row.status ? <StatusTag status={row.status} /> : '-'),
+    },
+    {
+      key: 'reason',
+      label: '原因',
+      track: 'minmax(88px,0.9fr)',
+      min: 'xl',
+      cellClass: (row) =>
+        row.reason || row.error ? styles.warnText : styles.muted,
+      title: (row) => [row.reason, row.error, row.message].filter(Boolean).join(' · ') || undefined,
+      value: (row) => row.reason || row.error || row.message || '-',
+    },
+    {
+      key: 'clientIp',
+      label: '客户端 IP',
+      track: 'minmax(96px,0.9fr)',
+      className: styles.mono,
+      title: (row) => [row.clientIp, geoText(row)].filter(Boolean).join(' · ') || undefined,
+      value: (row) => row.clientIp || '-',
+    },
+    {
+      key: 'geo',
+      label: '地区',
+      track: 'minmax(84px,0.8fr)',
+      min: 'lg',
+      className: styles.muted,
+      value: (row) => geoText(row) || '-',
+      title: (row) => geoText(row) || undefined,
+    },
+    {
+      key: 'bytesIn',
+      label: '上行',
+      track: '60px',
+      min: 'lg',
+      className: `${styles.mono} ${styles.muted}`,
+      value: (row) => (row.bytesIn ? fmtBytes(row.bytesIn) : '-'),
+    },
+    {
+      key: 'bytesOut',
+      label: '下行',
+      track: '66px',
+      min: 'lg',
+      className: `${styles.mono} ${styles.muted}`,
+      value: (row) => (row.bytesOut ? fmtBytes(row.bytesOut) : '-'),
+    },
+    {
+      key: 'duration',
+      label: '连接时长',
+      track: '58px',
+      className: `${styles.mono} ${styles.muted}`,
+      value: (row) => durationText(row.durationMs),
+    },
+  ]
+
+  const columns = (source === 'web' ? webColumns : forwardColumns).filter((col) => {
+    if (isMobile) return !!col.mobile
+    if (!col.min) return true
+    return col.min === 'lg' ? !!screens.lg : !!screens.xl
+  })
+  const template = columns
+    .map((col) => (isMobile ? col.mobile : col.track))
+    .join(' ')
 
   const header = (
     <div className={`${styles.grid} ${styles.gridHead}`} style={{ gridTemplateColumns: template }}>
-      <span className={styles.line}>时间</span>
-      <span className={styles.line}>来源</span>
-      {!isMobile ? <span className={styles.line}>{labels.rule}</span> : null}
-      <span className={styles.line}>{labels.main}</span>
-      <span className={styles.line}>{labels.verdict}</span>
-      <span className={styles.line}>客户端</span>
-      {!isMobile ? <span className={styles.line}>{labels.duration}</span> : null}
-      {showExtraColumns ? (
-        <>
-          <span className={styles.line}>大小</span>
-          <span className={styles.line}>请求 ID</span>
-        </>
-      ) : null}
+      {columns.map((col) => (
+        <span key={col.key} className={styles.line}>
+          {col.label}
+        </span>
+      ))}
     </div>
   )
 
   const renderRow = (row: AccessRow) => {
-    const geo = geoText(row)
-    const size = bytesText(row)
-    const waf = row.wafAction
-      ? `WAF ${row.wafAction}${row.wafRuleId ? ` #${row.wafRuleId}` : ''}`
-      : ''
-    const verdict = [row.reason, row.error, waf].filter(Boolean).join(' · ')
-    const verdictClass = row.error ? styles.dangerText : styles.warnText
-    const ruleSub = [row.host, row.listen, row.proto || row.protocol, row.tls]
-      .filter(Boolean)
-      .join(' · ')
-    const requestMain =
-      row.source === 'forward'
-        ? `${row.listen || '-'} → ${row.upstream || '-'}`
-        : `${row.method || '-'} ${row.path || '-'}`
-    const requestSub = isMobile
-      ? row.rule || row.host || row.userAgent || row.message || ''
-      : row.source === 'forward'
-        ? [
-            row.bytesIn ? `↑ ${fmtBytes(row.bytesIn)}` : '',
-            row.bytesOut ? `↓ ${fmtBytes(row.bytesOut)}` : '',
-          ]
-            .filter(Boolean)
-            .join(' ')
-        : row.userAgent || row.message || ''
-    const sizeTitle =
-      row.bytesIn || row.bytesOut
-        ? `请求 ${fmtBytes(row.bytesIn ?? 0)} · 响应 ${fmtBytes(row.bytesOut ?? 0)}`
-        : undefined
-
     return (
       <div
         className={`${styles.grid} ${styles.gridRow} ${styles.clickable}`}
@@ -531,57 +730,21 @@ export default function AccessLogs({
           }
         }}
       >
-        <span className={`${styles.line} ${styles.mono} ${styles.muted}`} title={fullTime(row.time)}>
-          {isMobile ? shortTime(row.time) : fullTime(row.time)}
-        </span>
-        <span className={styles.line}>
-          <SourceTag source={row.source} />
-        </span>
-        {!isMobile ? (
-          <div className={styles.stack} title={[row.rule || row.ruleId, ruleSub].filter(Boolean).join(' · ')}>
-            <span className={styles.line}>{row.rule || row.ruleId || '-'}</span>
-            <span className={`${styles.line} ${styles.tiny}`}>{ruleSub || '-'}</span>
-          </div>
-        ) : null}
-        <div className={styles.stack} title={`${requestMain}${requestSub ? ` · ${requestSub}` : ''}`}>
-          <span className={`${styles.line} ${styles.mono}`}>{requestMain}</span>
-          {requestSub ? <span className={`${styles.line} ${styles.tiny}`}>{requestSub}</span> : null}
-        </div>
-        <div className={styles.stack} title={verdict || undefined}>
-          {row.status ? (
-            <span className={styles.line}>
-              <StatusTag status={row.status} />
-            </span>
-          ) : (
-            <span className={`${styles.line} ${styles.tiny}`}>{row.result || '-'}</span>
-          )}
-          {verdict ? (
-            <span className={`${styles.line} ${styles.tiny} ${verdictClass}`}>{verdict}</span>
-          ) : null}
-        </div>
-        <div className={styles.stack} title={[row.clientIp, geo].filter(Boolean).join(' · ')}>
-          <span className={`${styles.line} ${styles.mono}`}>{row.clientIp || '-'}</span>
-          {geo ? <span className={`${styles.line} ${styles.tiny}`}>{geo}</span> : null}
-        </div>
-        {!isMobile ? (
-          <span className={`${styles.line} ${styles.muted}`}>{durationText(row.durationMs)}</span>
-        ) : null}
-        {showExtraColumns ? (
-          <>
-            <span className={`${styles.line} ${styles.muted}`} title={sizeTitle}>
-              {size}
-            </span>
-            <span
-              className={`${styles.line} ${styles.mono} ${styles.muted}`}
-              title={row.requestId || undefined}
-            >
-              {row.requestId ? row.requestId.slice(0, 8) : '-'}
-            </span>
-          </>
-        ) : null}
+        {columns.map((col) => (
+          <span
+            key={col.key}
+            className={[styles.line, col.className, col.cellClass?.(row)]
+              .filter(Boolean)
+              .join(' ')}
+            title={col.title?.(row)}
+          >
+            {col.value(row)}
+          </span>
+        ))}
       </div>
     )
   }
+
 
   const filterFields = (stacked: boolean) => {
     const width = (value: number) => (stacked ? { width: '100%' } : { width: value })
@@ -866,10 +1029,10 @@ export default function AccessLogs({
           <VirtualList<AccessRow>
             ref={listRef}
             items={rows}
-            rowHeight={58}
+            rowHeight={isMobile ? 40 : 34}
             header={header}
-            headerHeight={isMobile ? 38 : 40}
-            contentMinWidth={isMobile ? 540 : showExtraColumns ? 1180 : 960}
+            headerHeight={34}
+            contentMinWidth={isMobile ? 360 : 1060}
             ariaLabel="访问日志"
             rowKey={(row) => row.key}
             renderRow={renderRow}
