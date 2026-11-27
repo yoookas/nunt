@@ -202,6 +202,50 @@ func TestSeriesFillsEmptyBuckets(t *testing.T) {
 	}
 }
 
+// The series separates a refusal by an access rule from a WAF interception;
+// the two share a 403 but mean different things on the dashboard.
+func TestSeriesCountsRefusals(t *testing.T) {
+	s := newTestStore(t)
+	base := time.Now().Add(-time.Hour).Truncate(time.Hour)
+	seed(t, s, []Entry{
+		entryAt(base, 0, nil),
+		entryAt(base, time.Second, func(e *Entry) {
+			e.Status = 403
+			e.Reason = "deny:ip:10.0.0.0/8"
+		}),
+		entryAt(base, 2*time.Second, func(e *Entry) {
+			e.Status = 403
+			e.WAFAction = "deny"
+			e.Result = "deny"
+		}),
+		entryAt(base, 3*time.Second, func(e *Entry) {
+			e.Source = SourceForward
+			e.Result = "denied"
+		}),
+		entryAt(base, 4*time.Second, func(e *Entry) {
+			e.Status = 401
+			e.Reason = "basic-auth"
+		}),
+	})
+	points, err := s.Series(Query{From: base, To: base.Add(time.Hour)}, time.Hour)
+	if err != nil {
+		t.Fatalf("series: %v", err)
+	}
+	if len(points) == 0 {
+		t.Fatal("no points")
+	}
+	got := points[0]
+	if got.Total != 5 {
+		t.Fatalf("total = %d", got.Total)
+	}
+	if got.Denied != 2 {
+		t.Fatalf("denied = %d, want the web and the forward refusal", got.Denied)
+	}
+	if got.Blocked != 1 {
+		t.Fatalf("blocked = %d, want the WAF interception", got.Blocked)
+	}
+}
+
 func TestClear(t *testing.T) {
 	s := newTestStore(t)
 	seed(t, s, []Entry{entryAt(time.Now(), 0, nil)})

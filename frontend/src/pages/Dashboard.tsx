@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Alert, Card, Empty, Progress, Skeleton, Tag, Typography, theme } from 'antd'
 import { api } from '../api'
-import { fmtBytes, fmtDuration, fmtTime } from '../format'
+import { fmtBytes, fmtDuration } from '../format'
+import RequestLineChart from '../components/RequestLineChart'
 import { usePolling } from '../usePolling'
 
 interface ModuleStatus {
@@ -52,8 +53,8 @@ interface Health {
 interface SeriesPoint {
   time: string
   total: number
-  errors4xx?: number
-  errors5xx?: number
+  denied?: number
+  blocked?: number
 }
 
 const num = (value: unknown): number => {
@@ -92,63 +93,6 @@ function Meter({
         strokeColor={danger ? token.colorError : token.colorPrimary}
         style={{ margin: '2px 0 0' }}
       />
-    </div>
-  )
-}
-
-/** A compact hourly bar chart with the peak and the time span underneath. */
-function RequestChart({ points, color }: { points: SeriesPoint[]; color: string }) {
-  const { token } = theme.useToken()
-  const sorted = useMemo(
-    () => [...points].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()),
-    [points],
-  )
-  const peak = Math.max(1, ...sorted.map((point) => num(point.total)))
-  const total = sorted.reduce((sum, point) => sum + num(point.total), 0)
-
-  if (!sorted.length) {
-    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无请求数据" style={{ padding: 24 }} />
-  }
-
-  return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
-        <Typography.Text style={{ fontSize: 22, fontWeight: 650 }}>{formatCount(total)}</Typography.Text>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          次 · 峰值 {formatCount(peak)} / 小时
-        </Typography.Text>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 120 }}>
-        {sorted.map((point) => {
-          const height = Math.max(2, Math.round((num(point.total) / peak) * 100))
-          const failed = num(point.errors5xx) + num(point.errors4xx)
-          return (
-            <div
-              key={point.time}
-              title={`${fmtTime(point.time)} · ${formatCount(num(point.total))} 次${failed ? `（${failed} 次失败）` : ''}`}
-              style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%' }}
-            >
-              <div
-                style={{
-                  height: `${height}%`,
-                  minHeight: 2,
-                  borderRadius: 3,
-                  background: failed ? token.colorWarning : color,
-                  opacity: 0.85,
-                }}
-              />
-            </div>
-          )
-        })}
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
-        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-          {fmtTime(sorted[0].time)}
-        </Typography.Text>
-        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-          {fmtTime(sorted[sorted.length - 1].time)}
-        </Typography.Text>
-      </div>
     </div>
   )
 }
@@ -274,6 +218,8 @@ export default function Dashboard() {
   const problems = health?.problems ?? []
 
   const cardStyle = { borderColor: token.colorBorderSecondary, height: '100%' }
+  const webTotal = webSeries.reduce((sum, point) => sum + num(point.total), 0)
+  const forwardTotal = forwardSeries.reduce((sum, point) => sum + num(point.total), 0)
 
   const bodyStyle = { padding: 14, minHeight: 132 }
 
@@ -458,19 +404,35 @@ export default function Dashboard() {
           title="Web 服务请求"
           size="small"
           style={cardStyle}
-          extra={<Typography.Text type="secondary" style={{ fontSize: 12 }}>最近 24 小时</Typography.Text>}
-          styles={{ body: { padding: 16 } }}
+          extra={
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {formatCount(webTotal)} 次 · 最近 24 小时
+            </Typography.Text>
+          }
+          styles={{ body: { padding: '12px 16px 8px' } }}
         >
-          <RequestChart points={webSeries} color={token.colorPrimary} />
+          <RequestLineChart
+            points={webSeries}
+            color={token.colorPrimary}
+            empty={<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无请求数据" />}
+          />
         </Card>
         <Card
           title="端口转发请求"
           size="small"
           style={cardStyle}
-          extra={<Typography.Text type="secondary" style={{ fontSize: 12 }}>最近 24 小时</Typography.Text>}
-          styles={{ body: { padding: 16 } }}
+          extra={
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {formatCount(forwardTotal)} 次 · 最近 24 小时
+            </Typography.Text>
+          }
+          styles={{ body: { padding: '12px 16px 8px' } }}
         >
-          <RequestChart points={forwardSeries} color="#13a8a8" />
+          <RequestLineChart
+            points={forwardSeries}
+            color="#13a8a8"
+            empty={<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无连接数据" />}
+          />
         </Card>
       </div>
     </div>

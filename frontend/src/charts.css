@@ -1,0 +1,10 @@
+/*
+ * The bklit charts are vendored from its shadcn registry and style parts of
+ * their chrome (tooltip shell, axis labels, legend) with Tailwind utilities.
+ * The app itself is plain CSS modules plus antd, so only the theme variables
+ * and the utilities are pulled in: preflight would reset the antd components
+ * that surround the charts.
+ */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);

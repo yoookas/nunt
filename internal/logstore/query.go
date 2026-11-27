@@ -77,7 +77,13 @@ type SeriesPoint struct {
 	Total     int64     `json:"total"`
 	Errors4xx int64     `json:"errors4xx"`
 	Errors5xx int64     `json:"errors5xx"`
-	Bytes     int64     `json:"bytes"`
+	// Denied counts the connections and requests an access rule refused; a web
+	// refusal carries the rule in reason, a forwarded one is recorded as
+	// result "denied".
+	Denied int64 `json:"denied"`
+	// Blocked counts the requests the WAF intercepted.
+	Blocked int64 `json:"blocked"`
+	Bytes   int64 `json:"bytes"`
 }
 
 // MaxSeriesBuckets bounds the response size of one series request.
@@ -376,6 +382,11 @@ func (s *Store) Series(q Query, bucket time.Duration) ([]SeriesPoint, error) {
 	query := `SELECT (ts / ?) * ? AS b, COUNT(*),
 		COALESCE(SUM(CASE WHEN status BETWEEN 400 AND 499 THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN status >= 500 THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN waf_action <> '' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN waf_action = '' AND (
+			result = 'denied' OR
+			reason IN ('rest:deny','ua-rest:deny','geo-unavailable') OR
+			substr(reason,1,5) = 'deny:') THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(bytes),0)
 		FROM access_log` + where + ` GROUP BY b ORDER BY b`
 	rows, err := s.db.Query(query, args...)
@@ -385,11 +396,19 @@ func (s *Store) Series(q Query, bucket time.Duration) ([]SeriesPoint, error) {
 	defer rows.Close()
 	points := map[int64]*SeriesPoint{}
 	for rows.Next() {
-		var ms, total, e4, e5, bytes int64
-		if err := rows.Scan(&ms, &total, &e4, &e5, &bytes); err != nil {
+		var ms, total, e4, e5, blocked, denied, bytes int64
+		if err := rows.Scan(&ms, &total, &e4, &e5, &blocked, &denied, &bytes); err != nil {
 			return nil, fmt.Errorf("scan series: %w", err)
 		}
-		points[ms] = &SeriesPoint{Time: time.UnixMilli(ms), Total: total, Errors4xx: e4, Errors5xx: e5, Bytes: bytes}
+		points[ms] = &SeriesPoint{
+			Time:      time.UnixMilli(ms),
+			Total:     total,
+			Errors4xx: e4,
+			Errors5xx: e5,
+			Denied:    denied,
+			Blocked:   blocked,
+			Bytes:     bytes,
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read series: %w", err)
