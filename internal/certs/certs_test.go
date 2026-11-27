@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -258,5 +259,45 @@ func TestStoreKeepsRemark(t *testing.T) {
 	list := store.List()
 	if len(list) != 1 || list[0].Remark != "主站证书" {
 		t.Fatalf("stored info = %+v", list)
+	}
+}
+
+// A certificate is uploaded by an administrator and its subject alternative
+// names come from the file, so a name such as ".." must not be turned into a
+// directory expression by the store.
+func TestAddRejectsADomainThatEscapesTheStore(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	for _, domain := range []string{".", "..", "a..b", "../../etc"} {
+		certPEM, keyPEM := selfSigned(t, []string{domain})
+		if _, err := s.Add([]string{domain}, certPEM, keyPEM, "test", "", "", false); err == nil {
+			t.Fatalf("Add(%q) succeeded", domain)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read the store directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("a rejected add left files behind: %v", entries)
+	}
+}
+
+// IDFor must only ever produce a single path element, whatever the domain is.
+func TestIDForKeepsTheStoreBoundary(t *testing.T) {
+	for _, domain := range []string{"../../etc/passwd", `..\..\windows`, "a/b:c d", "*.example.com"} {
+		id := IDFor([]string{domain})
+		if strings.ContainsAny(id, `/\`) {
+			t.Fatalf("IDFor(%q) = %q contains a separator", domain, id)
+		}
+		if id == "" || id == "." || id == ".." {
+			t.Fatalf("IDFor(%q) = %q is not a usable name", domain, id)
+		}
+	}
+	if got := IDFor([]string{"*.Example.COM"}); got != "_wildcard.example.com" {
+		t.Fatalf("wildcard id = %q, want _wildcard.example.com", got)
 	}
 }

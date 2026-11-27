@@ -125,18 +125,32 @@ func (s *Store) load(id string) error {
 	return nil
 }
 
-// IDFor derives the directory name of a certificate.
+// IDFor derives the directory name of a certificate. Only characters a single
+// path element may safely contain survive: a domain is attacker supplied when a
+// certificate is uploaded, and a separator here would place the files outside
+// the store. The result is not guaranteed to be usable: callers that write must
+// still reject a name validID refuses (a malformed domain such as ".." is not a
+// directory).
 func IDFor(domains []string) string {
 	if len(domains) == 0 {
 		return "unnamed"
 	}
-	id := strings.ToLower(domains[0])
-	id = strings.ReplaceAll(id, "*.", "_wildcard.")
-	id = strings.NewReplacer("/", "_", "\\", "_", ":", "_", " ", "_").Replace(id)
-	if len(id) > 100 {
-		id = id[:100]
+	id := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(domains[0])), "*.", "_wildcard.")
+	var b strings.Builder
+	b.Grow(len(id))
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
 	}
-	return id
+	out := b.String()
+	if len(out) > 100 {
+		out = out[:100]
+	}
+	return out
 }
 
 // Add stores a certificate (chain + key) and returns its metadata.
@@ -161,6 +175,12 @@ func (s *Store) Add(domains []string, certPEM, keyPEM []byte, source, jobID, rem
 		}
 	}
 	id := IDFor(domains)
+	// The domains come from the certificate itself when the caller did not name
+	// them, so this check is what keeps a SAN such as ".." from turning the
+	// store directory into a path expression.
+	if !validID(id) {
+		return Info{}, fmt.Errorf("certificate domain %q cannot be used as a storage name", domains[0])
+	}
 	info := Info{
 		ID:        id,
 		Domains:   domains,
