@@ -11,6 +11,9 @@ import (
 
 // Query describes one page of access records.
 type Query struct {
+	// Source narrows the records to one producer. SourceWeb also matches the
+	// WAF records: an intercepted request is still a request the site served,
+	// and the operator wants both in the same web table.
 	Source string
 	RuleID string
 	// Host matches the requested host as a case insensitive substring.
@@ -99,7 +102,12 @@ func clauses(q Query) (string, []any) {
 		args = append(args, value)
 	}
 	if q.Source != "" {
-		add("source = ?", q.Source)
+		if q.Source == SourceWeb {
+			parts = append(parts, "source IN (?, ?)")
+			args = append(args, SourceWeb, SourceWAF)
+		} else {
+			add("source = ?", q.Source)
+		}
 	}
 	if q.RuleID != "" {
 		add("rule_id = ?", q.RuleID)

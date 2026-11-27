@@ -283,12 +283,88 @@ func TestAccessLogExportNeutralisesFormulas(t *testing.T) {
 		t.Fatalf("the export carries no data row: %v", records)
 	}
 	row := records[1]
-	// Column 7 is 域名 and column 25 is User-Agent, per the header the handler
-	// writes.
-	if got := row[7]; !strings.HasPrefix(got, "'=") {
+	// Resolve the columns by name: the export drops the HTTP-only columns for
+	// forward rows, so the positions differ per source.
+	if got := row[columnIndex(t, records[0], "域名")]; !strings.HasPrefix(got, "'=") {
 		t.Fatalf("host cell = %q, want it neutralised with an apostrophe", got)
 	}
-	if got := row[25]; !strings.HasPrefix(got, "'@") {
+	if got := row[columnIndex(t, records[0], "User-Agent")]; !strings.HasPrefix(got, "'@") {
 		t.Fatalf("user agent cell = %q, want it neutralised with an apostrophe", got)
 	}
+}
+
+// The export matches the table it was started from: a port-forward export has
+// no method, path or status column, and a web export has no 目标 column.
+func TestAccessLogExportColumnsFollowSource(t *testing.T) {
+	env := newTestEnv(t)
+	cookies, _ := login(t, env)
+
+	now := time.Now()
+	seedLogs(t, env,
+		logstore.Entry{Time: now, Source: logstore.SourceWeb, Host: "example.com",
+			Method: "GET", Path: "/a", Status: 200},
+		logstore.Entry{Time: now, Source: logstore.SourceForward, Listen: ":8080",
+			Upstream: "10.0.0.5:3389", Result: "closed", BytesOut: 1024},
+	)
+
+	cases := []struct {
+		source  string
+		present []string
+		absent  []string
+	}{
+		{
+			source:  "web",
+			present: []string{"来源", "请求 ID", "方法", "路径", "状态", "User-Agent", "WAF 动作"},
+			absent:  []string{"目标"},
+		},
+		{
+			source:  "forward",
+			present: []string{"监听", "目标", "结果", "总字节"},
+			absent:  []string{"来源", "方法", "路径", "状态", "User-Agent", "WAF 动作"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.source, func(t *testing.T) {
+			rec := env.do(t, http.MethodGet, "/api/v1/logs/access/export?source="+tc.source,
+				nil, cookies, nil)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("export = %d %s", rec.Code, rec.Body.String())
+			}
+			records, err := csv.NewReader(strings.NewReader(rec.Body.String())).ReadAll()
+			if err != nil {
+				t.Fatalf("parse the export: %v", err)
+			}
+			if len(records) != 2 {
+				t.Fatalf("export rows = %d, want a header and one row: %v", len(records), records)
+			}
+			header := records[0]
+			for _, name := range tc.present {
+				columnIndex(t, header, name)
+			}
+			for _, name := range tc.absent {
+				for _, h := range header {
+					if h == name {
+						t.Fatalf("%s export has a %q column: %v", tc.source, name, header)
+					}
+				}
+			}
+			if tc.source == "forward" {
+				if got := records[1][columnIndex(t, header, "目标")]; got != "10.0.0.5:3389" {
+					t.Fatalf("目标 cell = %q", got)
+				}
+			}
+		})
+	}
+}
+
+// columnIndex resolves a header name to its position, failing when it is absent.
+func columnIndex(t *testing.T, header []string, name string) int {
+	t.Helper()
+	for i, h := range header {
+		if h == name {
+			return i
+		}
+	}
+	t.Fatalf("the export has no %q column: %v", name, header)
+	return -1
 }

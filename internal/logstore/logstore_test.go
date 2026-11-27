@@ -79,6 +79,7 @@ func TestFilters(t *testing.T) {
 		want int
 	}{
 		{"source", Query{Source: SourceWAF}, 1},
+		{"web source includes waf", Query{Source: SourceWeb}, 3},
 		{"status class", Query{Status: "4xx"}, 1},
 		{"status exact", Query{Status: "502"}, 1},
 		{"ip prefix", Query{IP: "10.0."}, 1},

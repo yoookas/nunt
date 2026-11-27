@@ -62,6 +62,24 @@ const RANGES: { value: RangeKey; label: string }[] = [
 ]
 
 
+// The drawer of a forward record keeps only the columns that exist for it.
+const FORWARD_DETAIL_KEYS = new Set([
+  'time',
+  'source',
+  'rule',
+  'listen',
+  'protocol',
+  'status',
+  'reason',
+  'error',
+  'clientIp',
+  'geo',
+  'upstream',
+  'duration',
+  'bytes',
+  'message',
+])
+
 const STATUSES = [
   { value: 'all', label: '全部状态' },
   { value: '2xx', label: '2xx 成功' },
@@ -355,7 +373,7 @@ export default function AccessLogs({
   }
 
   const activeFilterCount = [
-    status !== 'all',
+    source === 'web' && status !== 'all',
     range !== '24h',
     ip.trim() !== '',
     keyword.trim() !== '',
@@ -444,15 +462,22 @@ export default function AccessLogs({
       ? '140px 74px minmax(150px,1.1fr) minmax(220px,1.6fr) 150px minmax(140px,1fr) 72px 80px 86px'
       : '130px 70px minmax(140px,1.1fr) minmax(200px,1.6fr) 140px minmax(130px,1fr) 66px'
 
+  // The two tables fill the same slots with different things: a forward row is
+  // a connection to a target, a web row is a request to a site.
+  const labels =
+    source === 'web'
+      ? { rule: '站点 / 规则', main: '请求', verdict: '状态 / 结果', duration: '耗时' }
+      : { rule: '规则', main: '连接', verdict: '结果', duration: '连接时长' }
+
   const header = (
     <div className={`${styles.grid} ${styles.gridHead}`} style={{ gridTemplateColumns: template }}>
       <span className={styles.line}>时间</span>
       <span className={styles.line}>来源</span>
-      {!isMobile ? <span className={styles.line}>站点 / 规则</span> : null}
-      <span className={styles.line}>请求</span>
-      <span className={styles.line}>状态 / 结果</span>
+      {!isMobile ? <span className={styles.line}>{labels.rule}</span> : null}
+      <span className={styles.line}>{labels.main}</span>
+      <span className={styles.line}>{labels.verdict}</span>
       <span className={styles.line}>客户端</span>
-      {!isMobile ? <span className={styles.line}>耗时</span> : null}
+      {!isMobile ? <span className={styles.line}>{labels.duration}</span> : null}
       {showExtraColumns ? (
         <>
           <span className={styles.line}>大小</span>
@@ -572,17 +597,21 @@ export default function AccessLogs({
       )
     return (
       <>
-        {field(
-          '状态',
-          <Select
-            size={size}
-            value={status}
-            onChange={setStatus}
-            options={STATUSES}
-            style={width(148)}
-            aria-label="状态"
-          />,
-        )}
+        {/* A forward row carries no HTTP status, so the status filter would
+            only ever return nothing. */}
+        {source === 'web'
+          ? field(
+              '状态',
+              <Select
+                size={size}
+                value={status}
+                onChange={setStatus}
+                options={STATUSES}
+                style={width(148)}
+                aria-label="状态"
+              />,
+            )
+          : null}
         {field(
           '时间范围',
           <Select
@@ -612,7 +641,7 @@ export default function AccessLogs({
             size={size}
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
-            placeholder="路径 / 域名 / UA"
+            placeholder={source === 'web' ? '路径 / 域名 / UA' : '目标 / 规则 / 结果'}
             allowClear
             prefix={<SearchOutlined />}
             style={width(190)}
@@ -664,11 +693,18 @@ export default function AccessLogs({
       ? '存储信息不可用'
       : '加载中…'
 
+  // A forward record has no HTTP columns; listing them empty would only be
+  // noise in the drawer.
+  const forwardDetail = detail?.source === 'forward'
   const detailItems: DescriptionsProps['items'] = detail
     ? [
         { key: 'time', label: '时间', children: fullTime(detail.time) },
         { key: 'source', label: '来源', children: <SourceTag source={detail.source} /> },
-        { key: 'rule', label: '站点 / 规则', children: detail.rule || detail.ruleId || '-' },
+        {
+          key: 'rule',
+          label: forwardDetail ? '规则' : '站点 / 规则',
+          children: detail.rule || detail.ruleId || '-',
+        },
         { key: 'host', label: '域名', children: mono(detail.host) },
         { key: 'listen', label: '监听', children: mono(detail.listen) },
         {
@@ -720,7 +756,7 @@ export default function AccessLogs({
         { key: 'upstream', label: '上游 / 目标', children: mono(detail.upstream) },
         {
           key: 'duration',
-          label: '耗时',
+          label: forwardDetail ? '连接时长' : '耗时',
           children: detail.durationMs ? `${detail.durationMs} ms` : '-',
         },
         {
@@ -748,7 +784,9 @@ export default function AccessLogs({
           children: detail.userAgent ? <div className={styles.detailValue}>{detail.userAgent}</div> : '-',
         },
         { key: 'message', label: '消息', children: detail.message ? <div className={styles.detailValue}>{detail.message}</div> : '-' },
-      ]
+      ].filter(
+        (item) => !forwardDetail || FORWARD_DETAIL_KEYS.has(String(item.key)),
+      )
     : []
 
   return (

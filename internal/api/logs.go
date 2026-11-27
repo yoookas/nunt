@@ -216,10 +216,8 @@ func (s *Server) handleAccessLogExport(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF})
 
 	cw := csv.NewWriter(w)
-	_ = cw.Write([]string{"时间", "来源", "请求 ID", "站点/规则", "协议", "TLS", "监听", "域名",
-		"方法", "路径", "状态", "上游状态", "尝试次数", "结果", "拒绝原因", "错误", "客户端 IP",
-		"国家", "省份", "城市", "上游/目标", "耗时(ms)", "请求字节", "响应字节", "总字节",
-		"User-Agent", "WAF 动作", "消息"})
+	head := exportColumns(q.Source)
+	_ = cw.Write(head)
 
 	written := 0
 	for page := 0; page < exportRowLimit/logstore.MaxLimit+1; page++ {
@@ -232,35 +230,10 @@ func (s *Server) handleAccessLogExport(w http.ResponseWriter, r *http.Request) {
 			// Every field here is influenced by the request that produced it
 			// (path, Host, User-Agent, WAF message), so the cells are neutralised
 			// before a spreadsheet gets the chance to evaluate one.
-			row := []string{
-				e.Time.Format("2006-01-02 15:04:05"),
-				e.Source,
-				e.RequestID,
-				e.Rule,
-				e.Proto,
-				e.TLS,
-				e.Listen,
-				e.Host,
-				e.Method,
-				e.Path,
-				statusCell(e.Status),
-				optionalInt(e.UpstreamStatus),
-				optionalInt(e.Attempts),
-				e.Result,
-				e.Reason,
-				e.Error,
-				e.ClientIP,
-				e.Country,
-				e.Province,
-				e.City,
-				e.Upstream,
-				durationCell(e.DurationMs),
-				optionalInt64(e.BytesIn),
-				optionalInt64(e.BytesOut),
-				optionalInt64(e.Bytes),
-				e.UserAgent,
-				e.WAFAction,
-				e.Message,
+			cells := exportCells(e)
+			row := make([]string, len(head))
+			for i, name := range head {
+				row[i] = cells[name]
 			}
 			for i := range row {
 				row[i] = csvSafe(row[i])
@@ -277,6 +250,66 @@ func (s *Server) handleAccessLogExport(w http.ResponseWriter, r *http.Request) {
 		q.Cursor = res.NextCursor
 	}
 	cw.Flush()
+}
+
+// exportColumns mirrors the table the operator is looking at: a port-forward
+// row has no method, path, status or User-Agent, so those columns are dropped
+// instead of being written empty on every line. An export that does not pin a
+// source keeps the full superset plus a 来源 column, because it may mix rows.
+func exportColumns(source string) []string {
+	switch source {
+	case logstore.SourceForward:
+		return []string{"时间", "规则", "监听", "客户端 IP", "国家", "省份", "城市",
+			"目标", "结果", "拒绝原因", "错误", "耗时(ms)", "请求字节", "响应字节",
+			"总字节", "消息"}
+	case logstore.SourceWeb, logstore.SourceWAF:
+		// A web export also carries the WAF interceptions, because that is the
+		// same traffic; the 来源 column tells the two apart.
+		return []string{"时间", "来源", "请求 ID", "规则", "协议", "TLS", "监听", "域名", "方法",
+			"路径", "状态", "上游状态", "尝试次数", "结果", "拒绝原因", "错误",
+			"客户端 IP", "国家", "省份", "城市", "上游", "耗时(ms)", "请求字节",
+			"响应字节", "总字节", "User-Agent", "WAF 动作", "消息"}
+	default:
+		return []string{"时间", "来源", "请求 ID", "规则", "协议", "TLS", "监听", "域名",
+			"方法", "路径", "状态", "上游状态", "尝试次数", "结果", "拒绝原因", "错误",
+			"客户端 IP", "国家", "省份", "城市", "上游", "耗时(ms)", "请求字节",
+			"响应字节", "总字节", "User-Agent", "WAF 动作", "消息"}
+	}
+}
+
+// exportCells renders every named column; exportColumns picks the subset.
+func exportCells(e logstore.Entry) map[string]string {
+	return map[string]string{
+		"时间":         e.Time.Format("2006-01-02 15:04:05"),
+		"来源":         e.Source,
+		"请求 ID":      e.RequestID,
+		"规则":         e.Rule,
+		"协议":         e.Proto,
+		"TLS":        e.TLS,
+		"监听":         e.Listen,
+		"域名":         e.Host,
+		"方法":         e.Method,
+		"路径":         e.Path,
+		"状态":         statusCell(e.Status),
+		"上游状态":       optionalInt(e.UpstreamStatus),
+		"尝试次数":       optionalInt(e.Attempts),
+		"结果":         e.Result,
+		"拒绝原因":       e.Reason,
+		"错误":         e.Error,
+		"客户端 IP":     e.ClientIP,
+		"国家":         e.Country,
+		"省份":         e.Province,
+		"城市":         e.City,
+		"上游":         e.Upstream,
+		"目标":         e.Upstream,
+		"耗时(ms)":     durationCell(e.DurationMs),
+		"请求字节":       optionalInt64(e.BytesIn),
+		"响应字节":       optionalInt64(e.BytesOut),
+		"总字节":        optionalInt64(e.Bytes),
+		"User-Agent": e.UserAgent,
+		"WAF 动作":     e.WAFAction,
+		"消息":         e.Message,
+	}
 }
 
 // csvSafe neutralises a cell that a spreadsheet would evaluate as a formula.
