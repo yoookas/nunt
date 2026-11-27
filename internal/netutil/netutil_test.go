@@ -1,6 +1,7 @@
 package netutil
 
 import (
+	"crypto/tls"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -206,5 +207,49 @@ func TestPeerIPScopedIPv6(t *testing.T) {
 	ip := PeerIP(r)
 	if ip == nil || ip.String() != "fe80::1" {
 		t.Fatalf("PeerIP = %v, want fe80::1", ip)
+	}
+}
+
+// HTTPS gates the Secure cookie flag, so it follows exactly the same trust rule
+// as ClientIP: the forwarded header counts only from a configured proxy.
+func TestTrustPolicyHTTPS(t *testing.T) {
+	cases := []struct {
+		name   string
+		trust  bool
+		peer   string
+		proto  string
+		expect bool
+	}{
+		{"no proxy configured", false, "10.0.0.2:5555", "https", false},
+		{"proxy configured but peer is not one", true, "10.0.0.9:5555", "https", false},
+		{"trusted proxy terminating TLS", true, "10.0.0.2:5555", "https", true},
+		{"trusted proxy forwarding plain http", true, "10.0.0.2:5555", "http", false},
+		{"trusted proxy forwarding a list", true, "10.0.0.2:5555", "https, http", true},
+		{"trusted proxy without the header", true, "10.0.0.2:5555", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.RemoteAddr = tc.peer
+			if tc.proto != "" {
+				r.Header.Set("X-Forwarded-Proto", tc.proto)
+			}
+			var p TrustPolicy
+			if tc.trust {
+				p = mustTrust(t, true, "10.0.0.2/32")
+			}
+			if got := p.HTTPS(r); got != tc.expect {
+				t.Fatalf("HTTPS = %v, want %v", got, tc.expect)
+			}
+		})
+	}
+}
+
+// A connection that really is TLS needs no proxy at all.
+func TestTrustPolicyHTTPSOnDirectTLS(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.TLS = &tls.ConnectionState{}
+	if !(TrustPolicy{}).HTTPS(r) {
+		t.Fatal("a request that arrived over TLS must count as https")
 	}
 }

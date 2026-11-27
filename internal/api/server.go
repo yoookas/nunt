@@ -323,6 +323,20 @@ func (s *Server) clientIP(r *http.Request) net.IP {
 	return s.trustPolicy().ClientIP(r)
 }
 
+// secureCookie reports whether the session cookie has to carry the Secure flag.
+//
+// The admin listener itself speaks plain HTTP (adminlisten has no TLS support),
+// so a console published over HTTPS is always fronted by a reverse proxy that
+// terminates TLS: r.TLS is nil on every request and the only signal is
+// X-Forwarded-Proto. That header is honoured only from a configured trusted
+// proxy, exactly like the client address, so a caller cannot talk the service
+// into marking the cookie Secure. Deployments that reach the console over plain
+// HTTP (the default for a LAN) keep a non-Secure cookie, which is what lets the
+// browser send it back at all.
+func (s *Server) secureCookie(r *http.Request) bool {
+	return s.trustPolicy().HTTPS(r)
+}
+
 func (s *Server) register() {
 	s.registerAuth()
 	s.registerSystem()

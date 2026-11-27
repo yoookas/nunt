@@ -122,7 +122,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user *mode
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   s.secureCookie(r),
 		SameSite: http.SameSiteStrictMode,
 		Expires:  sess.ExpiresAt,
 		MaxAge:   int(ttl.Seconds()),
@@ -148,11 +148,16 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(SessionCookie); err == nil {
 		s.opts.Sessions.Delete(c.Value)
 	}
+	// The deletion cookie must carry the same flags as the one it replaces:
+	// a browser refuses to let a plaintext response overwrite a Secure cookie,
+	// so a logout through the TLS proxy would otherwise leave the session
+	// cookie behind.
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookie,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   s.secureCookie(r),
 		MaxAge:   -1,
 		SameSite: http.SameSiteStrictMode,
 	})

@@ -127,6 +127,26 @@ func (p TrustPolicy) TrustsPeer(r *http.Request) bool {
 	return matchAny(p.Proxies, PeerIP(r))
 }
 
+// HTTPS reports whether the request reached the service over TLS, either on the
+// connection itself or on the hop of a trusted proxy that terminated it. Like
+// ClientIP, the forwarded header is believed only when the direct peer is a
+// configured proxy: a caller that writes its own X-Forwarded-Proto must not be
+// able to talk the service into marking a cookie Secure over a plaintext
+// connection.
+func (p TrustPolicy) HTTPS(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if r.TLS != nil {
+		return true
+	}
+	if !p.TrustsPeer(r) {
+		return false
+	}
+	proto, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Proto"), ",")
+	return strings.EqualFold(strings.TrimSpace(proto), "https")
+}
+
 // ClientIP returns the address the request should be attributed to. Forwarded
 // headers are used only when the direct peer is a trusted proxy; otherwise the
 // connection address wins, so a client that writes its own X-Forwarded-For can
