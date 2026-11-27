@@ -128,8 +128,9 @@
 
 ### 3.5 持续守卫（CI）
 
-- `.github/workflows/ci.yml`：`gofmt` 检查、`go vet`、`go test`、构建二进制与镜像；
+- `.github/workflows/ci.yml`：`gofmt` 检查、`go vet`、`go test`、`go test -race`、构建二进制与镜像；
 - 同文件里的 **`govulncheck` job 是阻塞的**（不设 `continue-on-error`）：依赖里存在「可达的已知漏洞」时 CI 直接失败——面向公网的服务不该把这种发现降级成警告；
+- 同一份 workflow 还有**每周一次的定时运行**（周一 03:00 UTC）：只重跑 `govulncheck`，用于发现「提交之后才公布」的 CVE——否则要等到下一次 push 才会被扫到；
 - `.github/dependabot.yml`：gomod 每周检查（同时最多 3 个 PR，minor/patch 自动分组）、GitHub Actions 每月检查（最多 2 个 PR），避免更新 PR 刷屏；
 - `.github/workflows/docker-smoke.yml`：在真实 docker daemon 上构建镜像、host 网络启动、校验容器契约（uid 1000、`cap_net_bind_service`、`/data` 下配置与密钥 600、管理 UI 与静态资源可访问、用日志里的随机密码登录并拉到模块列表、两个 compose 文件可被 `docker compose config` 解析）。
 
@@ -211,7 +212,7 @@
 1. **Docker 未实跑**：本机没有跑过 `docker compose up`；`.github/workflows/docker-smoke.yml` 已经写好（构建镜像 + host 网络启动 + 校验容器契约），并在 CI 上跑通过一次。
 2. **ACME 未对真实 CA 跑过**：没有在 Let's Encrypt 上完成过真实签发；续期循环、失败重试、证书热加载都只有单元测试与本地自签验证。
 3. **DNS 提供商未真实联调**：`internal/dnsprov` 只保留了阿里云 DNS 与腾讯云 DNSPod 两家国内提供商，外加自定义回调；它们目前只有接口形状与单元测试，没有用真实账号调过 API（DDNS 与 ACME dns-01 都依赖它们）。
-4. **没有 race / 压测 / soak**：没有跑过 `go test -race` 的长时间运行，没有并发压测，没有 24h soak；连接泄漏、goroutine 泄漏、限流参数是否合适都还是未知数。
+4. **没有压测 / soak / fuzz**：`go test -race` 已经在 CI 里随每次 push/PR 跑，但那只是单进程、单次运行——没有做过长时间运行下的 race 观察，没有并发压测，没有 24h soak，也没有对请求解析和 WAF 规则做 fuzz；连接泄漏、goroutine 泄漏、限流参数是否合适都还是未知数。
 5. **前端未真机浏览器验证**：管理界面只做过静态资源可访问性检查（HTTP 200），没有在真实浏览器里逐页点过（尤其是 WAF 规则编辑、SSE 日志这几处）。
 6. **管理面白名单未在真实公网验证**：`adminAllowIps` 的强制逻辑有单测覆盖，但没有在真实公网环境（含 CDN/第三方反代 + `trustProxy`）验证过取到的客户端 IP 是否就是期望值。
 7. **WAF 误报率未知**：CRS 在真实业务流量下的误报率没有数据；`paranoiaLevel`、`inboundThreshold` 等参数目前是按经验值设的。

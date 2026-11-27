@@ -153,7 +153,10 @@ data/
 
 ## 安全设计
 
-- **认证**：Argon2id 密码哈希；会话为服务端存储的随机令牌（HttpOnly + SameSite=Strict + TLS 下 Secure），修改密码后其它旧会话立即失效。
+- **认证**：Argon2id 密码哈希；会话为服务端存储的随机令牌（HttpOnly + SameSite=Strict + Secure），修改密码后其它旧会话立即失效。
+  `Secure` 只在「连接本身是 TLS」或「直连对端是可信代理且它声明 `X-Forwarded-Proto: https`」时置位：管理端监听器自己不做 TLS，
+  所以在 TLS 终结代理后面要把该代理填进 `system.trustProxy` + `system.trustedProxies`；纯局域网 HTTP 访问则保持不带
+  （在明文连接上设置 Secure Cookie 会被浏览器直接丢弃，登录会看起来成功却立即掉线）。
   首次登录必须改密：改密前服务端只放行会话查询、改密与退出登录三个接口，控制台不会打开。
 - **CSRF**：会话鉴权的写操作必须带 `X-CSRF-Token`（登录时下发）。
 - **暴力破解**：登录失败按来源 IP 计数，超过阈值指数退避锁定；API 有令牌桶限流。
@@ -267,6 +270,7 @@ internal/ipfilter    访问控制过滤器（CIDR + 国家/省份/城市）
 internal/vfs        安全文件系统抽象（os.Root）
 internal/security   密码、会话、限流
 internal/rest       路由与 JSON 工具
+internal/testutil   测试辅助（便宜的 Argon2 参数、配置种子；仅测试引用，不进二进制）
 internal/webui      管理界面构建产物（go:embed，源码在 frontend/）
 web 前端            frontend/（React 19 + Ant Design 5 + Vite 8）
 ```

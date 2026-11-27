@@ -179,6 +179,11 @@ NUNT_ADMIN_LISTEN=127.0.0.1:18080 docker compose up -d
 > 只有直连对端命中这个列表时才会读取 `X-Forwarded-For`（其次 `X-Real-IP`）；开启开关但列表为空时
 > 转发头会被忽略。服务直接暴露在公网时，伪造的 XFF 不会生效。
 >
+> 同一个开关还决定两件与 TLS 有关的事：**管理后台会话 Cookie 的 `Secure` 标志**和 **Web 监听器的 HSTS 头**。
+> 管理端监听器本身不做 TLS，所以在 TLS 终结代理后面，只有配好 `trustProxy` + `trustedProxies`（并保证代理发送
+> `X-Forwarded-Proto: https`）才会得到 Secure Cookie 与 HSTS；反过来，直连局域网 HTTP 访问时两者都不该出现，
+> 这也是为什么没有配可信代理时不会强行加 `Secure`——浏览器会丢弃明文响应里设置的 Secure Cookie，表现为「登录成功但立刻掉线」。
+>
 > **不要把自己锁在外面**：只填写公网出口 IP 时，内网与容器内的访问同样会被拒绝；建议同时保留内网网段
 > （如 `192.168.0.0/16`、`10.0.0.0/8`）。
 

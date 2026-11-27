@@ -66,6 +66,9 @@ RegisterAPI(mux *rest.Mux)         // 注册 /api/v1/<name>/... 路由
 - 写接口：`POST /xxx` 新建、`PUT /xxx/{id}` 更新、`DELETE /xxx/{id}` 删除、`POST /xxx/{id}/toggle` 开关。
 - 请求体字段与 `internal/model` 的 JSON tag 一致；用 `rest.Decode` 解析。
 - 鉴权、CSRF、限流、CORS 已由 `internal/api` 统一处理，模块里不要重复实现。
+- 管理员端点（**包括只读的列表与状态接口**）入口先做一次管理员校验：`internal/api` 里是 `requireAdmin`，
+  模块里通常是一个包装 `api.IdentityFrom` 的 `requireAdmin`。当前每个会话都是管理员，这一步看似多余，
+  但把它写全，将来加只读角色时只需改 `isAdmin` 一处，不必回头翻每个 handler。
 - 更新配置统一走 `deps.Cfg.Update(func(c *model.Config) error { ... })`；改动后自己再调用一次
   `m.Reload(deps.Cfg.Snapshot())` 保证立即生效（`Update` 也会通过 `Subscribe` 触发一次，重复调用必须无害）。
 - 返回凭据时必须脱敏（`secret.Mask`）；保存时若字段值等于掩码（含 `********`）则沿用旧值，不要覆盖成掩码。
