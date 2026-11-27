@@ -25,6 +25,15 @@ const DrainDelay = 300 * time.Millisecond
 // shutdownGrace bounds one graceful shutdown (a replaced listener or Close).
 const shutdownGrace = 10 * time.Second
 
+// adminReadTimeout bounds reading one admin request, body included. The sign in
+// route is reachable without a session and reads a JSON body, so without a
+// deadline a client could hold one connection per goroutine by sending that body
+// a byte at a time; the request rate limiter does not help, because it limits
+// how often a request starts, not how long it may take. The one endpoint that
+// legitimately reads a large body (the ip2region upload) extends its own
+// deadline instead of relaxing this one.
+const adminReadTimeout = 60 * time.Second
+
 // Error kinds reported by Rebind and Serve.
 const (
 	// KindEnv means the address is controlled by an environment variable, so a
@@ -340,9 +349,12 @@ func (s *Server) newHTTPServer() *http.Server {
 	srv := &http.Server{
 		Handler:           s.handler,
 		ReadHeaderTimeout: 15 * time.Second,
-		ReadTimeout:       0, // uploads and SSE streams may be long lived
-		WriteTimeout:      0,
-		IdleTimeout:       120 * time.Second,
+		ReadTimeout:       adminReadTimeout,
+		// SSE and large downloads stream for a long time, so the write side has
+		// no server wide deadline: the event handler bounds every individual
+		// write with http.ResponseController instead.
+		WriteTimeout: 0,
+		IdleTimeout:  120 * time.Second,
 	}
 	if s.log != nil {
 		srv.ErrorLog = slog.NewLogLogger(s.log.Handler(), slog.LevelWarn)

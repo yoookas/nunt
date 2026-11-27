@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/nunt/nunt/internal/adminlisten"
 	"github.com/nunt/nunt/internal/config"
@@ -571,6 +572,12 @@ func (s *Server) handleGetIP2Region(w http.ResponseWriter, r *http.Request) {
 // largest of the two and stays well under this limit.
 const maxIP2RegionUpload = 256 << 20
 
+// ip2RegionUploadTimeout is the read budget of that upload. The admin listener
+// bounds every request body with a short deadline; a database of a few hundred
+// megabytes over a slow link cannot be read that fast, so this one handler
+// extends its own deadline instead of disabling the bound for everyone.
+const ip2RegionUploadTimeout = 30 * time.Minute
+
 // handleUploadIP2Region stores an uploaded database in the data directory,
 // validates it, switches the matching family to it and reloads the service.
 // The version is taken from the file itself, never from the caller.
@@ -587,6 +594,11 @@ func (s *Server) handleUploadIP2Region(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxIP2RegionUpload)
+	// Give this request a budget long enough for a large file on a slow link.
+	// http.ResponseController reaches the connection through the middleware
+	// wrappers (they implement Unwrap); an embedder whose writer has no
+	// deadline simply ignores the error.
+	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(ip2RegionUploadTimeout))
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		rest.Fail(w, http.StatusBadRequest, "无法读取上传内容（上限 %d MiB）：%s", maxIP2RegionUpload>>20, err)
 		return

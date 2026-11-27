@@ -285,3 +285,30 @@ func TestCloseStopsTheListenerAndIsIdempotent(t *testing.T) {
 		t.Fatal("Serve after Close must fail")
 	}
 }
+
+// The sign in route is reachable without a session and reads a JSON body, so the
+// read side has to be bounded: without a deadline a client could hold one
+// connection per goroutine by sending that body a byte at a time. The write side
+// stays unbounded on purpose, because the event stream bounds every individual
+// write itself.
+func TestHTTPServerBoundsTheRequestRead(t *testing.T) {
+	srv := (&Server{}).newHTTPServer()
+
+	if srv.ReadHeaderTimeout <= 0 {
+		t.Fatal("ReadHeaderTimeout must be bounded")
+	}
+	if srv.ReadTimeout <= 0 {
+		t.Fatal("ReadTimeout must bound the request body as well as the headers")
+	}
+	if srv.ReadTimeout < srv.ReadHeaderTimeout {
+		t.Fatalf("ReadTimeout (%v) must not be shorter than ReadHeaderTimeout (%v)",
+			srv.ReadTimeout, srv.ReadHeaderTimeout)
+	}
+	if srv.WriteTimeout != 0 {
+		t.Fatalf("WriteTimeout = %v, want 0: SSE and downloads bound each write themselves",
+			srv.WriteTimeout)
+	}
+	if srv.IdleTimeout <= 0 {
+		t.Fatal("IdleTimeout must be bounded")
+	}
+}
