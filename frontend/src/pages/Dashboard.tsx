@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Alert, Card, Empty, Progress, Skeleton, Tag, Typography, theme } from 'antd'
-import { api, errorText } from '../api'
+import { api } from '../api'
 import { fmtBytes, fmtDuration, fmtTime } from '../format'
 import { usePolling } from '../usePolling'
 
@@ -153,33 +153,43 @@ function RequestChart({ points, color }: { points: SeriesPoint[]; color: string 
   )
 }
 
-/** One block of the merged service card. */
-function ServiceStat({
+/** One line of the service card: a dot, a name, a figure and a detail. */
+function ServiceLine({
   title,
-  primary,
-  lines,
   tone,
+  value,
+  note,
 }: {
   title: string
-  primary: string
-  lines: string[]
   tone: string
+  value: string
+  note?: string
 }) {
-  const { token } = theme.useToken()
   return (
-    <div style={{ padding: '2px 0', minWidth: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: tone, flexShrink: 0 }} />
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          {title}
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
+      <span
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          background: tone,
+          flexShrink: 0,
+          alignSelf: 'center',
+        }}
+      />
+      <Typography.Text style={{ fontSize: 13, whiteSpace: 'nowrap' }}>{title}</Typography.Text>
+      <div style={{ flex: 1, minWidth: 8 }} />
+      <Typography.Text strong style={{ fontSize: 13, whiteSpace: 'nowrap' }}>
+        {value}
+      </Typography.Text>
+      {note ? (
+        <Typography.Text
+          type="secondary"
+          style={{ fontSize: 11, whiteSpace: 'nowrap' }}
+        >
+          {note}
         </Typography.Text>
-      </div>
-      <div style={{ fontSize: 18, fontWeight: 650, marginTop: 1, color: token.colorText }}>{primary}</div>
-      {lines.map((line) => (
-        <div key={line} style={{ fontSize: 12, color: token.colorTextTertiary, marginTop: 1 }}>
-          {line}
-        </div>
-      ))}
+      ) : null}
     </div>
   )
 }
@@ -192,7 +202,6 @@ export default function Dashboard() {
   const [health, setHealth] = useState<Health | null>(null)
   const [webSeries, setWebSeries] = useState<SeriesPoint[]>([])
   const [forwardSeries, setForwardSeries] = useState<SeriesPoint[]>([])
-  const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
 
   const load = async () => {
@@ -219,23 +228,22 @@ export default function Dashboard() {
     if (healthData) setHealth(healthData)
     if (Array.isArray(webData?.points)) setWebSeries(webData.points)
     if (Array.isArray(forwardData?.points)) setForwardSeries(forwardData.points)
-    setError('')
     setLoading(false)
   }
 
   const live = usePolling(load, 10_000)
 
+  // The first load goes through the poll status too, so the card can say when
+  // it was last refreshed instead of showing a blank spot until the first tick.
   useEffect(() => {
-    void load().catch((err) => {
-      setError(errorText(err))
-      setLoading(false)
-    })
+    void live.refresh().finally(() => setLoading(false))
+    // live.refresh is stable; running this once on mount is the point.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const host = stats?.host
   const cores = num(stats?.numCpu)
   const load1 = num(host?.load1)
-  const load5 = num(host?.load5)
   const cpuPct = cores ? Math.min(100, (load1 / cores) * 100) : 0
   const memTotal = num(host?.memTotalBytes)
   const memUsed = Math.max(0, memTotal - num(host?.memFreeBytes))
@@ -267,36 +275,10 @@ export default function Dashboard() {
 
   const cardStyle = { borderColor: token.colorBorderSecondary, height: '100%' }
 
+  const bodyStyle = { padding: 14, minHeight: 132 }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <Card size="small" style={cardStyle} styles={{ body: { padding: '12px 16px' } }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
-          <div style={{ minWidth: 0 }}>
-            <Typography.Title level={4} style={{ margin: 0, fontSize: 18 }}>
-              系统概览
-            </Typography.Title>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {stats?.hostname || '主机'} · {info?.version?.version || 'dev'} · 运行{' '}
-              {stats ? fmtDuration(stats.uptimeSec) : '-'}
-            </Typography.Text>
-          </div>
-          <div style={{ flex: 1 }} />
-          {health ? (
-            problems.length ? (
-              <Tag color="orange">{problems.length} 项需要处理</Tag>
-            ) : (
-              <Tag color="green">运行正常</Tag>
-            )
-          ) : null}
-          {live.failed ? (
-            <Typography.Text type="danger" style={{ fontSize: 12 }}>
-              刷新失败
-            </Typography.Text>
-          ) : null}
-        </div>
-      </Card>
-
-      {error ? <Alert type="error" showIcon message="概览数据加载失败" description={error} /> : null}
       {problems.map((problem, index) => (
         <Alert
           key={`${problem.title}-${index}`}
@@ -307,65 +289,125 @@ export default function Dashboard() {
         />
       ))}
 
-      {/* 资源与磁盘 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 14 }}>
-        <Card title="系统资源" size="small" style={cardStyle} styles={{ body: { padding: 16, display: 'grid', gap: 14 } }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+          gap: 14,
+        }}
+      >
+        {/* 系统概览 */}
+        <Card
+          size="small"
+          title="系统概览"
+          style={cardStyle}
+          styles={{ body: bodyStyle }}
+          extra={
+            live.updatedAt ? (
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                更新于{' '}
+                {new Date(live.updatedAt).toLocaleTimeString('zh-CN', {
+                  hour12: false,
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </Typography.Text>
+            ) : null
+          }
+        >
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 3,
+              minWidth: 0,
+            }}
+          >
+            <Typography.Text strong style={{ fontSize: 16 }} ellipsis>
+              {stats?.hostname || '主机'}
+            </Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {info?.version?.version || 'dev'}
+            </Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              已运行 {stats ? fmtDuration(stats.uptimeSec) : '-'}
+            </Typography.Text>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 7 }}>
+              {health ? (
+                problems.length ? (
+                  <Tag color="orange" style={{ marginInlineEnd: 0 }}>
+                    {problems.length} 项需要处理
+                  </Tag>
+                ) : (
+                  <Tag color="green" style={{ marginInlineEnd: 0 }}>
+                    运行正常
+                  </Tag>
+                )
+              ) : null}
+              {live.failed ? (
+                <Tag color="red" style={{ marginInlineEnd: 0 }}>
+                  刷新失败
+                </Tag>
+              ) : null}
+            </div>
+          </div>
+        </Card>
+
+        {/* 系统资源 */}
+        <Card title="系统资源" size="small" style={cardStyle} styles={{ body: bodyStyle }}>
           {loading ? (
             <Skeleton active paragraph={{ rows: 2 }} title={false} />
           ) : (
-            <>
+            <div style={{ display: 'grid', gap: 10 }}>
               <Meter
                 label="CPU 负载"
                 percent={cpuPct}
                 danger={cpuPct > 85}
                 detail={
-                  cores
-                    ? `${load1.toFixed(2)} / ${cores} 核 · 5 分钟 ${load5.toFixed(2)}`
-                    : '负载不可用'
+                  cores ? `${load1.toFixed(2)} / ${cores} 核` : '负载不可用'
                 }
               />
               <Meter
                 label="内存"
                 percent={memPct}
                 danger={memPct > 85}
-                detail={memTotal ? `${fmtBytes(memUsed)} / ${fmtBytes(memTotal)}` : '内存统计不可用'}
+                detail={memTotal ? `${fmtBytes(memUsed)} / ${fmtBytes(memTotal)}` : '统计不可用'}
               />
               <Meter
                 label="Go 堆内存"
                 percent={memTotal ? (heap / memTotal) * 100 : 0}
-                detail={
-                  heap
-                    ? `${fmtBytes(heap)}${memTotal ? ` · 占系统内存 ${((heap / memTotal) * 100).toFixed(1)}%` : ''}`
-                    : '尚未采集'
-                }
+                detail={heap ? fmtBytes(heap) : '尚未采集'}
               />
-            </>
+            </div>
           )}
         </Card>
 
-        <Card
-          title="磁盘"
-          size="small"
-          style={cardStyle}
-          styles={{ body: { padding: 16, display: 'grid', gap: 14 } }}
-        >
+        {/* 磁盘 */}
+        <Card title="磁盘" size="small" style={cardStyle} styles={{ body: bodyStyle }}>
           {loading ? (
             <Skeleton active paragraph={{ rows: 2 }} title={false} />
           ) : disks.length ? (
-            disks.map((disk, index) => {
-              const total = num(disk.totalBytes)
-              const free = num(disk.freeBytes)
-              const pct = total ? ((total - free) / total) * 100 : 0
-              return (
-                <Meter
-                  key={`${disk.path ?? 'disk'}-${index}`}
-                  label={disk.path || `磁盘 ${index + 1}`}
-                  percent={pct}
-                  danger={pct > 90}
-                  detail={total ? `${fmtBytes(total - free)} / ${fmtBytes(total)}` : '统计不可用'}
-                />
-              )
-            })
+            <div style={{ display: 'grid', gap: 10 }}>
+              {disks.slice(0, 3).map((disk, index) => {
+                const total = num(disk.totalBytes)
+                const free = num(disk.freeBytes)
+                const pct = total ? ((total - free) / total) * 100 : 0
+                return (
+                  <Meter
+                    key={`${disk.path ?? 'disk'}-${index}`}
+                    label={disk.path || `磁盘 ${index + 1}`}
+                    percent={pct}
+                    danger={pct > 90}
+                    detail={total ? `${fmtBytes(total - free)} / ${fmtBytes(total)}` : '统计不可用'}
+                  />
+                )
+              })}
+              {disks.length > 3 ? (
+                <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                  另有 {disks.length - 3} 个挂载点
+                </Typography.Text>
+              ) : null}
+            </div>
           ) : (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               磁盘统计不可用
@@ -373,51 +415,42 @@ export default function Dashboard() {
           )}
         </Card>
 
+        {/* 服务 */}
+        <Card title="服务" size="small" style={cardStyle} styles={{ body: bodyStyle }}>
+          <div style={{ display: 'grid', gap: 9 }}>
+            <ServiceLine
+              title="Web 服务"
+              tone="#2f54eb"
+              value={`${num(web.routes) || num(info?.webRules)} 条路由`}
+              note={`· ${num(web.listeners)} 个监听器`}
+            />
+            <ServiceLine
+              title="端口转发"
+              tone="#13a8a8"
+              value={`${num(forward.listening) || num(forward.enabled)} 个监听`}
+              note={`· ${num(forward.activeConnections)} 个活跃连接`}
+            />
+            <ServiceLine
+              title="动态域名"
+              tone="#389e0d"
+              value={`${num(ddns.enabled)} 个启用`}
+              note={`· ${num(ddns.rules)} 条规则`}
+            />
+            <ServiceLine
+              title="证书"
+              tone="#d48806"
+              value={`${certTotal} 张`}
+              note={
+                num(certs?.expired)
+                  ? `· ${num(certs?.expired)} 张已过期`
+                  : expiring
+                    ? `· ${expiring} 张 30 天内到期`
+                    : '· 全部有效'
+              }
+            />
+          </div>
+        </Card>
       </div>
-
-      {/* 服务汇总 */}
-      <Card title="服务" size="small" style={cardStyle} styles={{ body: { padding: 12 } }}>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-            gap: 12,
-          }}
-        >
-          <ServiceStat
-            title="Web 服务"
-            tone="#2f54eb"
-            primary={`${num(web.routes) || num(info?.webRules)} 条路由`}
-            lines={[`${num(web.listeners)} 个监听器`]}
-          />
-          <ServiceStat
-            title="端口转发"
-            tone="#13a8a8"
-            primary={`${num(forward.listening) || num(forward.enabled)} 个监听`}
-            lines={[
-              `${num(forward.rules)} 条规则 · ${num(forward.activeConnections)} 个活跃连接`,
-            ]}
-          />
-          <ServiceStat
-            title="动态域名"
-            tone="#389e0d"
-            primary={`${num(ddns.enabled)} 个启用`}
-            lines={[`${num(ddns.rules)} 条规则`]}
-          />
-          <ServiceStat
-            title="证书"
-            tone="#d48806"
-            primary={`${certTotal} 张`}
-            lines={[
-              num(certs?.expired)
-                ? `${num(certs?.expired)} 张已过期`
-                : expiring
-                  ? `${expiring} 张 30 天内到期`
-                  : '全部有效',
-            ]}
-          />
-        </div>
-      </Card>
 
       {/* 两条请求曲线 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 14 }}>

@@ -4,7 +4,6 @@ import {
   emptyAccess,
   normalizeAccess,
   type Access,
-  type AccessAction,
   type AccessEntry,
   type AccessList,
 } from '../access'
@@ -59,13 +58,15 @@ function ListEditor({
   }
 
   const add = () => {
-    const entry: AccessEntry = { action: 'allow', kind: kinds[0].value as AccessEntry['kind'], value: '' }
-    const entries = [...list.entries, entry]
-    // The terminal row follows the first entry: a whitelist denies the rest, a
-    // blacklist allows it. It stays manually editable afterwards.
-    const rest: AccessAction =
-      list.entries.length === 0 ? (entry.action === 'allow' ? 'deny' : 'allow') : list.rest
-    onChange({ entries, rest })
+    const entry: AccessEntry = {
+      action: 'allow',
+      kind: kinds[0].value as AccessEntry['kind'],
+      value: '',
+    }
+    // Adding a rule never touches the "everything else" action: flipping it
+    // under the operator was the surprising part, and the default already
+    // matches what a new list means.
+    onChange({ ...list, entries: [...list.entries, entry] })
   }
 
   return (
@@ -146,9 +147,6 @@ function ListEditor({
           style={{ width: 84 }}
           onChange={(value) => onChange({ ...list, rest: value })}
         />
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          不可移动或删除
-        </Typography.Text>
       </div>
       <Button size="small" icon={<PlusOutlined />} onClick={add}>
         添加规则
@@ -169,7 +167,9 @@ export default function AccessEditor({
   allowUA?: boolean
   allowInherit?: boolean
 }) {
-  const access = normalizeAccess(value ?? emptyAccess())
+  // keepEmpty: a row that was just added still has no value, and dropping it
+  // here would make the button look broken.
+  const access = normalizeAccess(value ?? emptyAccess(), { keepEmpty: true })
   const update = (next: Partial<Access>) => onChange?.({ ...access, ...next })
 
   return (

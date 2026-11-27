@@ -837,7 +837,7 @@ export default function RouteForm({
       <Form.Item
         name="access"
         label="访问控制"
-        extra="从上到下匹配，第一条命中的规则生效；最后一行“其余流量”是兜底，不可移动或删除。"
+        extra="从上到下匹配，第一条命中的规则生效。"
       >
         <AccessEditor />
       </Form.Item>
