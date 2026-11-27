@@ -229,7 +229,10 @@ func (s *Server) handleAccessLogExport(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		for _, e := range res.Items {
-			_ = cw.Write([]string{
+			// Every field here is influenced by the request that produced it
+			// (path, Host, User-Agent, WAF message), so the cells are neutralised
+			// before a spreadsheet gets the chance to evaluate one.
+			row := []string{
 				e.Time.Format("2006-01-02 15:04:05"),
 				e.Source,
 				e.RequestID,
@@ -258,7 +261,11 @@ func (s *Server) handleAccessLogExport(w http.ResponseWriter, r *http.Request) {
 				e.UserAgent,
 				e.WAFAction,
 				e.Message,
-			})
+			}
+			for i := range row {
+				row[i] = csvSafe(row[i])
+			}
+			_ = cw.Write(row)
 			written++
 			if written >= exportRowLimit {
 				break
@@ -270,6 +277,22 @@ func (s *Server) handleAccessLogExport(w http.ResponseWriter, r *http.Request) {
 		q.Cursor = res.NextCursor
 	}
 	cw.Flush()
+}
+
+// csvSafe neutralises a cell that a spreadsheet would evaluate as a formula.
+// Access log fields are chosen by the requests that produced them, so a visitor
+// can plant "=cmd|..." in a User-Agent and wait for the operator to open the
+// export: a leading apostrophe makes the spreadsheet treat the cell as text and
+// is not displayed. Numeric and ordinary text cells are returned unchanged.
+func csvSafe(cell string) string {
+	if cell == "" {
+		return cell
+	}
+	switch cell[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + cell
+	}
+	return cell
 }
 
 func statusCell(status int) string {

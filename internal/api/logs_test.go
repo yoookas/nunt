@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -252,5 +253,42 @@ func TestAccessLogSeries(t *testing.T) {
 	rec = env.do(t, http.MethodGet, "/api/v1/logs/access/series?bucket=60&from=2020-01-01T00:00:00Z", nil, cookies, nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("huge range = %d, want 400", rec.Code)
+	}
+}
+
+// Every column of the export is chosen by the request that produced the record,
+// so a visitor must not be able to plant a spreadsheet formula.
+func TestAccessLogExportNeutralisesFormulas(t *testing.T) {
+	env := newTestEnv(t)
+	cookies, _ := login(t, env)
+
+	seedLogs(t, env, logstore.Entry{
+		Time:      time.Now(),
+		Source:    logstore.SourceWeb,
+		Host:      `=HYPERLINK("http://evil.example","click")`,
+		Path:      "/x",
+		Status:    200,
+		UserAgent: "@SUM(1+1)",
+	})
+
+	rec := env.do(t, http.MethodGet, "/api/v1/logs/access/export?source=web", nil, cookies, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("export = %d %s", rec.Code, rec.Body.String())
+	}
+	records, err := csv.NewReader(strings.NewReader(rec.Body.String())).ReadAll()
+	if err != nil {
+		t.Fatalf("parse the export: %v", err)
+	}
+	if len(records) < 2 {
+		t.Fatalf("the export carries no data row: %v", records)
+	}
+	row := records[1]
+	// Column 7 is 域名 and column 25 is User-Agent, per the header the handler
+	// writes.
+	if got := row[7]; !strings.HasPrefix(got, "'=") {
+		t.Fatalf("host cell = %q, want it neutralised with an apostrophe", got)
+	}
+	if got := row[25]; !strings.HasPrefix(got, "'@") {
+		t.Fatalf("user agent cell = %q, want it neutralised with an apostrophe", got)
 	}
 }
