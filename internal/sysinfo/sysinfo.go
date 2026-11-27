@@ -35,6 +35,16 @@ type HostStats struct {
 	DiskTotalBytes uint64  `json:"diskTotalBytes,omitempty"`
 	DiskFreeBytes  uint64  `json:"diskFreeBytes,omitempty"`
 	DiskPath       string  `json:"diskPath,omitempty"`
+	// Disks lists the mounted local file systems, so a host with several disks
+	// can show one bar each instead of only the data directory.
+	Disks []DiskStat `json:"disks,omitempty"`
+}
+
+// DiskStat is one mounted local file system.
+type DiskStat struct {
+	Path       string `json:"path"`
+	TotalBytes uint64 `json:"totalBytes"`
+	FreeBytes  uint64 `json:"freeBytes"`
 }
 
 // Collect gathers a snapshot of the current state.

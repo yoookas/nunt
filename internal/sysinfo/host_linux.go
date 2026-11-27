@@ -46,6 +46,7 @@ func hostStats(diskPath string) *HostStats {
 		used := stats.MemTotalBytes - stats.MemFreeBytes
 		stats.MemUsedPct = float64(used) / float64(stats.MemTotalBytes) * 100
 	}
+	stats.Disks = collectDisks()
 	if diskPath == "" {
 		diskPath = "/"
 	}
@@ -56,6 +57,44 @@ func hostStats(diskPath string) *HostStats {
 		stats.DiskFreeBytes = fsStat.Bavail * uint64(fsStat.Bsize)
 	}
 	return stats
+}
+
+// collectDisks lists the mounted local file systems (one entry per device, at
+// most eight, so the overview stays readable).
+func collectDisks() []DiskStat {
+	data, err := os.ReadFile("/proc/mounts")
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]DiskStat, 0, 4)
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || !strings.HasPrefix(fields[0], "/dev/") {
+			continue
+		}
+		if seen[fields[0]] {
+			continue
+		}
+		var stat syscall.Statfs_t
+		if err := syscall.Statfs(fields[1], &stat); err != nil {
+			continue
+		}
+		total := stat.Blocks * uint64(stat.Bsize)
+		if total == 0 {
+			continue
+		}
+		seen[fields[0]] = true
+		out = append(out, DiskStat{
+			Path:       fields[1],
+			TotalBytes: total,
+			FreeBytes:  stat.Bavail * uint64(stat.Bsize),
+		})
+		if len(out) >= 8 {
+			break
+		}
+	}
+	return out
 }
 
 func parseKB(line string) uint64 {
