@@ -931,7 +931,16 @@ export default function Web() {
                             <Space size={[4, 4]} wrap>
                               <RouteTypeTag type={rule.type} />
                               <AccessTag access={rule.access} />
-                              {rule.waf ? <Tag color="volcano">WAF</Tag> : null}
+                              {(() => {
+                                const inherited = listeners.find((item) => item.id === rule.listenerId)?.waf
+                                const on = rule.wafMode === 'on' || (rule.wafMode !== 'off' && !!inherited)
+                                if (!on) return null
+                                return (
+                                  <Tag color="volcano">
+                                    {rule.wafMode === 'on' ? 'WAF' : 'WAF（继承）'}
+                                  </Tag>
+                                )
+                              })()}
                               <Muted>{fmtCount(rule.requests)} 次</Muted>
                             </Space>
                           }

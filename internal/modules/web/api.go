@@ -657,6 +657,9 @@ func prepareRule(r *model.WebRule, previous *model.WebRule) error {
 	if r.Access.Mode == "" {
 		r.Access.Mode = model.AccessOff
 	}
+	if r.WAFMode == "" {
+		r.WAFMode = model.WAFModeInherit
+	}
 	if r.Proxy != nil {
 		for i := range r.Proxy.Targets {
 			r.Proxy.Targets[i] = strings.TrimSpace(r.Proxy.Targets[i])

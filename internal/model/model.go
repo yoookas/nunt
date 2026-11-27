@@ -42,6 +42,14 @@ const (
 	AccessInherit = "inherit"
 )
 
+// WAF modes of a web route. A route inherits the listener switch unless it
+// overrides it.
+const (
+	WAFModeInherit = "inherit"
+	WAFModeOn      = "on"
+	WAFModeOff     = "off"
+)
+
 // Actions of one access list entry. Allow and deny are also the two possible
 // values of AccessList.Rest, the "everything else" action at the end of a list.
 const (
@@ -186,7 +194,10 @@ type WebListener struct {
 	Disabled bool `json:"disabled,omitempty"`
 	// Access is the default filter of the routes on this listener. A route
 	// with mode "inherit" uses it; a route with its own mode overrides it.
-	Access    Access    `json:"access"`
+	Access Access `json:"access"`
+	// WAF is the default of the routes on this listener. A route with
+	// wafMode "inherit" follows it; "on" or "off" overrides it.
+	WAF       bool      `json:"waf,omitempty"`
 	Listen    []string  `json:"listen"`
 	TLS       WebTLS    `json:"tls"`
 	Remark    string    `json:"remark,omitempty"`
@@ -206,7 +217,7 @@ type WebRule struct {
 	Domains    []string     `json:"domains,omitempty"`
 	Path       string       `json:"path"`
 	Priority   int          `json:"priority"`
-	WAF        bool         `json:"waf"`
+	WAFMode string `json:"wafMode,omitempty"`
 	Access     Access       `json:"access"`
 	BasicAuth  *BasicAuth   `json:"basicAuth,omitempty"`
 	Proxy      *ProxyTarget `json:"proxy,omitempty"`

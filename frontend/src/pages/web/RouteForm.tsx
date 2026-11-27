@@ -62,7 +62,7 @@ interface RouteFormValues {
   path: string
   priority: number
   remark: string
-  waf: boolean
+  wafMode: string
   access: Access
   authEnable: boolean
   authUsers: AuthUserForm[]
@@ -105,7 +105,7 @@ function blankForm(listenerId = ''): RouteFormValues {
     path: '/',
     priority: 0,
     remark: '',
-    waf: false,
+    wafMode: 'inherit',
     access: emptyAccess(),
     authEnable: false,
     authUsers: [],
@@ -164,7 +164,7 @@ function ruleToForm(rule: WebRule, fallbackListenerId: string): RouteFormValues 
     path: rule.path || '/',
     priority: num(rule.priority, 0),
     remark: rule.remark || '',
-    waf: !!rule.waf,
+    wafMode: rule.wafMode || 'inherit',
     access: normalizeAccess(access),
     authEnable: !!auth?.enable,
     authUsers: (Array.isArray(auth?.users) ? auth?.users ?? [] : []).map((user) => ({
@@ -241,7 +241,7 @@ const FIELD_TAB: Record<string, string> = {
   authUsers: 'access',
   priority: 'advanced',
   remark: 'advanced',
-  waf: 'advanced',
+  wafMode: 'advanced',
 }
 
 export interface RoutePayload {
@@ -252,7 +252,7 @@ export interface RoutePayload {
   domains: string[]
   path: string
   priority: number
-  waf: boolean
+  wafMode: string
   access: Access
   basicAuth: { enable: boolean; users: BasicAuthUser[] }
   proxy: ProxyTarget | null
@@ -286,6 +286,9 @@ export default function RouteForm({
   const [tab, setTab] = useState('basic')
 
   const type = (Form.useWatch('type', form) ?? rule?.type ?? 'proxy') as RouteType
+  const listenerWAF = !!listeners.find(
+    (item) => item.id === String(Form.useWatch('listenerId', form) ?? rule?.listenerId ?? ''),
+  )?.waf
   const authEnable = !!Form.useWatch('authEnable', form)
   const corsEnable = !!Form.useWatch('corsEnable', form)
 
@@ -327,7 +330,7 @@ export default function RouteForm({
       domains,
       path: String(values.path || '').trim() || '/',
       priority: num(values.priority, 0),
-      waf: !!values.waf,
+      wafMode: String(values.wafMode || 'inherit'),
       access: normalizeAccess(values.access ?? rule?.access),
       // Disabled BasicAuth keeps the accounts that already exist (with an
       // empty password, which means "keep the stored hash" server side).
@@ -951,16 +954,24 @@ export default function RouteForm({
         </Col>
       </Row>
 
-      <SectionTitle title="WAF" hint="WAF 规则集在「WAF」页面配置；这里只控制该路由是否经过 WAF。" />
+      <SectionTitle
+        title="WAF"
+        hint="WAF 规则集在「WAF」页面配置；这里只控制该路由是否经过 WAF。"
+      />
       <Row gutter={16}>
         <Col xs={24} md={12}>
           <Form.Item
-            name="waf"
+            name="wafMode"
             label="WAF 检查"
-            valuePropName="checked"
-            extra="关闭后该路由完全不经过 WAF"
+            extra="继承时跟随监听器开关；启用/关闭会覆盖监听器。"
           >
-            <Switch />
+            <Select
+              options={[
+                { value: 'inherit', label: `继承监听器（当前：${listenerWAF ? '启用' : '关闭'}）` },
+                { value: 'on', label: '启用' },
+                { value: 'off', label: '关闭' },
+              ]}
+            />
           </Form.Item>
         </Col>
       </Row>

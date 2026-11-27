@@ -54,7 +54,7 @@ func TestWebSocketUpgradeIsProxied(t *testing.T) {
 	addr := freeAddr(t)
 	rule := mkRule(t, "ws", "ws.example.com", "/", 0, model.WebTypeProxy)
 	rule.Proxy = &model.ProxyTarget{Targets: []string{upstream.URL}, Balance: "roundrobin"}
-	rule.WAF = true
+	rule.WAFMode = model.WAFModeOn
 
 	store := testConfigStoreWithListener(t, testListener("l1", []string{addr}, model.TLSModeOff), rule)
 	deps := &module.Deps{

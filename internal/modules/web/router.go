@@ -25,6 +25,9 @@ type rule struct {
 	spec       *model.WebRule
 	filter     *ipfilter.Filter
 	listenerID string
+	// waf is the resolved switch of the rule: its own mode, or the listener
+	// default when the rule inherits.
+	waf bool
 	// hsts and certDomains are copied from the owning listener at compile time.
 	hsts        bool
 	certDomains []string

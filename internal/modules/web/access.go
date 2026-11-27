@@ -268,7 +268,7 @@ const dummyHash = "$argon2id$v=19$m=65536,t=2,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAA
 
 // wafHandler wraps a site with the WAF engine when the rule enables it.
 func (w *Web) wafHandler(r *rule, next http.Handler) http.Handler {
-	if !r.spec.WAF || w.waf == nil {
+	if !r.waf || w.waf == nil {
 		return next
 	}
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {

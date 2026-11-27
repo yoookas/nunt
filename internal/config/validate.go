@@ -119,6 +119,7 @@ func Normalize(c *model.Config) {
 			r.Type = model.WebTypeProxy
 		}
 		normalizeAccess(&r.Access, true, true)
+		r.WAFMode = normalizeWAFMode(r.WAFMode)
 		if r.Proxy != nil && r.Proxy.Balance == "" {
 			r.Proxy.Balance = "roundrobin"
 		}
@@ -557,6 +558,19 @@ func normalizeUAList(list model.AccessList) model.AccessList {
 
 // normalizeRest keeps the "everything else" action explicit. An unset value
 // denies, so a half configured rule never opens up.
+// normalizeWAFMode keeps the route switch to inherit/on/off. An unknown value
+// inherits, which is the least surprising default.
+func normalizeWAFMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case model.WAFModeOn:
+		return model.WAFModeOn
+	case model.WAFModeOff:
+		return model.WAFModeOff
+	default:
+		return model.WAFModeInherit
+	}
+}
+
 func normalizeRest(rest string) string {
 	rest = strings.ToLower(strings.TrimSpace(rest))
 	if rest == model.AccessAllow {

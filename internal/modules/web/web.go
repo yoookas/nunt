@@ -580,8 +580,10 @@ func (w *Web) compileWeb(cfg *model.Config) ([]*rule, map[string]*listenerPlan, 
 	plans := map[string]*listenerPlan{}
 	byListener := map[string][]*listenerPlan{}
 	listenerAccess := map[string]model.Access{}
+	listenerWAF := map[string]bool{}
 	for _, l := range cfg.Web.Listeners {
 		listenerAccess[l.ID] = l.Access
+		listenerWAF[l.ID] = l.WAF
 	}
 	var errs []error
 	for _, l := range cfg.Web.Listeners {
@@ -646,6 +648,16 @@ func (w *Web) compileWeb(cfg *model.Config) ([]*rule, map[string]*listenerPlan, 
 		}
 		r.filter = filter
 		r.spec.Access = access
+		// The WAF switch works like the access rule: the listener is the
+		// default, an explicit on/off on the route overrides it.
+		switch raw.WAFMode {
+		case model.WAFModeOn:
+			r.waf = true
+		case model.WAFModeOff:
+			r.waf = false
+		default:
+			r.waf = listenerWAF[raw.ListenerID]
+		}
 
 		list := byListener[raw.ListenerID]
 		if len(list) == 0 {

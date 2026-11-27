@@ -37,6 +37,8 @@ export interface WebListener {
 }
 
 export interface WebListenerView extends WebListener {
+  /** Default of the routes on this listener. */
+  waf?: boolean
   routeCount?: number
 }
 
@@ -107,7 +109,7 @@ export interface WebRule {
   domains?: string[]
   path: string
   priority: number
-  waf: boolean
+  wafMode: string
   access: Access
   basicAuth?: BasicAuth | null
   proxy?: ProxyTarget | null

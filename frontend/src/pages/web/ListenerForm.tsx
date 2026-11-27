@@ -33,6 +33,7 @@ export interface ListenerPayload {
     clientCa: string
   }
   access: Access
+  waf: boolean
   remark: string
 }
 
@@ -45,6 +46,7 @@ interface ListenerFormValues {
   clientAuth: ClientAuthMode
   clientCa: string
   access: Access
+  waf: boolean
   remark: string
 }
 
@@ -58,6 +60,7 @@ function blankForm(): ListenerFormValues {
     clientAuth: 'off',
     clientCa: '',
     access: emptyAccess(),
+    waf: false,
     remark: '',
   }
 }
@@ -72,6 +75,7 @@ function listenerToForm(listener: WebListenerView): ListenerFormValues {
     clientAuth: normalizeClientAuth(listener.tls?.clientAuth),
     clientCa: listener.tls?.clientCa || '',
     access: normalizeAccess(listener.access),
+    waf: !!listener.waf,
     remark: listener.remark || '',
   }
 }
@@ -120,6 +124,7 @@ export default function ListenerForm({
         clientCa: auth === 'off' ? '' : String(values.clientCa || '').trim(),
       },
       access: normalizeAccess(values.access ?? listener?.access),
+      waf: !!values.waf,
       remark: String(values.remark || '').trim(),
     }
     onSave(payload)
@@ -312,6 +317,15 @@ export default function ListenerForm({
         extra="作用于本监听器下所有“继承监听器”的路由；从上到下匹配，最后一行是兜底。"
       >
         <AccessEditor allowInherit={false} />
+      </Form.Item>
+
+      <Form.Item
+        name="waf"
+        label="启用 WAF"
+        valuePropName="checked"
+        extra="本监听器下「继承监听器」的路由默认经过 WAF；路由可以单独覆盖。"
+      >
+        <Switch />
       </Form.Item>
 
       <div
