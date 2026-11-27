@@ -128,6 +128,33 @@ go build -o nunt ./cmd/nunt
 
 静态托管只提供只读文件服务；公网部署前请按 [PUBLIC-EXPOSURE](docs/PUBLIC-EXPOSURE.md) 的清单收紧监听面。
 
+#### 后台放在自己的 TLS 代理后面
+
+推荐形态：管理端只听回环（`NUNT_ADMIN_LISTEN=127.0.0.1:3113`），对外只暴露代理。三件事要一起配：
+
+1. 「设置 → 信任反向代理」打开（`system.trustProxy`），并把**代理的源地址**填进 `system.trustedProxies`
+   （同机代理填 `127.0.0.1/32`，Docker bridge 里的代理填该网段）；
+2. 管理端绑定到回环，只让代理能连——开了信任代理之后，3113 对别人可达就等于允许伪造 `X-Forwarded-For`；
+3. `adminAllowIPs` 按真实客户端 IP 填写，配了信任代理后白名单看到的就是真实地址。
+
+不配的话：白名单要么全拒要么形同虚设（看到的是代理 IP）、登录锁定会波及所有用户、后台 Cookie 不带 `Secure`、`sessionBindIp` 失效。
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:3113;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;   # 追加，不要覆盖
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    proxy_buffering off;          # SSE（/api/v1/events）必须关缓冲，否则实时日志不刷新
+    proxy_read_timeout 300s;      # 事件流是长连接
+    client_max_body_size 256m;    # IP 地址库上传上限
+}
+```
+
+Caddy 只需 `reverse_proxy 127.0.0.1:3113`（转发头自动设置、SSE 默认不缓冲）。后台界面本身不发 HSTS，
+需要的话在代理层加；证书、SSE 缓冲、上传体积这些也都在代理层收口。
+
 ---
 
 ## 目录与配置
