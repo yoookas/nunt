@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Empty, Progress, Skeleton, Tag, Typography, theme } from 'antd'
-import { ReloadOutlined } from '@ant-design/icons'
+import { Alert, Card, Empty, Progress, Skeleton, Tag, Typography, theme } from 'antd'
 import { api, errorText } from '../api'
 import { fmtBytes, fmtDuration, fmtTime } from '../format'
 import { usePolling } from '../usePolling'
@@ -41,6 +40,7 @@ interface SystemStats {
   hostname?: string
   numCpu?: number
   uptimeSec?: number
+  heapBytes?: number
   host?: HostStats | null
 }
 
@@ -167,16 +167,16 @@ function ServiceStat({
 }) {
   const { token } = theme.useToken()
   return (
-    <div style={{ padding: '4px 0', minWidth: 0 }}>
+    <div style={{ padding: '2px 0', minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ width: 8, height: 8, borderRadius: '50%', background: tone, flexShrink: 0 }} />
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           {title}
         </Typography.Text>
       </div>
-      <div style={{ fontSize: 22, fontWeight: 650, marginTop: 2, color: token.colorText }}>{primary}</div>
+      <div style={{ fontSize: 18, fontWeight: 650, marginTop: 1, color: token.colorText }}>{primary}</div>
       {lines.map((line) => (
-        <div key={line} style={{ fontSize: 12, color: token.colorTextTertiary, marginTop: 2 }}>
+        <div key={line} style={{ fontSize: 12, color: token.colorTextTertiary, marginTop: 1 }}>
           {line}
         </div>
       ))}
@@ -240,6 +240,7 @@ export default function Dashboard() {
   const memTotal = num(host?.memTotalBytes)
   const memUsed = Math.max(0, memTotal - num(host?.memFreeBytes))
   const memPct = num(host?.memUsedPct) || (memTotal ? (memUsed / memTotal) * 100 : 0)
+  const heap = num(stats?.heapBytes)
 
   const disks: DiskStat[] = useMemo(() => {
     if (Array.isArray(host?.disks) && host.disks.length) return host.disks
@@ -268,31 +269,32 @@ export default function Dashboard() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
-        <div style={{ minWidth: 0 }}>
-          <Typography.Title level={4} style={{ margin: 0, fontSize: 20 }}>
-            系统概览
-          </Typography.Title>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            {stats?.hostname || '主机'} · {info?.version?.version || 'dev'} · 运行{' '}
-            {stats ? fmtDuration(stats.uptimeSec) : '-'}
-          </Typography.Text>
+      <Card size="small" style={cardStyle} styles={{ body: { padding: '12px 16px' } }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
+          <div style={{ minWidth: 0 }}>
+            <Typography.Title level={4} style={{ margin: 0, fontSize: 18 }}>
+              系统概览
+            </Typography.Title>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {stats?.hostname || '主机'} · {info?.version?.version || 'dev'} · 运行{' '}
+              {stats ? fmtDuration(stats.uptimeSec) : '-'}
+            </Typography.Text>
+          </div>
+          <div style={{ flex: 1 }} />
+          {health ? (
+            problems.length ? (
+              <Tag color="orange">{problems.length} 项需要处理</Tag>
+            ) : (
+              <Tag color="green">运行正常</Tag>
+            )
+          ) : null}
+          {live.failed ? (
+            <Typography.Text type="danger" style={{ fontSize: 12 }}>
+              刷新失败
+            </Typography.Text>
+          ) : null}
         </div>
-        <div style={{ flex: 1 }} />
-        {health ? (
-          problems.length ? (
-            <Tag color="orange">{problems.length} 项需要处理</Tag>
-          ) : (
-            <Tag color="green">运行正常</Tag>
-          )
-        ) : null}
-        <Typography.Text type={live.failed ? 'danger' : 'secondary'} style={{ fontSize: 12 }}>
-          {live.failed ? '刷新失败' : '实时'}
-        </Typography.Text>
-        <Button icon={<ReloadOutlined />} onClick={() => void live.refresh()}>
-          刷新
-        </Button>
-      </div>
+      </Card>
 
       {error ? <Alert type="error" showIcon message="概览数据加载失败" description={error} /> : null}
       {problems.map((problem, index) => (
@@ -306,7 +308,7 @@ export default function Dashboard() {
       ))}
 
       {/* 资源与磁盘 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 14 }}>
         <Card title="系统资源" size="small" style={cardStyle} styles={{ body: { padding: 16, display: 'grid', gap: 14 } }}>
           {loading ? (
             <Skeleton active paragraph={{ rows: 2 }} title={false} />
@@ -327,6 +329,15 @@ export default function Dashboard() {
                 percent={memPct}
                 danger={memPct > 85}
                 detail={memTotal ? `${fmtBytes(memUsed)} / ${fmtBytes(memTotal)}` : '内存统计不可用'}
+              />
+              <Meter
+                label="Go 堆内存"
+                percent={memTotal ? (heap / memTotal) * 100 : 0}
+                detail={
+                  heap
+                    ? `${fmtBytes(heap)}${memTotal ? ` · 占系统内存 ${((heap / memTotal) * 100).toFixed(1)}%` : ''}`
+                    : '尚未采集'
+                }
               />
             </>
           )}
@@ -361,15 +372,16 @@ export default function Dashboard() {
             </Typography.Text>
           )}
         </Card>
+
       </div>
 
       {/* 服务汇总 */}
-      <Card title="服务" size="small" style={cardStyle} styles={{ body: { padding: 16 } }}>
+      <Card title="服务" size="small" style={cardStyle} styles={{ body: { padding: 12 } }}>
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-            gap: 16,
+            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+            gap: 12,
           }}
         >
           <ServiceStat
