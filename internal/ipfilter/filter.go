@@ -1,9 +1,15 @@
 // Package ipfilter evaluates the access rule of a web or forward rule: an
-// explicit CIDR list, optionally combined with the country, province or city
-// data of ip2region. A rule either allows or denies the union of those sets.
+// ordered list of address entries (IP ranges and ip2region countries, provinces
+// or cities) followed by an ordered list of user agent fragments, each ending in
+// an "everything else" action.
+//
+// The first entry that matches decides, so the order of the list is the
+// priority. The two lists are independent and combined with AND: a request has
+// to pass both.
 package ipfilter
 
 import (
+	"fmt"
 	"net"
 	"strings"
 
@@ -17,85 +23,136 @@ type Lookup interface {
 	Lookup(net.IP) (ip2region.Record, error)
 }
 
+// addressRule is one compiled entry of the address list.
+type addressRule struct {
+	allow bool
+	kind  string
+	// net is set for AccessKindIP, name for AccessKindGeo.
+	net  *net.IPNet
+	name string
+}
+
+// uaRule is one compiled entry of the client list.
+type uaRule struct {
+	allow   bool
+	pattern string
+}
+
 // Filter is a compiled access rule. It is safe for concurrent use.
 type Filter struct {
-	mode   string
-	nets   []*net.IPNet
-	names  []string
-	lookup Lookup
+	mode      string
+	addresses []addressRule
+	ua        []uaRule
+	// addressRest and uaRest are the actions taken when nothing in the list
+	// matches. They come from AccessList.Rest and are false (deny) when unset,
+	// so a half configured rule never opens up.
+	addressRest bool
+	uaRest      bool
+	lookup      Lookup
 }
 
-// Compile turns a stored access rule into a filter. Invalid CIDRs are an
+// Compile turns a stored access rule into a filter. Invalid entries are an
 // error: a typo must never silently open or close a rule.
 func Compile(access model.Access, geo Lookup) (*Filter, error) {
-	nets, err := netutil.ParseIPList(access.IPs)
-	if err != nil {
-		return nil, err
+	f := &Filter{
+		mode:        access.Mode,
+		addressRest: access.IP.Rest == model.AccessAllow,
+		uaRest:      access.UA.Rest == model.AccessAllow,
+		lookup:      geo,
 	}
-	return &Filter{
-		mode:   access.Mode,
-		nets:   nets,
-		names:  cleanList(access.Geo),
-		lookup: geo,
-	}, nil
+	if f.mode != model.AccessRules {
+		f.mode = model.AccessOff
+		return f, nil
+	}
+	for i, entry := range access.IP.Entries {
+		rule := addressRule{allow: entry.Action == model.AccessAllow, kind: entry.Kind}
+		switch entry.Kind {
+		case model.AccessKindIP:
+			nets, err := netutil.ParseIPList([]string{entry.Value})
+			if err != nil || len(nets) != 1 {
+				if err == nil {
+					err = fmt.Errorf("%q is not one address range", entry.Value)
+				}
+				return nil, fmt.Errorf("address rule %d: %w", i+1, err)
+			}
+			rule.net = nets[0]
+		case model.AccessKindGeo:
+			rule.name = entry.Value
+		default:
+			return nil, fmt.Errorf("address rule %d: unsupported kind %q", i+1, entry.Kind)
+		}
+		f.addresses = append(f.addresses, rule)
+	}
+	for i, entry := range access.UA.Entries {
+		if entry.Kind != model.AccessKindUA && entry.Kind != "" {
+			return nil, fmt.Errorf("client rule %d: unsupported kind %q", i+1, entry.Kind)
+		}
+		f.ua = append(f.ua, uaRule{
+			allow:   entry.Action == model.AccessAllow,
+			pattern: strings.ToLower(entry.Value),
+		})
+	}
+	return f, nil
 }
 
-// Allowed reports whether the client address passes the rule and, when it does
-// not, a short reason for the log. A geo lookup failure is fail-closed: the
-// request is refused in both allow and deny mode.
-func (f *Filter) Allowed(ip net.IP) (bool, string) {
-	if f == nil || f.mode == "" || f.mode == model.AccessOff {
+// Allowed reports whether the address and user agent pass the rule and, when
+// they do not, a short reason for the log.
+//
+// A geo lookup failure is fail-closed: the request is refused instead of being
+// judged by a list whose geo entries could not be evaluated. The lookup only
+// happens when the walk actually reaches a geo entry, so traffic matched by an
+// earlier IP range never touches the database.
+func (f *Filter) Allowed(ip net.IP, userAgent string) (bool, string) {
+	if f == nil || f.mode != model.AccessRules {
 		return true, "off"
 	}
-	matched, reason, err := f.match(ip)
-	if err != nil {
-		return false, reason
-	}
-	if f.mode == model.AccessAllow {
-		if matched {
-			return true, reason
+
+	var record ip2region.Record
+	loaded := false
+	for _, rule := range f.addresses {
+		switch rule.kind {
+		case model.AccessKindIP:
+			if rule.net != nil && rule.net.Contains(ip) {
+				return rule.allow, actionText(rule.allow) + ":ip:" + rule.net.String()
+			}
+		case model.AccessKindGeo:
+			if !loaded {
+				loaded = true
+				if f.lookup == nil {
+					return false, "geo-unavailable"
+				}
+				next, err := f.lookup.Lookup(ip)
+				if err != nil {
+					return false, "geo-unavailable"
+				}
+				record = next
+			}
+			if matchGeoName(rule.name, record) {
+				return rule.allow, actionText(rule.allow) + ":geo:" + rule.name
+			}
 		}
-		if reason == "" {
-			reason = "no-match"
+	}
+	if !f.addressRest {
+		return false, "rest:deny"
+	}
+
+	lower := strings.ToLower(userAgent)
+	for _, rule := range f.ua {
+		if rule.pattern != "" && strings.Contains(lower, rule.pattern) {
+			return rule.allow, actionText(rule.allow) + ":ua:" + rule.pattern
 		}
-		return false, reason
 	}
-	if matched {
-		return false, reason
+	if !f.uaRest {
+		return false, "ua-rest:deny"
 	}
-	return true, "no-match"
+	return true, "pass"
 }
 
-func (f *Filter) match(ip net.IP) (bool, string, error) {
-	if ip == nil {
-		return false, "", nil
+func actionText(allow bool) string {
+	if allow {
+		return model.AccessAllow
 	}
-	for _, n := range f.nets {
-		if n.Contains(ip) {
-			return true, "cidr", nil
-		}
-	}
-	if len(f.names) == 0 {
-		return false, "", nil
-	}
-	if f.lookup == nil {
-		return false, "geo-unavailable", ip2region.ErrUnavailable
-	}
-	record, err := f.lookup.Lookup(ip)
-	if err != nil {
-		return false, "geo-error", err
-	}
-	// Private, loopback and reserved addresses have no geography in the
-	// common databases; say so instead of a bare "no-match" in the log.
-	if record.Country == "" && record.Province == "" && record.City == "" {
-		return false, "geo-no-data", nil
-	}
-	for _, want := range f.names {
-		if matchGeoName(want, record) {
-			return true, "geo:" + want, nil
-		}
-	}
-	return false, "", nil
+	return model.AccessDeny
 }
 
 // matchGeoName compares one entry against the country, province and city of a
@@ -135,21 +192,4 @@ func trimAdministrativeSuffix(name string) string {
 		}
 	}
 	return name
-}
-
-func cleanList(in []string) []string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(in))
-	seen := map[string]bool{}
-	for _, item := range in {
-		item = strings.TrimSpace(item)
-		if item == "" || seen[item] {
-			continue
-		}
-		seen[item] = true
-		out = append(out, item)
-	}
-	return out
 }

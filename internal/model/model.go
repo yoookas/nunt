@@ -36,11 +36,25 @@ const (
 // Access control modes.
 const (
 	AccessOff   = "off"
-	AccessAllow = "allow"
-	AccessDeny  = "deny"
+	AccessRules = "rules"
 	// AccessInherit is a web route mode: use the access rule of the listener
 	// the route belongs to.
 	AccessInherit = "inherit"
+)
+
+// Actions of one access list entry. Allow and deny are also the two possible
+// values of AccessList.Rest, the "everything else" action at the end of a list.
+const (
+	AccessAllow = "allow"
+	AccessDeny  = "deny"
+)
+
+// Kinds of an access list entry. The address list takes ip and geo, the client
+// list takes ua.
+const (
+	AccessKindIP  = "ip"
+	AccessKindGeo = "geo"
+	AccessKindUA  = "ua"
 )
 
 // Config is the root document.
@@ -216,20 +230,30 @@ type WebTLS struct {
 	ClientCA string `json:"clientCa,omitempty"`
 }
 
-// Access is an IP / User-Agent filter.
+// AccessEntry is one entry of an ordered access list. The first entry that
+// matches wins, so the order of the slice is the priority.
+type AccessEntry struct {
+	Action string `json:"action"` // allow | deny
+	Kind   string `json:"kind"`   // ip | geo in the address list, ua in the client list
+	Value  string `json:"value"`  // CIDR or single address, country/province/city, or a UA fragment
+}
+
+// AccessList is an ordered list plus the action used when nothing in it
+// matches. Rest is the "everything else" row the UI pins to the bottom.
+type AccessList struct {
+	Entries []AccessEntry `json:"entries,omitempty"`
+	Rest    string        `json:"rest,omitempty"` // allow | deny
+}
+
+// Access is the filter of a web listener, a web route or a forward rule.
+//
+// Address and client are independent lists combined with AND: a request has to
+// pass both. Forward rules carry no client list (a TCP stream has no user
+// agent); the normaliser clears it for them.
 type Access struct {
-	Mode string   `json:"mode"`
-	IPs  []string `json:"ips,omitempty"`
-	// Geo lists countries, provinces or cities. Every entry is matched against
-	// the ip2region country, province and city fields, and the whole list is
-	// combined with IPs as a union under the same mode.
-	Geo []string `json:"geo,omitempty"`
-	// Countries and Provinces are the old split lists. They are read once by
-	// the normaliser, merged into Geo and never written again.
-	Countries []string `json:"countries,omitempty"`
-	Provinces []string `json:"provinces,omitempty"`
-	UAMode    string   `json:"uaMode,omitempty"`
-	UAs       []string `json:"uas,omitempty"`
+	Mode string     `json:"mode"` // off | rules | inherit
+	IP   AccessList `json:"ip"`
+	UA   AccessList `json:"ua"`
 }
 
 // BasicAuth guards a rule with HTTP basic authentication.

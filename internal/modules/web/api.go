@@ -657,9 +657,6 @@ func prepareRule(r *model.WebRule, previous *model.WebRule) error {
 	if r.Access.Mode == "" {
 		r.Access.Mode = model.AccessOff
 	}
-	if r.Access.UAMode == "" {
-		r.Access.UAMode = model.AccessOff
-	}
 	if r.Proxy != nil {
 		for i := range r.Proxy.Targets {
 			r.Proxy.Targets[i] = strings.TrimSpace(r.Proxy.Targets[i])

@@ -139,20 +139,15 @@ func clientIPString(r *http.Request, trust netutil.TrustPolicy) string {
 	return ip.String()
 }
 
-// accessHandler enforces the IP and User-Agent filter of a rule.
+// accessHandler enforces the access rule of a rule. The address and user agent
+// lists live in one filter, so a refusal reports which entry matched.
 func (w *Web) accessHandler(r *rule, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		ip := w.trustPolicy().ClientIP(req)
-		allowed, reason := r.filter.Allowed(ip)
+		allowed, reason := r.filter.Allowed(ip, req.UserAgent())
 		if !allowed {
-			noteFrom(req.Context()).setReason("ip:" + reason)
-			w.logger().Warn("web：客户端被 IP 过滤拒绝", "rule", r.name, "mode", r.spec.Access.Mode, "ip", ipString(ip), "reason", reason)
-			http.Error(rw, "forbidden", http.StatusForbidden)
-			return
-		}
-		if !netutil.UAAllowed(r.spec.Access.UAMode, r.spec.Access.UAs, req.UserAgent()) {
-			noteFrom(req.Context()).setReason("ua")
-			w.logger().Warn("web：客户端被 User-Agent 过滤拒绝", "rule", r.name, "mode", r.spec.Access.UAMode, "ua", req.UserAgent())
+			noteFrom(req.Context()).setReason(reason)
+			w.logger().Warn("web：客户端被访问规则拒绝", "rule", r.name, "ip", ipString(ip), "reason", reason)
 			http.Error(rw, "forbidden", http.StatusForbidden)
 			return
 		}

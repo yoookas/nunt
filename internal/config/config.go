@@ -17,7 +17,12 @@ import (
 )
 
 // CurrentVersion is the configuration schema version.
-const CurrentVersion = 1
+//
+// Version 2 replaced the single allow/deny access mode with ordered lists. The
+// old fields are not migrated: a rule that used to be a whitelist becomes "no
+// filtering" on upgrade, which is why Load reports the version it found and the
+// application warns about it.
+const CurrentVersion = 2
 
 // DefaultAdminListen is the address the admin console listens on until an
 // operator changes it. Deployment can override it with NUNT_ADMIN_LISTEN or
@@ -35,6 +40,10 @@ type Store struct {
 	cfg     *model.Config
 	path    string
 	subs    []func(*model.Config)
+	// loadedVersion is the schema version found on disk (0 when the file did not
+	// exist yet). It is kept so a caller can warn about an upgrade that dropped
+	// state.
+	loadedVersion int
 }
 
 // Load reads the configuration from path, creating it with defaults (and a
@@ -49,6 +58,7 @@ func Load(path string) (*Store, string, error) {
 		if err := store.ReadJSON(path, cfg); err != nil {
 			return nil, "", err
 		}
+		s.loadedVersion = cfg.Version
 	} else {
 		pw, err := security.RandomPassword(16)
 		if err != nil {
@@ -78,6 +88,10 @@ func Load(path string) (*Store, string, error) {
 	}
 	return s, initialPassword, nil
 }
+
+// LoadedVersion reports the schema version the loaded file was written with, or
+// 0 when the file did not exist yet.
+func (s *Store) LoadedVersion() int { return s.loadedVersion }
 
 // Path returns the configuration file path.
 func (s *Store) Path() string { return s.path }

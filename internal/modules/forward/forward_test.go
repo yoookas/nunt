@@ -217,7 +217,7 @@ func TestForwardTCPAccessDenied(t *testing.T) {
 		Protocol: protoTCP,
 		SrcAddr:  fmt.Sprintf("127.0.0.1:%d", srcPort),
 		DstAddr:  target,
-		Access:   model.Access{Mode: model.AccessDeny, IPs: []string{"127.0.0.1/32"}},
+		Access:   model.Access{Mode: model.AccessRules, IP: model.AccessList{Rest: model.AccessAllow, Entries: []model.AccessEntry{{Action: model.AccessDeny, Kind: model.AccessKindIP, Value: "127.0.0.1/32"}}}, UA: model.AccessList{Rest: model.AccessAllow}},
 	}
 	setRules(t, store, rule)
 
@@ -453,7 +453,7 @@ func TestAccessLoggerRing(t *testing.T) {
 }
 
 func TestAccessMatcherFailsClosed(t *testing.T) {
-	m := loadAccess(model.Access{Mode: model.AccessAllow, IPs: []string{"not-an-ip"}}, nil)
+	m := loadAccess(model.Access{Mode: model.AccessRules, IP: model.AccessList{Rest: model.AccessDeny, Entries: []model.AccessEntry{{Action: model.AccessAllow, Kind: model.AccessKindIP, Value: "not-an-ip"}}}, UA: model.AccessList{Rest: model.AccessAllow}}, nil)
 	if ok, _ := m.allows(net.ParseIP("127.0.0.1")); ok {
 		t.Fatal("an unparsable allow list must reject every address")
 	}
@@ -704,7 +704,7 @@ func TestForwardUDPAccessDeniedDoesNotPanic(t *testing.T) {
 		Protocol: protoUDP,
 		SrcAddr:  fmt.Sprintf("127.0.0.1:%d", srcPort),
 		DstAddr:  target,
-		Access:   model.Access{Mode: model.AccessDeny, IPs: []string{"127.0.0.1/32"}},
+		Access:   model.Access{Mode: model.AccessRules, IP: model.AccessList{Rest: model.AccessAllow, Entries: []model.AccessEntry{{Action: model.AccessDeny, Kind: model.AccessKindIP, Value: "127.0.0.1/32"}}}, UA: model.AccessList{Rest: model.AccessAllow}},
 	}
 	setRules(t, store, rule)
 

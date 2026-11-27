@@ -16,108 +16,151 @@ type fakeGeo struct {
 
 func (f fakeGeo) Lookup(net.IP) (ip2region.Record, error) { return f.record, f.err }
 
-func TestFilterCIDRAndGeoUnion(t *testing.T) {
-	cn := fakeGeo{record: ip2region.Record{Country: "中国", Province: "浙江省"}}
+func entry(action, kind, value string) model.AccessEntry {
+	return model.AccessEntry{Action: action, Kind: kind, Value: value}
+}
+
+func list(rest string, entries ...model.AccessEntry) model.AccessList {
+	return model.AccessList{Rest: rest, Entries: entries}
+}
+
+func rules(ipList, uaList model.AccessList) model.Access {
+	return model.Access{Mode: model.AccessRules, IP: ipList, UA: uaList}
+}
+
+var uaPassthrough = list(model.AccessAllow)
+
+func TestOrderedAccessLists(t *testing.T) {
+	china := fakeGeo{record: ip2region.Record{Country: "中国", Province: "浙江省", City: "杭州市"}}
+
 	cases := []struct {
-		name string
-		acc  model.Access
-		geo  Lookup
-		ip   string
-		want bool
+		name   string
+		access model.Access
+		lookup Lookup
+		ip     string
+		ua     string
+		want   bool
+		reason string
 	}{
-		{"cidr allow", model.Access{Mode: model.AccessAllow, IPs: []string{"10.0.0.0/8"}}, nil, "10.1.2.3", true},
-		{"cidr allow miss", model.Access{Mode: model.AccessAllow, IPs: []string{"10.0.0.0/8"}}, nil, "192.168.1.1", false},
-		{"country allow", model.Access{Mode: model.AccessAllow, Geo: []string{"中国"}}, cn, "1.1.1.1", true},
-		{"country allow miss", model.Access{Mode: model.AccessAllow, Geo: []string{"美国"}}, cn, "1.1.1.1", false},
-		{"several countries, one matches", model.Access{Mode: model.AccessAllow, Geo: []string{"美国", "日本", "中国"}}, cn, "1.1.1.1", true},
-		{"several countries, none matches", model.Access{Mode: model.AccessAllow, Geo: []string{"美国", "日本"}}, cn, "1.1.1.1", false},
-		{"several provinces, one matches", model.Access{Mode: model.AccessAllow, Geo: []string{"江苏省", "浙江"}}, cn, "1.1.1.1", true},
-		{"several provinces, none matches", model.Access{Mode: model.AccessAllow, Geo: []string{"江苏省", "广东省"}}, cn, "1.1.1.1", false},
-		{"deny list matches the second entry", model.Access{Mode: model.AccessDeny, Geo: []string{"江苏省", "浙江"}}, cn, "1.1.1.1", false},
-		{"province full name", model.Access{Mode: model.AccessAllow, Geo: []string{"浙江省"}}, cn, "1.1.1.1", true},
-		{"province short name", model.Access{Mode: model.AccessAllow, Geo: []string{"浙江"}}, cn, "1.1.1.1", true},
-		{"cidr or country", model.Access{Mode: model.AccessAllow, IPs: []string{"10.0.0.0/8"}, Geo: []string{"美国"}}, cn, "192.168.1.1", false},
-		{"deny country", model.Access{Mode: model.AccessDeny, Geo: []string{"中国"}}, cn, "1.1.1.1", false},
-		{"deny country miss", model.Access{Mode: model.AccessDeny, Geo: []string{"美国"}}, cn, "1.1.1.1", true},
-		{"deny cidr", model.Access{Mode: model.AccessDeny, IPs: []string{"1.1.1.0/24"}}, cn, "1.1.1.1", false},
-		{"off", model.Access{Mode: model.AccessOff, Geo: []string{"中国"}}, nil, "1.1.1.1", true},
+		{
+			name:   "the first matching entry wins",
+			access: rules(list(model.AccessDeny, entry("allow", "ip", "10.0.0.0/8"), entry("deny", "ip", "10.1.0.0/16")), uaPassthrough),
+			ip:     "10.1.2.3",
+			want:   true,
+			reason: "allow:ip:10.0.0.0/8",
+		},
+		{
+			name:   "swapping the order swaps the verdict",
+			access: rules(list(model.AccessDeny, entry("deny", "ip", "10.1.0.0/16"), entry("allow", "ip", "10.0.0.0/8")), uaPassthrough),
+			ip:     "10.1.2.3",
+			want:   false,
+			reason: "deny:ip:10.1.0.0/16",
+		},
+		{
+			name:   "nothing matches, the list denies",
+			access: rules(list(model.AccessDeny, entry("allow", "ip", "10.0.0.0/8")), uaPassthrough),
+			ip:     "192.168.1.1",
+			want:   false,
+			reason: "rest:deny",
+		},
+		{
+			name:   "nothing matches, the list allows",
+			access: rules(list(model.AccessAllow, entry("deny", "ip", "10.0.0.0/8")), uaPassthrough),
+			ip:     "192.168.1.1",
+			want:   true,
+			reason: "pass",
+		},
+		{
+			name:   "an earlier ip entry means the geo entry is not reached",
+			access: rules(list(model.AccessDeny, entry("allow", "ip", "10.0.0.0/8"), entry("deny", "geo", "中国")), uaPassthrough),
+			lookup: china,
+			ip:     "10.1.1.1",
+			want:   true,
+			reason: "allow:ip:10.0.0.0/8",
+		},
+		{
+			name:   "a geo entry matches country and province",
+			access: rules(list(model.AccessAllow, entry("deny", "geo", "浙江")), uaPassthrough),
+			lookup: china,
+			ip:     "1.1.1.1",
+			want:   false,
+			reason: "deny:geo:浙江",
+		},
+		{
+			name:   "an address without geography falls through to the rest",
+			access: rules(list(model.AccessAllow, entry("deny", "geo", "中国")), uaPassthrough),
+			lookup: fakeGeo{},
+			ip:     "10.0.0.1",
+			want:   true,
+			reason: "pass",
+		},
+		{
+			name:   "a geo lookup failure fails closed",
+			access: rules(list(model.AccessAllow, entry("allow", "geo", "中国")), uaPassthrough),
+			lookup: fakeGeo{err: errors.New("no database")},
+			ip:     "1.1.1.1",
+			want:   false,
+			reason: "geo-unavailable",
+		},
+		{
+			name:   "the user agent list denies after the address list allowed",
+			access: rules(list(model.AccessAllow), list(model.AccessAllow, entry("deny", "ua", "curl"))),
+			ip:     "192.168.1.1",
+			ua:     "curl/8.0",
+			want:   false,
+			reason: "deny:ua:curl",
+		},
+		{
+			name:   "the user agent rest denies an unmatched client",
+			access: rules(list(model.AccessAllow), list(model.AccessDeny, entry("allow", "ua", "mozilla"))),
+			ip:     "192.168.1.1",
+			ua:     "curl/8.0",
+			want:   false,
+			reason: "ua-rest:deny",
+		},
+		{
+			name:   "a denied address never reaches the user agent list",
+			access: rules(list(model.AccessDeny, entry("deny", "ip", "10.0.0.0/8")), list(model.AccessAllow, entry("allow", "ua", "mozilla"))),
+			ip:     "10.1.1.1",
+			ua:     "mozilla/5.0",
+			want:   false,
+			reason: "deny:ip:10.0.0.0/8",
+		},
+		{
+			name:   "mode off ignores the lists",
+			access: model.Access{Mode: model.AccessOff, IP: list(model.AccessDeny, entry("deny", "ip", "10.0.0.0/8"))},
+			ip:     "10.1.1.1",
+			want:   true,
+			reason: "off",
+		},
 	}
+
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			f, err := Compile(tc.acc, tc.geo)
+			filter, err := Compile(tc.access, tc.lookup)
 			if err != nil {
 				t.Fatalf("compile: %v", err)
 			}
-			got, _ := f.Allowed(net.ParseIP(tc.ip))
+			got, reason := filter.Allowed(net.ParseIP(tc.ip), tc.ua)
 			if got != tc.want {
-				t.Fatalf("Allowed(%s) = %v, want %v", tc.ip, got, tc.want)
+				t.Fatalf("Allowed(%s) = %v, want %v (reason %q)", tc.ip, got, tc.want, reason)
+			}
+			if reason != tc.reason {
+				t.Fatalf("reason = %q, want %q", reason, tc.reason)
 			}
 		})
 	}
 }
 
-func TestFilterFailsClosedOnGeoErrors(t *testing.T) {
-	broken := fakeGeo{err: errors.New("boom")}
-	for _, mode := range []string{model.AccessAllow, model.AccessDeny} {
-		f, err := Compile(model.Access{Mode: mode, Geo: []string{"中国"}}, broken)
-		if err != nil {
-			t.Fatalf("compile: %v", err)
+func TestCompileRejectsInvalidEntries(t *testing.T) {
+	bad := []model.Access{
+		rules(list(model.AccessAllow, entry("allow", "ip", "10.0.0.0/33")), uaPassthrough),
+		rules(list(model.AccessAllow, entry("allow", "dns", "example.com")), uaPassthrough),
+		rules(list(model.AccessAllow), list(model.AccessAllow, entry("allow", "ip", "10.0.0.0/8"))),
+	}
+	for i, access := range bad {
+		if _, err := Compile(access, nil); err == nil {
+			t.Fatalf("case %d compiled although it is invalid", i)
 		}
-		if ok, reason := f.Allowed(net.ParseIP("1.1.1.1")); ok || reason != "geo-error" {
-			t.Fatalf("%s mode with a broken database = %v %q", mode, ok, reason)
-		}
-	}
-	// A geo rule compiled without a lookup also refuses instead of allowing.
-	f, err := Compile(model.Access{Mode: model.AccessAllow, Geo: []string{"浙江"}}, nil)
-	if err != nil {
-		t.Fatalf("compile: %v", err)
-	}
-	if ok, _ := f.Allowed(net.ParseIP("1.1.1.1")); ok {
-		t.Fatal("a geo rule without a database must refuse")
-	}
-}
-
-func TestCompileRejectsBadCIDR(t *testing.T) {
-	if _, err := Compile(model.Access{Mode: model.AccessAllow, IPs: []string{"nope"}}, nil); err == nil {
-		t.Fatal("an invalid CIDR must be rejected")
-	}
-}
-
-// One flattened list matches any of the three levels and accepts the common
-// short spellings.
-func TestFilterGeoMatchesCountryProvinceOrCity(t *testing.T) {
-	geo := fakeGeo{record: ip2region.Record{Country: "中国", Province: "浙江省", City: "杭州市"}}
-	cases := map[string]bool{
-		"中国":  true,
-		"浙江":  true,
-		"浙江省": true,
-		"杭州":  true,
-		"杭州市": true,
-		"江苏":  false,
-		"上海":  false,
-		"日本":  false,
-	}
-	for name, want := range cases {
-		f, err := Compile(model.Access{Mode: model.AccessAllow, Geo: []string{name}}, geo)
-		if err != nil {
-			t.Fatalf("compile %q: %v", name, err)
-		}
-		if got, _ := f.Allowed(net.ParseIP("1.1.1.1")); got != want {
-			t.Fatalf("%q: allowed = %v, want %v", name, got, want)
-		}
-	}
-}
-
-// An address without geography (private/loopback) reports why instead of a
-// bare "no-match".
-func TestFilterGeoNoDataReason(t *testing.T) {
-	empty := fakeGeo{record: ip2region.Record{}}
-	f, err := Compile(model.Access{Mode: model.AccessAllow, Geo: []string{"中国"}}, empty)
-	if err != nil {
-		t.Fatalf("compile: %v", err)
-	}
-	ok, reason := f.Allowed(net.ParseIP("127.0.0.1"))
-	if ok || reason != "geo-no-data" {
-		t.Fatalf("allowed=%v reason=%q", ok, reason)
 	}
 }

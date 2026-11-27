@@ -106,7 +106,7 @@ func TestEndToEnd(t *testing.T) {
 					Index:   []string{"index.html"},
 					Listing: true,
 				},
-				Access: model.Access{Mode: model.AccessOff, UAMode: model.AccessOff},
+				Access: model.Access{Mode: model.AccessOff},
 			}},
 		},
 		Forward: model.ForwardConfig{

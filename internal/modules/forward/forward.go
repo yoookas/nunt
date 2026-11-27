@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -514,16 +513,24 @@ func fingerprint(r model.ForwardRule) string {
 	}, "|")
 }
 
+// accessFingerprint captures the access rule. The order of the entries changes
+// the verdict, so it is part of the string and must not be sorted away.
 func accessFingerprint(a model.Access) string {
-	ips := append([]string{}, a.IPs...)
-	sort.Strings(ips)
-	geo := append([]string{}, a.Geo...)
-	sort.Strings(geo)
-	return strings.Join([]string{
-		a.Mode,
-		strings.Join(ips, ","),
-		strings.Join(geo, ","),
-	}, "~")
+	var b strings.Builder
+	b.WriteString(a.Mode)
+	for _, list := range []model.AccessList{a.IP, a.UA} {
+		b.WriteString("|")
+		b.WriteString(list.Rest)
+		for _, entry := range list.Entries {
+			b.WriteString("~")
+			b.WriteString(entry.Action)
+			b.WriteString(":")
+			b.WriteString(entry.Kind)
+			b.WriteString(":")
+			b.WriteString(entry.Value)
+		}
+	}
+	return b.String()
 }
 
 func timeoutSeconds(r model.ForwardRule) int {

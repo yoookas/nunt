@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nunt/nunt/internal/ipfilter"
 	"github.com/nunt/nunt/internal/model"
 	"github.com/nunt/nunt/internal/netutil"
 	"github.com/nunt/nunt/internal/rest"
@@ -352,9 +353,6 @@ func withRuleIDs(rule *model.ForwardRule) {
 	if rule.Access.Mode == "" {
 		rule.Access.Mode = model.AccessOff
 	}
-	for i := range rule.Access.IPs {
-		rule.Access.IPs[i] = strings.TrimSpace(rule.Access.IPs[i])
-	}
 }
 
 // validateRule rejects the rules the forwarder could never serve.
@@ -376,13 +374,15 @@ func validateRule(rule model.ForwardRule) error {
 	if rule.MaxConnsPerIP < 0 {
 		return errors.New("maxConnsPerIP must not be negative")
 	}
-	if rule.Access.Mode != "" && rule.Access.Mode != model.AccessOff {
-		if rule.Access.Mode != model.AccessAllow && rule.Access.Mode != model.AccessDeny {
-			return errors.New("access mode must be off, allow or deny")
-		}
-		if _, err := netutil.ParseIPList(rule.Access.IPs); err != nil {
+	switch rule.Access.Mode {
+	case "", model.AccessOff:
+		return nil
+	case model.AccessRules:
+		if _, err := ipfilter.Compile(rule.Access, nil); err != nil {
 			return err
 		}
+		return nil
+	default:
+		return errors.New("access mode must be off or rules")
 	}
-	return nil
 }

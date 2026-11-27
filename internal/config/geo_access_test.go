@@ -12,15 +12,25 @@ func geoConfig(rules ...model.WebRule) *model.Config {
 	cfg.Users = []model.User{{ID: "u1"}}
 	cfg.Web.Listeners = []model.WebListener{{ID: "l1", Name: "http", Listen: []string{":8080"}}}
 	cfg.Web.Rules = rules
+	// The store normalises before it validates; do the same so the fixtures do
+	// not have to spell out every default.
+	Normalize(cfg)
 	return cfg
 }
 
-func geoWebRule(mode string, mutate func(*model.WebRule)) model.WebRule {
+func geoWebRule(action string, mutate func(*model.WebRule)) model.WebRule {
 	r := model.WebRule{
 		ID: "rule-geo", Name: "geo", Enable: true, Type: model.WebTypeProxy,
 		ListenerID: "l1", Path: "/geo",
-		Proxy:  &model.ProxyTarget{Targets: []string{"http://127.0.0.1:9000"}},
-		Access: model.Access{Mode: mode, Geo: []string{"中国"}},
+		Proxy: &model.ProxyTarget{Targets: []string{"http://127.0.0.1:9000"}},
+		Access: model.Access{
+			Mode: model.AccessRules,
+			IP: model.AccessList{
+				Rest:    model.AccessDeny,
+				Entries: []model.AccessEntry{{Action: action, Kind: model.AccessKindGeo, Value: "中国"}},
+			},
+			UA: model.AccessList{Rest: model.AccessAllow},
+		},
 	}
 	if mutate != nil {
 		mutate(&r)
@@ -39,68 +49,97 @@ func TestGeoAccessRequiresDatabaseForEnabledRules(t *testing.T) {
 		t.Fatalf("geo rule with a database must validate: %v", err)
 	}
 
-	// A disabled draft does not need the database yet.
+	// A disabled rule is not served, so it may keep a geo entry without the
+	// database being configured.
 	draft := geoWebRule(model.AccessAllow, func(r *model.WebRule) { r.Enable = false })
-	if err := Validate(geoConfig(draft)); err != nil {
-		t.Fatalf("disabled geo rule = %v", err)
+	draftCfg := geoConfig(draft)
+	if err := Validate(draftCfg); err != nil {
+		t.Fatalf("disabled geo rule must validate without a database: %v", err)
 	}
 }
 
-func TestGeoAccessValidation(t *testing.T) {
-	cases := map[string]model.WebRule{
-		"off mode": geoWebRule(model.AccessOff, nil),
-		"pipe in entry": geoWebRule(model.AccessAllow, func(r *model.WebRule) {
-			r.Access.Geo = []string{"中国|美国"}
-		}),
-		"invalid cidr": geoWebRule(model.AccessAllow, func(r *model.WebRule) {
-			r.Access.IPs = []string{"192.168.1.0/33"}
-		}),
+func TestAccessRuleValidation(t *testing.T) {
+	cfg := geoConfig(geoWebRule(model.AccessAllow, func(r *model.WebRule) {
+		r.Access.IP.Entries[0].Value = "中国|美国"
+	}))
+	if err := Validate(cfg); err == nil {
+		t.Fatal("a geo entry containing a pipe must be rejected")
 	}
-	for name, rule := range cases {
-		t.Run(name, func(t *testing.T) {
-			cfg := geoConfig(rule)
-			cfg.System.IP2RegionDB = "/data/geoip/ip2region.xdb"
-			if err := Validate(cfg); err == nil {
-				t.Fatalf("%s must be rejected", name)
-			}
-		})
+
+	cfg = geoConfig(geoWebRule(model.AccessAllow, func(r *model.WebRule) {
+		r.Access.IP.Entries[0] = model.AccessEntry{Action: model.AccessAllow, Kind: model.AccessKindIP, Value: "192.168.1.0/33"}
+	}))
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "address rule 1") {
+		t.Fatalf("an invalid CIDR must be rejected with its position: %v", err)
+	}
+
+	cfg = geoConfig(geoWebRule(model.AccessAllow, func(r *model.WebRule) {
+		r.Access.IP.Entries[0].Action = "maybe"
+	}))
+	if err := Validate(cfg); err == nil {
+		t.Fatal("an unknown action must be rejected")
+	}
+
+	cfg = geoConfig(geoWebRule(model.AccessAllow, func(r *model.WebRule) {
+		r.Access.IP.Entries[0].Kind = "dns"
+	}))
+	if err := Validate(cfg); err == nil {
+		t.Fatal("an unknown kind must be rejected")
 	}
 }
 
-func TestNormalizeAccessFlattensLegacyLists(t *testing.T) {
+func TestNormalizeAccessFillsTheRestAndKeepsTheOrder(t *testing.T) {
 	access := model.Access{
-		Mode:      model.AccessAllow,
-		Geo:       []string{" 杭州 "},
-		Countries: []string{" 中国 ", "中国", "", "美国"},
-		Provinces: []string{"浙江省", "浙江", " 北京市 ", "火星"},
+		Mode: "RULES",
+		IP: model.AccessList{Entries: []model.AccessEntry{
+			{Action: "ALLOW", Kind: "", Value: " 10.0.0.0/8 "},
+			{Action: "deny", Kind: "geo", Value: " 杭州 "},
+		}},
+		UA: model.AccessList{Entries: []model.AccessEntry{{Action: "deny", Value: " curl "}}},
 	}
-	normalizeAccess(&access, true)
-	// Known provinces collapse to the short form, legacy lists are merged and
-	// cleared, duplicates disappear and a city stays as typed.
-	want := "杭州,中国,美国,浙江,北京,火星"
-	if got := strings.Join(access.Geo, ","); got != want {
-		t.Fatalf("geo = %q, want %q", got, want)
+	normalizeAccess(&access, true, true)
+
+	if access.Mode != model.AccessRules {
+		t.Fatalf("mode = %q", access.Mode)
 	}
-	if len(access.Countries) != 0 || len(access.Provinces) != 0 {
-		t.Fatalf("legacy lists must be cleared: %+v", access)
+	if access.IP.Rest != model.AccessDeny || access.UA.Rest != model.AccessDeny {
+		t.Fatalf("rest defaults = %q/%q, want deny/deny", access.IP.Rest, access.UA.Rest)
+	}
+	// The kind is inferred from the value when it is missing.
+	if access.IP.Entries[0].Kind != model.AccessKindIP {
+		t.Fatalf("first entry kind = %q, want ip", access.IP.Entries[0].Kind)
+	}
+	if access.IP.Entries[0].Action != model.AccessAllow {
+		t.Fatalf("first entry action = %q, want allow", access.IP.Entries[0].Action)
+	}
+	// The order is preserved, and a province is stored in its short form.
+	if access.IP.Entries[1].Value != "杭州" || access.IP.Entries[1].Kind != model.AccessKindGeo {
+		t.Fatalf("second entry = %+v", access.IP.Entries[1])
+	}
+	if access.UA.Entries[0].Kind != model.AccessKindUA || access.UA.Entries[0].Value != "curl" {
+		t.Fatalf("client entry = %+v", access.UA.Entries[0])
 	}
 }
 
-func TestNormalizeAccessInherit(t *testing.T) {
-	access := model.Access{
+func TestNormalizeAccessInheritAndForward(t *testing.T) {
+	inherit := model.Access{
 		Mode: model.AccessInherit,
-		IPs:  []string{"10.0.0.0/8"},
-		Geo:  []string{"中国"},
-		UAs:  []string{"*bot*"},
+		IP:   model.AccessList{Rest: model.AccessAllow, Entries: []model.AccessEntry{{Action: "allow", Kind: "ip", Value: "10.0.0.0/8"}}},
 	}
-	normalizeAccess(&access, true)
-	if access.Mode != model.AccessInherit || len(access.IPs) != 0 || len(access.Geo) != 0 || len(access.UAs) != 0 {
-		t.Fatalf("an inherited rule must not carry its own lists: %+v", access)
+	normalizeAccess(&inherit, true, true)
+	if len(inherit.IP.Entries) != 0 {
+		t.Fatalf("an inherited rule must not carry a list: %+v", inherit.IP)
 	}
-	// Forward rules have no listener to inherit from.
-	forward := model.Access{Mode: model.AccessInherit}
-	normalizeAccess(&forward, false)
-	if forward.Mode != model.AccessOff {
-		t.Fatalf("forward inherit = %q, want off", forward.Mode)
+
+	// A forward rule has no user agent, so the client list is cleared and left
+	// as "allow everything" instead of silently refusing every connection.
+	forward := model.Access{
+		Mode: model.AccessRules,
+		IP:   model.AccessList{Rest: model.AccessDeny},
+		UA:   model.AccessList{Rest: model.AccessDeny, Entries: []model.AccessEntry{{Action: "deny", Kind: "ua", Value: "curl"}}},
+	}
+	normalizeAccess(&forward, false, false)
+	if len(forward.UA.Entries) != 0 || forward.UA.Rest != model.AccessAllow {
+		t.Fatalf("forward client list = %+v, want empty and allow", forward.UA)
 	}
 }

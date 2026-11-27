@@ -101,7 +101,7 @@ func Normalize(c *model.Config) {
 		for j := range l.Listen {
 			l.Listen[j] = strings.TrimSpace(l.Listen[j])
 		}
-		normalizeAccess(&l.Access, false)
+		normalizeAccess(&l.Access, false, true)
 	}
 	for i := range c.Web.Rules {
 		r := &c.Web.Rules[i]
@@ -118,7 +118,7 @@ func Normalize(c *model.Config) {
 		if r.Type == "" {
 			r.Type = model.WebTypeProxy
 		}
-		normalizeAccess(&r.Access, true)
+		normalizeAccess(&r.Access, true, true)
 		if r.Proxy != nil && r.Proxy.Balance == "" {
 			r.Proxy.Balance = "roundrobin"
 		}
@@ -134,7 +134,7 @@ func Normalize(c *model.Config) {
 		if r.Protocol == "" {
 			r.Protocol = "tcp"
 		}
-		normalizeAccess(&r.Access, false)
+		normalizeAccess(&r.Access, false, false)
 		if r.MaxConns == 0 {
 			r.MaxConns = defaultForwardMaxConns
 		}
@@ -481,40 +481,98 @@ func hasConcreteDomain(domains []string) bool {
 // normalizeAccess flattens the old country/province lists into Geo, trims the
 // lists and resolves the mode defaults. Inherited rules carry no lists of their
 // own: the listener's access rule is used instead.
-func normalizeAccess(a *model.Access, allowInherit bool) {
+// normalizeAccess trims the ordered lists, resolves the mode and makes the
+// "everything else" action of each list explicit. Inherited rules carry no
+// lists of their own: the listener's access rule is used instead. Forward rules
+// pass allowUA=false, which clears the client list: a TCP stream has no user
+// agent, and a stale list there would silently refuse every connection.
+func normalizeAccess(a *model.Access, allowInherit, allowUA bool) {
 	a.Mode = strings.ToLower(strings.TrimSpace(a.Mode))
 	switch a.Mode {
-	case model.AccessAllow, model.AccessDeny:
+	case model.AccessRules:
 	case model.AccessInherit:
 		if !allowInherit {
 			a.Mode = model.AccessOff
 		}
-	case model.AccessOff:
-		a.Mode = model.AccessOff
 	default:
 		a.Mode = model.AccessOff
 	}
-	merged := make([]string, 0, len(a.Geo)+len(a.Countries)+len(a.Provinces))
-	merged = append(merged, a.Geo...)
-	merged = append(merged, a.Countries...)
-	merged = append(merged, a.Provinces...)
-	a.Geo = normalizeGeoList(merged)
-	a.Countries = nil
-	a.Provinces = nil
-	a.IPs = normalizeStringList(a.IPs)
-	a.UAMode = strings.ToLower(strings.TrimSpace(a.UAMode))
-	switch a.UAMode {
-	case model.AccessAllow, model.AccessDeny:
-	default:
-		a.UAMode = model.AccessOff
-	}
-	a.UAs = normalizeStringList(a.UAs)
+	a.IP = normalizeAddressList(a.IP)
+	a.UA = normalizeUAList(a.UA)
 	if a.Mode == model.AccessInherit {
-		a.IPs = nil
-		a.Geo = nil
-		a.UAs = nil
-		a.UAMode = model.AccessOff
+		a.IP = model.AccessList{}
+		a.UA = model.AccessList{}
 	}
+	if !allowUA {
+		a.UA = model.AccessList{Rest: model.AccessAllow}
+	}
+}
+
+// normalizeAddressList trims the address list and infers a missing kind. An
+// invalid entry is kept: validation has to report which rule is wrong instead of
+// the normaliser quietly dropping the operator's intent.
+func normalizeAddressList(list model.AccessList) model.AccessList {
+	out := model.AccessList{Rest: normalizeRest(list.Rest)}
+	for _, entry := range list.Entries {
+		next := model.AccessEntry{
+			Action: strings.ToLower(strings.TrimSpace(entry.Action)),
+			Kind:   strings.ToLower(strings.TrimSpace(entry.Kind)),
+			Value:  strings.TrimSpace(entry.Value),
+		}
+		if next.Value == "" {
+			continue
+		}
+		if next.Kind == "" {
+			if _, err := netutil.ParseIPList([]string{next.Value}); err == nil {
+				next.Kind = model.AccessKindIP
+			} else {
+				next.Kind = model.AccessKindGeo
+			}
+		}
+		if next.Kind == model.AccessKindGeo {
+			next.Value = normalizeGeoName(next.Value)
+		}
+		out.Entries = append(out.Entries, next)
+	}
+	return out
+}
+
+// normalizeUAList trims the client list. Its entries are always user agent
+// fragments, so the kind never has to be inferred.
+func normalizeUAList(list model.AccessList) model.AccessList {
+	out := model.AccessList{Rest: normalizeRest(list.Rest)}
+	for _, entry := range list.Entries {
+		next := model.AccessEntry{
+			Action: strings.ToLower(strings.TrimSpace(entry.Action)),
+			Kind:   model.AccessKindUA,
+			Value:  strings.TrimSpace(entry.Value),
+		}
+		if next.Value == "" {
+			continue
+		}
+		out.Entries = append(out.Entries, next)
+	}
+	return out
+}
+
+// normalizeRest keeps the "everything else" action explicit. An unset value
+// denies, so a half configured rule never opens up.
+func normalizeRest(rest string) string {
+	rest = strings.ToLower(strings.TrimSpace(rest))
+	if rest == model.AccessAllow {
+		return model.AccessAllow
+	}
+	return model.AccessDeny
+}
+
+// normalizeGeoName stores a known province in its short form so the matcher
+// compares one spelling.
+func normalizeGeoName(name string) string {
+	out := normalizeGeoList([]string{name})
+	if len(out) == 0 {
+		return strings.TrimSpace(name)
+	}
+	return out[0]
 }
 
 func normalizeGeoList(in []string) []string {
@@ -558,27 +616,65 @@ func normalizeStringList(in []string) []string {
 // access rule. A rule that uses it must be an allow/deny rule, and an enabled
 // rule needs the database path: without it every geo lookup fails closed.
 func validateAccess(access model.Access, enabled bool, dbPath string) error {
-	if _, err := netutil.ParseIPList(access.IPs); err != nil {
-		return fmt.Errorf("invalid IP list: %w", err)
-	}
-	if len(access.Geo) == 0 {
+	switch access.Mode {
+	case model.AccessOff, model.AccessInherit:
 		return nil
+	case model.AccessRules:
+	default:
+		return fmt.Errorf("access mode %q must be off, rules or inherit", access.Mode)
 	}
-	if access.Mode != model.AccessAllow && access.Mode != model.AccessDeny {
-		return fmt.Errorf("country/province/city filtering requires access mode allow or deny")
-	}
-	for _, name := range access.Geo {
-		if strings.Contains(name, "|") || utf8.RuneCountInString(name) > 32 {
-			return fmt.Errorf("invalid geo entry %q", name)
+	geoUsed := false
+	for i, entry := range access.IP.Entries {
+		where := fmt.Sprintf("address rule %d", i+1)
+		if entry.Action != model.AccessAllow && entry.Action != model.AccessDeny {
+			return fmt.Errorf("%s: action %q must be allow or deny", where, entry.Action)
 		}
-		for _, r := range name {
+		switch entry.Kind {
+		case model.AccessKindIP:
+			if _, err := netutil.ParseIPList([]string{entry.Value}); err != nil {
+				return fmt.Errorf("%s: %w", where, err)
+			}
+		case model.AccessKindGeo:
+			geoUsed = true
+			if err := validateGeoName(entry.Value); err != nil {
+				return fmt.Errorf("%s: %w", where, err)
+			}
+		default:
+			return fmt.Errorf("%s: kind %q must be ip or geo", where, entry.Kind)
+		}
+	}
+	for i, entry := range access.UA.Entries {
+		where := fmt.Sprintf("client rule %d", i+1)
+		if entry.Action != model.AccessAllow && entry.Action != model.AccessDeny {
+			return fmt.Errorf("%s: action %q must be allow or deny", where, entry.Action)
+		}
+		if entry.Value == "" {
+			return fmt.Errorf("%s: a value is required", where)
+		}
+		if utf8.RuneCountInString(entry.Value) > 128 {
+			return fmt.Errorf("%s: value is longer than 128 characters", where)
+		}
+		for _, r := range entry.Value {
 			if r < 0x20 || r == 0x7f {
-				return fmt.Errorf("invalid geo entry %q", name)
+				return fmt.Errorf("%s: value contains a control character", where)
 			}
 		}
 	}
-	if enabled && strings.TrimSpace(dbPath) == "" {
-		return fmt.Errorf("country/province/city filtering requires an address database")
+	if geoUsed && enabled && strings.TrimSpace(dbPath) == "" {
+		return fmt.Errorf("country/province/city rules require an address database")
+	}
+	return nil
+}
+
+// validateGeoName checks one country, province or city entry.
+func validateGeoName(name string) error {
+	if strings.Contains(name, "|") || utf8.RuneCountInString(name) > 32 || name == "" {
+		return fmt.Errorf("invalid geo entry %q", name)
+	}
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("invalid geo entry %q", name)
+		}
 	}
 	return nil
 }

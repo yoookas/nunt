@@ -209,7 +209,7 @@ func (m *accessMatcher) allows(ip net.IP) (bool, string) {
 	if m.err != nil {
 		return false, "invalid-access"
 	}
-	return m.filter.Allowed(ip)
+	return m.filter.Allowed(ip, "")
 }
 
 // allow evaluates the access rule of the rule for a peer address and reports
@@ -222,7 +222,7 @@ func (f *Forward) allow(r model.ForwardRule, remote net.Addr) bool {
 		return true
 	}
 	f.log.Warn("转发：源地址被拒绝",
-		"rule", ruleLabel(r), "client", addrString(remote), "mode", r.Access.Mode,
+		"rule", ruleLabel(r), "client", addrString(remote),
 		"reason", reason, "error", m.err)
 	return false
 }
