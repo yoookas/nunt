@@ -74,6 +74,10 @@ export function EntityRow({
 /**
  * Two-pane workspace. Desktop shows the list on the left and the selected
  * detail on the right; mobile shows one of them, with a back button on detail.
+ *
+ * `fill` is for pages that measure their own viewport: the panes then stretch to
+ * the available height and scroll inside themselves instead of growing the page,
+ * and the sticky form footers stick to the bottom of the detail pane.
  */
 export function Workspace({
   list,
@@ -81,12 +85,14 @@ export function Workspace({
   selected,
   onBack,
   listWidth = 340,
+  fill = false,
 }: {
   list: ReactNode
   detail: ReactNode
   selected: boolean
   onBack: () => void
   listWidth?: number
+  fill?: boolean
 }) {
   const screens = Grid.useBreakpoint()
   const { token } = theme.useToken()
@@ -94,24 +100,104 @@ export function Workspace({
 
   if (!desktop) {
     return selected ? (
-      <div>
-        <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack} style={{ marginBottom: 8 }}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: 0,
+          flex: fill ? 1 : undefined,
+        }}
+      >
+        <Button
+          type="text"
+          icon={<ArrowLeftOutlined />}
+          onClick={onBack}
+          style={{ marginBottom: 8, alignSelf: 'flex-start', flexShrink: 0 }}
+        >
           返回列表
         </Button>
-        <Card styles={{ body: { padding: 16 } }}>{detail}</Card>
+        <Card
+          style={
+            fill
+              ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }
+              : undefined
+          }
+          styles={{
+            body: fill
+              ? { padding: 16, flex: 1, minHeight: 0, overflowY: 'auto' }
+              : { padding: 16 },
+          }}
+        >
+          {detail}
+        </Card>
       </div>
     ) : (
-      <Card styles={{ body: { padding: 0 } }}>{list}</Card>
+      <Card
+        style={fill ? { flex: 1, minHeight: 0 } : undefined}
+        styles={{
+          body: fill
+            ? {
+                padding: 0,
+                height: '100%',
+                minHeight: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+              }
+            : { padding: 0 },
+        }}
+      >
+        {list}
+      </Card>
     )
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: `${listWidth}px minmax(0, 1fr)`, gap: 12, alignItems: 'start' }}>
-      <Card styles={{ body: { padding: 0 } }} style={{ borderColor: token.colorBorderSecondary }}>
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: `${listWidth}px minmax(0, 1fr)`,
+        gap: 12,
+        alignItems: fill ? 'stretch' : 'start',
+        flex: fill ? 1 : undefined,
+        minHeight: fill ? 0 : undefined,
+      }}
+    >
+      <Card
+        style={{
+          borderColor: token.colorBorderSecondary,
+          ...(fill ? { minHeight: 0, display: 'flex', flexDirection: 'column' } : null),
+        }}
+        styles={{
+          body: fill
+            ? {
+                padding: 0,
+                flex: 1,
+                minHeight: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+              }
+            : { padding: 0 },
+        }}
+      >
         {list}
       </Card>
-      <Card styles={{ body: { padding: 20 } }} style={{ minHeight: 420 }}>
-        {detail}
+      <Card
+        style={{
+          minHeight: fill ? 0 : 420,
+          ...(fill ? { display: 'flex', flexDirection: 'column' } : null),
+        }}
+        styles={{
+          // In fill mode the body is the scrollport, so it must not carry the
+          // padding itself: the sticky form footer pins to the scrollport edge,
+          // and card padding below it would let content show through underneath.
+          body: fill
+            ? { padding: 0, flex: 1, minHeight: 0, overflowY: 'auto' }
+            : { padding: 20 },
+        }}
+      >
+        {fill ? <div style={{ padding: 20 }}>{detail}</div> : detail}
       </Card>
     </div>
   )

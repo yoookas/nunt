@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   Alert,
   App,
+  Badge,
   Button,
   Empty,
   Input,
-  Segmented,
+  Tabs,
   Select,
   Space,
   Spin,
@@ -15,7 +16,13 @@ import {
   Typography,
   theme,
 } from 'antd'
-import { HolderOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
+import {
+  ApiOutlined,
+  BranchesOutlined,
+  HolderOutlined,
+  PlusOutlined,
+  SearchOutlined,
+} from '@ant-design/icons'
 import {
   DndContext,
   PointerSensor,
@@ -32,7 +39,9 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { api, errorText } from '../api'
-import { Muted } from '../components'
+import { Muted, useIsMobile } from '../components'
+import { useContentViewport } from '../components/useContentViewport'
+import { usePolling } from '../usePolling'
 import { EntityRow, PaneTitle, Workspace, type ItemStatus } from '../components/Workspace'
 import ListenerForm, { type ListenerPayload } from './web/ListenerForm'
 import RouteForm, { type RoutePayload } from './web/RouteForm'
@@ -49,6 +58,20 @@ import {
 } from './web/types'
 
 type Mode = 'listeners' | 'rules'
+
+// The shell header already names the page, so the content area keeps a heading
+// for screen readers only instead of repeating the title on screen.
+const hiddenTitle: CSSProperties = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: 'hidden',
+  clip: 'rect(0, 0, 0, 0)',
+  whiteSpace: 'nowrap',
+  border: 0,
+}
 
 const NEW_ID = '__new__'
 const numberFormat = new Intl.NumberFormat('zh-CN')
@@ -145,9 +168,27 @@ function SortableEntity({
   )
 }
 
+/**
+ * One workspace pane: a header that stays put (title, filters, load error) above
+ * a body that scrolls on its own, so a long list never grows the page.
+ */
+function ListPane({ header, children }: { header: ReactNode; children: ReactNode }) {
+  return (
+    <>
+      <div style={{ flexShrink: 0 }}>{header}</div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>{children}</div>
+    </>
+  )
+}
+
 export default function Web() {
   const { message, modal } = App.useApp()
   const { token } = theme.useToken()
+  const isMobile = useIsMobile()
+  // The page fills the window and each pane scrolls inside itself, so a long
+  // route list never turns into a scrollbar on the whole page.
+  const viewportFallback = isMobile ? 'calc(100dvh - 60px - 24px)' : 'calc(100dvh - 60px - 48px)'
+  const { pageRef, height } = useContentViewport(viewportFallback)
 
   const [mode, setMode] = useState<Mode>('listeners')
   const [listeners, setListeners] = useState<WebListenerView[]>([])
@@ -162,7 +203,6 @@ export default function Web() {
 
   const [listenerLoading, setListenerLoading] = useState(true)
   const [rulesLoading, setRulesLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [listenerError, setListenerError] = useState('')
   const [ruleError, setRuleError] = useState('')
 
@@ -177,7 +217,9 @@ export default function Web() {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
 
   const loadListeners = useCallback(
-    async (silent = false): Promise<WebListenerView[] | null> => {
+    // silent: no loading spinner. quiet: no toast (a background poll must not
+    // spam errors; it reports the failure through the freshness badge).
+    async (silent = false, quiet = false): Promise<WebListenerView[] | null> => {
       if (!silent) setListenerLoading(true)
       try {
         const data = await api.get<ListResponse<WebListenerView>>('/api/v1/web/listeners')
@@ -198,7 +240,7 @@ export default function Web() {
       } catch (err) {
         const text = errorText(err)
         setListenerError(text)
-        message.error(text)
+        if (!quiet) message.error(text)
         return null
       } finally {
         if (!silent) setListenerLoading(false)
@@ -208,7 +250,7 @@ export default function Web() {
   )
 
   const loadRules = useCallback(
-    async (silent = false): Promise<WebRule[] | null> => {
+    async (silent = false, quiet = false): Promise<WebRule[] | null> => {
       if (!silent) setRulesLoading(true)
       try {
         const data = await api.get<ListResponse<WebRule>>('/api/v1/web/rules')
@@ -226,7 +268,7 @@ export default function Web() {
       } catch (err) {
         const text = errorText(err)
         setRuleError(text)
-        message.error(text)
+        if (!quiet) message.error(text)
         return null
       } finally {
         if (!silent) setRulesLoading(false)
@@ -246,12 +288,7 @@ export default function Web() {
 
   const refreshAll = useCallback(
     async (silent = false) => {
-      setRefreshing(true)
-      try {
-        await Promise.all([loadListeners(silent), loadRules(silent), loadCertificates()])
-      } finally {
-        setRefreshing(false)
-      }
+      await Promise.all([loadListeners(silent), loadRules(silent), loadCertificates()])
     },
     [loadListeners, loadRules, loadCertificates],
   )
@@ -259,6 +296,33 @@ export default function Web() {
   useEffect(() => {
     void refreshAll()
   }, [refreshAll])
+
+  // The counters shown here (requests, running state) change on the server, and
+  // every other list page polls them; doing the same makes a manual refresh
+  // button unnecessary. A tick is skipped while a save, toggle or reorder is in
+  // flight so it cannot fight the optimistic update, and it never toasts.
+  const busy =
+    savingListener ||
+    savingRule ||
+    busyListenerId !== '' ||
+    busyRuleId !== '' ||
+    reordering
+  const live = usePolling(
+    async () => {
+      const [nextListeners, nextRules] = await Promise.all([
+        loadListeners(true, true),
+        loadRules(true, true),
+      ])
+      if (nextListeners === null || nextRules === null) throw new Error('refresh failed')
+    },
+    10_000,
+    !busy,
+  )
+  const liveLabel = live.failed
+    ? '自动刷新失败'
+    : live.updatedAt
+      ? `更新于 ${new Date(live.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })}`
+      : '等待自动刷新'
 
   const selectedListener =
     selectedListenerId && selectedListenerId !== NEW_ID
@@ -303,7 +367,9 @@ export default function Web() {
     })
   }, [rules, listenerFilter, typeFilter, ruleSearch, listeners])
 
-  const activeListeners = listeners.filter((listener) => !listener.disabled).length
+  const runningListeners = listeners.filter(
+    (listener) => !listener.disabled && (Array.isArray(listener.listen) ? listener.listen.length : 0) > 0,
+  ).length
   const runningRules = rules.filter((rule) => rule.enable && rule.active).length
   const filtersActive =
     listenerFilter !== 'all' || typeFilter !== 'all' || ruleSearch.trim().length > 0
@@ -649,11 +715,11 @@ export default function Web() {
     setListenerFilter('all')
   }
 
-  const listenerList = (
+  const listenerPaneHeader = (
     <>
       <PaneTitle
         title="监听器"
-        subtitle={`${listeners.length} 个 · ${activeListeners} 个运行中`}
+        subtitle={`共 ${listeners.length} 个`}
       />
       {listenerError ? (
         <Alert
@@ -669,6 +735,11 @@ export default function Web() {
           }
         />
       ) : null}
+    </>
+  )
+
+  const listenerList = (
+    <ListPane header={listenerPaneHeader}>
       <Spin spinning={listenerLoading}>
         <div style={{ minHeight: 120 }}>
           {isNewListener ? (
@@ -751,10 +822,10 @@ export default function Web() {
           ) : null}
         </div>
       </Spin>
-    </>
+    </ListPane>
   )
 
-  const routeList = (
+  const routePaneHeader = (
     <>
       <PaneTitle
         title="路由"
@@ -816,6 +887,11 @@ export default function Web() {
           }
         />
       ) : null}
+    </>
+  )
+
+  const routeList = (
+    <ListPane header={routePaneHeader}>
       <Spin spinning={rulesLoading}>
         <div style={{ minHeight: 120 }}>
           {isNewRule ? (
@@ -911,7 +987,7 @@ export default function Web() {
           ) : null}
         </div>
       </Spin>
-    </>
+    </ListPane>
   )
 
   const listenerDetail = isNewListener ? (
@@ -1000,72 +1076,76 @@ export default function Web() {
     mode === 'listeners' ? selectedListenerId !== '' : selectedRuleId !== ''
 
   return (
-    <div>
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          gap: 8,
-          marginBottom: 12,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
-          <Typography.Text strong style={{ fontSize: 16 }}>
-            Web 服务
-          </Typography.Text>
-          <Space size={[4, 4]} wrap>
-            <Tag bordered={false} style={{ marginInlineEnd: 0 }}>
-              监听器 {listeners.length}
-            </Tag>
-            <Tag bordered={false} style={{ marginInlineEnd: 0 }}>
-              路由 {rules.length}
-            </Tag>
-            {runningRules > 0 ? (
-              <Tag color="green" bordered={false} style={{ marginInlineEnd: 0 }}>
-                运行中 {runningRules}
-              </Tag>
-            ) : null}
+    <div ref={pageRef} style={{ height, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <h2 style={hiddenTitle}>Web 服务</h2>
+
+      <Tabs
+        activeKey={mode}
+        onChange={(key) => changeMode(key as Mode)}
+        animated={false}
+        style={{ flexShrink: 0 }}
+        tabBarStyle={{ marginBottom: 8 }}
+        tabBarExtraContent={
+          <Space size={8}>
+            <Tooltip title={`${liveLabel}（点击立即刷新）`}>
+              <span
+                onClick={() => void live.refresh()}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
+              >
+                <Badge status={live.failed ? 'error' : live.updatedAt ? 'processing' : 'default'} />
+                {isMobile ? null : (
+                  <Typography.Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                    {liveLabel}
+                  </Typography.Text>
+                )}
+              </span>
+            </Tooltip>
+            <Button
+              size="small"
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={mode === 'listeners' ? startNewListener : startNewRule}
+            >
+              {mode === 'listeners' ? '新建监听器' : '新建路由'}
+            </Button>
           </Space>
-        </div>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            flexWrap: 'wrap',
-            marginLeft: 'auto',
-          }}
-        >
-          <Segmented
-            size="small"
-            value={mode}
-            onChange={(value) => changeMode(value as Mode)}
-            options={[
-              { label: '监听器', value: 'listeners' },
-              { label: '路由', value: 'rules' },
-            ]}
-          />
-          <Button
-            size="small"
-            icon={<ReloadOutlined />}
-            loading={refreshing}
-            onClick={() => void refreshAll(true)}
-          >
-            刷新
-          </Button>
-          <Button
-            size="small"
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={mode === 'listeners' ? startNewListener : startNewRule}
-          >
-            {mode === 'listeners' ? '新建监听器' : '新建路由'}
-          </Button>
-        </div>
-      </div>
+        }
+        items={[
+          {
+            key: 'listeners',
+            label: (
+              <span
+                title="运行中 / 总数"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <ApiOutlined />
+                监听器
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {runningListeners}/{listeners.length}
+                </Typography.Text>
+              </span>
+            ),
+          },
+          {
+            key: 'rules',
+            label: (
+              <span
+                title="运行中 / 总数"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <BranchesOutlined />
+                路由
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {runningRules}/{rules.length}
+                </Typography.Text>
+              </span>
+            ),
+          },
+        ]}
+      />
 
       <Workspace
+        fill
         listWidth={360}
         list={mode === 'listeners' ? listenerList : routeList}
         detail={mode === 'listeners' ? listenerDetail : ruleDetail}
