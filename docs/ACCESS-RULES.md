@@ -106,13 +106,44 @@ Allowed(ip, ua):
 - 规则列表行显示摘要：`规则 3 条 · 其余拦截`；`inherit` 显示 `继承监听器：3 条 · 其余拦截`；
 - 两个列表都为空且 `Rest=allow` 等价于不过滤，界面提示可关闭。
 
-## 6. 实现顺序
+## 6. 端口转发
 
-1. `internal/model`：`AccessEntry`/`AccessList`/`Access`；删除旧字段；
-2. `internal/ipfilter`：按上述算法重写 `Filter`，`Allowed(ip, ua) (bool, string)`，测试覆盖顺序、
-   地区缺失、默认值、UA 组合；
-3. `internal/config`：归一化与校验、版本升到 2、加载旧版本时的告警；
-4. 接入：`modules/web/access.go`（UA 从 `netutil.UAAllowed` 移入 filter）、`modules/forward`；
-5. 前端：`web/RouteForm`、`web/ListenerForm`、`forward/RuleForm` 共用新的访问控制编辑器，
+端口转发复用同一个 `Access`，但有两处本质差异：
+
+- **没有 HTTP 请求，就没有 User-Agent**：转发表单不显示 UA 编辑器，保存时清空 `ua` 列表。
+  `Filter.Allowed(ip, "")` 在 UA 列表为空且 `rest=allow` 时直接通过，所以不会误伤；但**必须保证
+  转发的规则里不可能出现 UA 条目**（API 层清空），否则一条从 Web 复制过来的 UA 规则会静默阻断
+  全部连接。
+- **规则变更靠指纹判断是否重启代理**，所以指纹必须覆盖新结构：
+  - `forward.go` 的 `fingerprint()` 把访问规则纳入比较，决定监听器是否重建；
+  - `logs.go` 的 `accessCache` 用指纹做缓存 key。
+  - 新指纹要包含 `entries`（**顺序敏感，序列化时不能排序**）、每条的动作/类型/值、`rest`、`ua`。
+    漏掉任何一项都会导致"改完规则不生效 / 日志仍按旧规则解释"，这是本次改动最容易漏的回归点。
+
+转发侧的改动清单：
+
+| 位置 | 改动 |
+|---|---|
+| `forward/listener.go:411` / `:712` | TCP 新连接、UDP 会话的准入判定，调用新的 `Allowed(ip, "")` |
+| `forward/logs.go:217` `allow()` | 拒绝日志的 `reason` 用新词汇，去掉 `mode` 字段 |
+| `forward/logs.go:186` `loadAccess()` | 缓存 key 换成新指纹 |
+| `forward/forward.go:513` `fingerprint()` | 纳入新访问规则，保证修改后重建代理 |
+| `forward/api.go:352-380` | 删掉手写的 mode 校验，改用 `config` 里的共享归一化/校验，避免 Web 与转发两套规则漂移 |
+| `frontend/pages/forward/RuleForm.tsx`、`types.ts` | 复用同一个 `AccessEditor`，传 `allowUA={false}` |
+| 列表行标签 | 与 Web 一致的摘要（`规则 3 条 · 其余拦截`） |
+
+## 7. 实现顺序
+
+1. `internal/model`：`AccessEntry` / `AccessList` / `Access`，删除旧字段；
+2. `internal/ipfilter`：按顺序匹配重写，`Allowed(ip, ua) (bool, string)`，geo 惰性查询；
+   表驱动测试覆盖顺序、地区缺失、默认值、UA 组合；
+3. `internal/config`：共享的归一化与校验、版本升到 2、加载 v1 时告警（范围涵盖 Web 与转发规则）；
+4. 接入 **Web**：`access.go` 里 UA 从 `netutil.UAAllowed` 移入 filter；
+5. 接入 **端口转发**：准入判定、拒绝日志、`loadAccess` 缓存 key、`fingerprint()`、
+   `api.go` 改用共享校验；补一个"改规则后代理必须重建"的测试；
+6. 前端：一个共享的 `AccessEditor`（IP/地区列表 + 固底行 + 可选 UA 列表），三张表单接入；
    `AccessTag` 改为摘要；
-6. 文档与 release note。
+7. 文档（README 功能表里的"源 IP 黑白名单"描述）与 release note。
+
+验收标准：`go vet` / `go test ./...` / `-race`（受影响包）全绿；旧配置加载时日志有明确告警；
+Web 与转发修改规则后立即生效（不重启进程）；Playwright 截图覆盖两种表单。
