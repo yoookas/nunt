@@ -94,10 +94,6 @@ func New(opts Options) (*App, error) {
 		KeepFiles: appLog.KeepFiles,
 	})
 	logger := hub.Logger()
-	if v := cfg.LoadedVersion(); v > 0 && v < config.CurrentVersion {
-		logger.Warn("配置来自旧版本，旧的访问控制规则已移除（白名单会变成不过滤），请重新配置 Web 与端口转发的访问规则",
-			"from", v, "to", config.CurrentVersion)
-	}
 
 	a := &App{
 		opts:            opts,
