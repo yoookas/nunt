@@ -69,14 +69,12 @@ export default function AppLayout() {
                   height: 60,
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: 6,
                   color: isActive ? token.colorPrimary : token.colorTextSecondary,
                   borderBottom: `2px solid ${isActive ? token.colorPrimary : 'transparent'}`,
                   fontWeight: isActive ? 600 : 400,
                   fontSize: 13,
                 })}
               >
-                {item.icon}
                 {item.title}
               </NavLink>
             ))}
