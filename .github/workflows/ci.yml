@@ -4,12 +4,21 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  # A vulnerability published after the last commit is invisible to a push or PR
+  # trigger, and this project ships dependency updates through Dependabot, which
+  # only reacts to its own advisory feed. The weekly run closes that gap. It is
+  # also why the build, frontend and image jobs skip this event: a scheduled run
+  # only has to repeat the vulnerability scan, not rebuild everything.
+  schedule:
+    - cron: "0 3 * * 1"
 
 permissions:
   contents: read
 
 jobs:
   build:
+    # A scheduled run only repeats the vulnerability scan.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -35,7 +44,15 @@ jobs:
       - name: Race detector
         # The proxy, forwarder and WAF all run concurrent goroutines; a data
         # race here is a security bug, not just a flake.
-        run: go test -race ./... -count=1
+        #
+        # The default ten minute timeout is too tight for internal/api under the
+        # race detector: every test environment hashes a password twice with the
+        # administrator Argon2 parameters (64 MiB), which the instrumentation
+        # slows down by roughly an order of magnitude - measured at 638s for that
+        # package alone. Raising the budget keeps the job honest instead of
+        # letting it flake near the deadline; making the tests cheaper (a test
+        # only parameter set) is the better long term fix.
+        run: go test -race ./... -count=1 -timeout 20m
 
       - name: Build
         run: go build -trimpath -o /tmp/nunt ./cmd/nunt
@@ -52,6 +69,8 @@ jobs:
   #   npm run build --prefix frontend   # rewrites internal/webui/assets
   #   go build -o nunt ./cmd/nunt
   frontend:
+    # A scheduled run only repeats the vulnerability scan.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -93,6 +112,8 @@ jobs:
         run: go build -o nunt ./cmd/nunt
 
   docker:
+    # A scheduled run only repeats the vulnerability scan.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -161,6 +182,9 @@ jobs:
   # code, which keeps the false positive rate low. If it ever becomes noisy, fix
   # the finding or pin/exclude it explicitly in the scan invocation - do not make
   # the job advisory.
+  #
+  # This job also runs on the weekly schedule declared above, so a CVE published
+  # between two commits is found without waiting for the next push.
   govulncheck:
     runs-on: ubuntu-latest
     steps:
