@@ -28,7 +28,6 @@ import { confirmDelete, Muted } from '../components'
 import { EntityRow, PaneTitle, Workspace, type ItemStatus } from '../components/Workspace'
 import { usePolling } from '../usePolling'
 import ForwardRuleForm from './forward/RuleForm'
-import ForwardLogsPanel from './forward/LogsPanel'
 import {
   num,
   PROTOCOL_LABEL,
@@ -515,10 +514,6 @@ export default function Forward() {
           saving={saving}
           onSubmit={saveRule}
         />
-      </Section>
-
-      <Section title="访问日志" extra={<Muted>当前规则 · 内存缓冲</Muted>}>
-        <ForwardLogsPanel key={rule.id} rule={rule} />
       </Section>
     </div>
   ) : (
