@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Card, Empty, Progress, Skeleton, Tag, Typography, theme } from 'antd'
+import { Alert, Card, Col, Empty, Progress, Row, Skeleton, Tag, Typography, theme } from 'antd'
 import { api } from '../api'
 import { fmtBytes, fmtDuration } from '../format'
 import RequestLineChart from '../components/RequestLineChart'
@@ -110,31 +110,45 @@ function ServiceLine({
   note?: string
 }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
-      <span
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: '50%',
-          background: tone,
-          flexShrink: 0,
-          alignSelf: 'center',
-        }}
-      />
-      <Typography.Text style={{ fontSize: 13, whiteSpace: 'nowrap' }}>{title}</Typography.Text>
-      <div style={{ flex: 1, minWidth: 8 }} />
-      <Typography.Text strong style={{ fontSize: 13, whiteSpace: 'nowrap' }}>
-        {value}
-      </Typography.Text>
-      {note ? (
-        <Typography.Text
-          type="secondary"
-          style={{ fontSize: 11, whiteSpace: 'nowrap' }}
-        >
-          {note}
+    <Row align="middle" wrap={false} gutter={8}>
+      <Col flex="auto" style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+        <span
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            background: tone,
+            flexShrink: 0,
+          }}
+        />
+        <Typography.Text ellipsis style={{ fontSize: 13 }}>
+          {title}
         </Typography.Text>
-      ) : null}
-    </div>
+      </Col>
+      {/* Fixed figure column: the numbers end on the same line, and the note
+          starts on one too, instead of trailing each value. */}
+      <Col flex="0 0 68px" style={{ textAlign: 'right' }}>
+        <Typography.Text strong style={{ fontSize: 13, whiteSpace: 'nowrap' }}>
+          {value}
+        </Typography.Text>
+      </Col>
+      <Col flex="1 1 90px" style={{ minWidth: 0 }}>
+        {note ? (
+          <Typography.Text
+            type="secondary"
+            style={{
+              fontSize: 11,
+              display: 'block',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {note}
+          </Typography.Text>
+        ) : null}
+      </Col>
+    </Row>
   )
 }
 
@@ -368,19 +382,19 @@ export default function Dashboard() {
               title="Web 服务"
               tone="#2f54eb"
               value={`${num(web.routes) || num(info?.webRules)} 条路由`}
-              note={`· ${num(web.listeners)} 个监听器`}
+              note={`${num(web.listeners)} 个监听器`}
             />
             <ServiceLine
               title="端口转发"
               tone="#13a8a8"
               value={`${num(forward.listening) || num(forward.enabled)} 个监听`}
-              note={`· ${num(forward.activeConnections)} 个活跃连接`}
+              note={`${num(forward.activeConnections)} 个活跃连接`}
             />
             <ServiceLine
               title="动态域名"
               tone="#389e0d"
               value={`${num(ddns.enabled)} 个启用`}
-              note={`· ${num(ddns.rules)} 条规则`}
+              note={`${num(ddns.rules)} 条规则`}
             />
             <ServiceLine
               title="证书"
@@ -388,10 +402,10 @@ export default function Dashboard() {
               value={`${certTotal} 张`}
               note={
                 num(certs?.expired)
-                  ? `· ${num(certs?.expired)} 张已过期`
+                  ? `${num(certs?.expired)} 张已过期`
                   : expiring
-                    ? `· ${expiring} 张 30 天内到期`
-                    : '· 全部有效'
+                    ? `${expiring} 张 30 天内到期`
+                    : '全部有效'
               }
             />
           </div>
