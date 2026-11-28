@@ -207,8 +207,11 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		rest.FailCode(w, http.StatusForbidden, "forbidden", "只能通过浏览器登录后修改密码")
 		return
 	}
-	if len(req.New) < 8 {
-		rest.Fail(w, http.StatusBadRequest, "新密码长度至少 8 位")
+	// The strength policy belongs to the console, which is the only client that
+	// sets this password. The server still refuses an empty one: an account
+	// with a blank password would accept the next blank login.
+	if req.New == "" {
+		rest.Fail(w, http.StatusBadRequest, "新密码不能为空")
 		return
 	}
 	currentHash := ""

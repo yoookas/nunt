@@ -5,6 +5,21 @@ import { useNavigate } from 'react-router-dom'
 import { errorText } from '../api'
 import { useAuth } from '../session'
 
+/**
+ * The console is the only place that sets the administrator password, so the
+ * policy lives here: six characters at least, with a letter, a digit and a
+ * symbol. The server only refuses an empty one.
+ */
+function passwordProblem(value: string): string | null {
+  if (value.length < 6) return '至少 6 个字符'
+  const missing: string[] = []
+  if (!/[A-Za-z]/.test(value)) missing.push('字母')
+  if (!/[0-9]/.test(value)) missing.push('数字')
+  if (!/[^A-Za-z0-9\s]/.test(value)) missing.push('符号')
+  if (missing.length) return `还需要包含${missing.join('、')}`
+  return null
+}
+
 export default function PasswordChange() {
   const { changePassword, logout, user } = useAuth()
   const { message } = App.useApp()
@@ -36,7 +51,21 @@ export default function PasswordChange() {
           <Form.Item name="current" label="当前密码" rules={[{ required: true }]}>
             <Input.Password prefix={<LockOutlined />} autoFocus />
           </Form.Item>
-          <Form.Item name="next" label="新密码" rules={[{ required: true, min: 12, message: '至少 12 个字符' }]}>
+          <Form.Item
+            name="next"
+            label="新密码"
+            rules={[
+              { required: true, message: '请输入新密码' },
+              {
+                validator: (_, value?: string) => {
+                  if (!value) return Promise.resolve()
+                  const problem = passwordProblem(value)
+                  return problem ? Promise.reject(new Error(problem)) : Promise.resolve()
+                },
+              },
+            ]}
+            extra="至少 6 个字符，并且同时包含字母、数字和符号"
+          >
             <Input.Password prefix={<LockOutlined />} />
           </Form.Item>
           <Form.Item name="confirm" label="确认新密码" rules={[{ required: true }]}>
