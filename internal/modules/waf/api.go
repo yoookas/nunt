@@ -225,7 +225,10 @@ func (w *WAF) handleLogs(rw http.ResponseWriter, r *http.Request) {
 	rest.OK(rw, map[string]any{
 		"items": events,
 		"count": len(events),
-		"total": w.rec.size(),
+		// total is the whole buffer, matched is what survives the action
+		// filter; the page prints the latter next to the filtered list.
+		"total":   w.rec.size(),
+		"matched": w.rec.count(action),
 	})
 }
 

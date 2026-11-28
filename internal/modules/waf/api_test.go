@@ -250,8 +250,10 @@ func TestAPILogs(t *testing.T) {
 		t.Fatalf("GET /logs = %d (%s)", rec.Code, rec.Body.String())
 	}
 	var payload struct {
-		Items []Event `json:"items"`
-		Count int     `json:"count"`
+		Items   []Event `json:"items"`
+		Count   int     `json:"count"`
+		Total   int     `json:"total"`
+		Matched int     `json:"matched"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -265,6 +267,30 @@ func TestAPILogs(t *testing.T) {
 	}
 	if ev.ClientIP == "" || ev.Method != http.MethodGet || ev.URI == "" {
 		t.Fatalf("the event lacks request context: %+v", ev)
+	}
+	// One request can buffer several rule hits; without a filter everything is
+	// matched. The page prints matched, not the unfiltered total.
+	if payload.Matched != payload.Total || payload.Total == 0 {
+		t.Fatalf("unfiltered counts = matched %d total %d", payload.Matched, payload.Total)
+	}
+	all := payload.Total
+	var denied struct {
+		Matched int `json:"matched"`
+		Count   int `json:"count"`
+	}
+	rec = apiDo(t, mux, http.MethodGet, "/api/v1/waf/logs?action=deny", nil)
+	if err := json.Unmarshal(rec.Body.Bytes(), &denied); err != nil {
+		t.Fatalf("decode deny: %v", err)
+	}
+	if denied.Matched != all {
+		t.Fatalf("deny filter matched %d, want all %d", denied.Matched, all)
+	}
+	rec = apiDo(t, mux, http.MethodGet, "/api/v1/waf/logs?action=detect", nil)
+	if err := json.Unmarshal(rec.Body.Bytes(), &denied); err != nil {
+		t.Fatalf("decode detect: %v", err)
+	}
+	if denied.Matched != 0 || denied.Count != 0 {
+		t.Fatalf("detect filter = matched %d count %d, want an empty list", denied.Matched, denied.Count)
 	}
 
 	if rec := apiDo(t, mux, http.MethodGet, "/api/v1/waf/logs?limit=abc", nil); rec.Code != http.StatusBadRequest {

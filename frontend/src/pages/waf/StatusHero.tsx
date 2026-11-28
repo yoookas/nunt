@@ -4,9 +4,21 @@ import { fmtTime } from '../../format'
 import { Muted } from '../../components'
 import type { WafConfig, WafEngine, WafStats } from './types'
 
-function Metric({ label, value, color }: { label: string; value: number; color?: string }) {
+function Metric({
+  label,
+  value,
+  color,
+  hint,
+}: {
+  label: string
+  value: number
+  color?: string
+  /** What the number counts; spelled out because the four tiles never add up
+      on their own once the passed requests are missing from the row. */
+  hint: string
+}) {
   return (
-    <div>
+    <div title={hint}>
       <div style={{ fontSize: 12, color: 'rgba(0,0,0,0.45)' }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 600, lineHeight: 1.25, color }}>{value.toLocaleString('zh-CN')}</div>
     </div>
@@ -85,15 +97,39 @@ export default function StatusHero({
           style={{
             flex: '2 1 320px',
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))',
             gap: 12,
             alignItems: 'center',
           }}
         >
-          <Metric label="请求" value={stats.requests ?? 0} />
-          <Metric label="拦截" value={stats.blocked ?? 0} color={token.colorError} />
-          <Metric label="检测" value={stats.detected ?? 0} color={token.colorWarning} />
-          <Metric label="错误" value={stats.errors ?? 0} color={token.colorError} />
+          <Metric
+            label="检查"
+            value={stats.requests ?? 0}
+            hint="经过 WAF 检查的请求数"
+          />
+          <Metric
+            label="通过"
+            value={stats.passed ?? 0}
+            hint="检查后放行的请求数"
+          />
+          <Metric
+            label="拦截"
+            value={stats.blocked ?? 0}
+            color={token.colorError}
+            hint="拦截模式下被拒绝的请求数"
+          />
+          <Metric
+            label="仅记录"
+            value={stats.detected ?? 0}
+            color={token.colorWarning}
+            hint="检测模式或仅记录模式下命中规则但放行的请求数"
+          />
+          <Metric
+            label="错误"
+            value={stats.errors ?? 0}
+            color={token.colorError}
+            hint="引擎无法完成检查的请求数"
+          />
         </div>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, flex: '0 0 auto' }}>

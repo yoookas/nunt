@@ -44,9 +44,10 @@ export default function EventsSection({ active, onEventsChange }: EventsSectionP
           action: filter || undefined,
         })
         setLogs(Array.isArray(data?.items) ? data.items : [])
-        const count = Number(data?.total) || 0
-        setTotal(count)
-        onEventsChange?.(count)
+        // matched respects the deny/detect filter, total does not; the header
+        // line describes the list on screen, so it uses matched.
+        setTotal(Number(data?.matched ?? data?.total) || 0)
+        onEventsChange?.(Number(data?.total) || 0)
       } catch (err) {
         if (!silent) message.error(errorText(err))
       } finally {

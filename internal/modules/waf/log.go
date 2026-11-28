@@ -125,6 +125,25 @@ func (r *recorder) list(limit int) []Event {
 	return out
 }
 
+// count reports how many buffered events carry the given action; an empty
+// action counts them all. It is used for the filtered total of the events
+// page, which must not be capped by the page size.
+func (r *recorder) count(action string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	size := r.next
+	if r.full {
+		size = len(r.events)
+	}
+	n := 0
+	for i := 0; i < size; i++ {
+		if action == "" || r.events[i].Action == action {
+			n++
+		}
+	}
+	return n
+}
+
 // clear drops the buffered events and the per rule counters.
 func (r *recorder) clear() {
 	r.mu.Lock()

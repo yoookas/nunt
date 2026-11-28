@@ -155,7 +155,10 @@ export interface WafLog {
 export interface WafLogsResponse {
   items?: WafLog[]
   count?: number
+  /** Whole ring buffer, independent of the action filter. */
   total?: number
+  /** Events matching the current action filter. */
+  matched?: number
 }
 
 export const MODE_OPTIONS: { value: WafMode; label: string }[] = [
