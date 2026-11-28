@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { App, Button, Card, Form, Input, Typography } from 'antd'
+import { App, Button, Card, Form, Input, Typography, theme } from 'antd'
 import { LockOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { errorText } from '../api'
 import { isTOTPChallenge, useAuth } from '../session'
 
 export default function Login() {
+  const { token } = theme.useToken()
   const { login, loginTOTP } = useAuth()
   const { message } = App.useApp()
   const navigate = useNavigate()
@@ -41,7 +42,17 @@ export default function Login() {
   }
 
   return (
-    <div style={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', padding: 16, background: 'var(--ant-color-bg-layout, #f5f5f5)' }}>
+    <div
+      style={{
+        minHeight: '100dvh',
+        display: 'grid',
+        placeItems: 'center',
+        padding: 16,
+        // The page sits outside the layout, so it has to paint the layout
+        // colour itself; the token follows the light and dark algorithm.
+        background: token.colorBgLayout,
+      }}
+    >
       <Card style={{ width: '100%', maxWidth: 380 }}>
         <div style={{ textAlign: 'center', marginBottom: 20 }}>
           <Typography.Title level={3} style={{ marginBottom: 4 }}>
