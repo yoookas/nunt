@@ -111,9 +111,10 @@ function ServiceLine({
 }) {
   return (
     <Row align="middle" wrap={false} gutter={8}>
-      {/* Three fixed, left-aligned columns: the names, the figures and the
-          details each start on their own line, whatever their width. */}
-      <Col flex="0 0 84px" style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+      {/* The name holds the left edge; the figure and its detail are a block on
+          the right, and both of their columns keep a fixed width so every row
+          starts them on the same line. */}
+      <Col flex="auto" style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
         <span
           style={{
             width: 8,
@@ -132,7 +133,7 @@ function ServiceLine({
           {value}
         </Typography.Text>
       </Col>
-      <Col flex="1 1 auto" style={{ minWidth: 0 }}>
+      <Col flex="0 0 112px" style={{ minWidth: 0 }}>
         {note ? (
           <Typography.Text
             type="secondary"
