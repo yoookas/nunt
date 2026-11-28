@@ -156,15 +156,12 @@ export default function RequestLineChart({
         xDataKey="time"
         aspectRatio={undefined}
         animationDuration={600}
-        margin={{ top: 12, right: 54, bottom: 30, left: 44 }}
+        margin={{ top: 12, right: 16, bottom: 30, left: 44 }}
         style={{ height }}
       >
         <Grid horizontal numTicksRows={4} />
         <XAxis numTicks={5} />
         <YAxis numTicks={4} />
-        {/* The refusal counts are an order of magnitude below the totals, so
-            they get their own axis on the right instead of hugging zero. */}
-        {refusals.length ? <YAxis yAxisId="refusals" orientation="right" numTicks={3} /> : null}
         <ChartTooltip
           showDatePill={false}
           content={({ point }) => (
@@ -208,7 +205,6 @@ export default function RequestLineChart({
             key={item.key}
             dataKey={item.key}
             stroke={item.color}
-            yAxisId={item.key === 'total' ? 'left' : 'refusals'}
             strokeWidth={item.key === 'total' ? 2.5 : 1.5}
             dashFromIndex={item.dashed ? 0 : undefined}
             dashArray="5,4"
