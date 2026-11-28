@@ -1,5 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Alert, Card, Col, Empty, Progress, Row, Skeleton, Tag, Typography, theme } from 'antd'
+import {
+  GlobalOutlined,
+  LinkOutlined,
+  SafetyCertificateOutlined,
+  SwapOutlined,
+} from '@ant-design/icons'
 import { api } from '../api'
 import { fmtBytes, fmtDuration } from '../format'
 import RequestLineChart from '../components/RequestLineChart'
@@ -97,59 +103,62 @@ function Meter({
   )
 }
 
-/** One line of the service card: a dot, a name, a figure and a detail. */
-function ServiceLine({
+/** One tile of the service card: icon, figure and a one line detail. */
+function ServiceTile({
+  icon,
   title,
   tone,
   value,
+  unit,
   note,
 }: {
+  icon: ReactNode
   title: string
   tone: string
   value: string
-  note?: string
+  unit: string
+  note: string
 }) {
+  const { token } = theme.useToken()
   return (
-    <Row align="middle" wrap={false} gutter={8}>
-      {/* The name holds the left edge; the figure and its detail are a block on
-          the right, and both of their columns keep a fixed width so every row
-          starts them on the same line. */}
-      <Col flex="auto" style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-        <span
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            background: tone,
-            flexShrink: 0,
-          }}
-        />
-        <Typography.Text ellipsis style={{ fontSize: 13 }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2,
+        minWidth: 0,
+        padding: '6px 9px',
+        borderRadius: token.borderRadiusLG,
+        background: token.colorFillQuaternary,
+        border: `1px solid ${token.colorBorderSecondary}`,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+        <span style={{ color: tone, display: 'inline-flex', fontSize: 12 }}>{icon}</span>
+        <Typography.Text type="secondary" ellipsis style={{ fontSize: 12 }}>
           {title}
         </Typography.Text>
-      </Col>
-      <Col flex="0 0 64px">
-        <Typography.Text strong style={{ fontSize: 13, whiteSpace: 'nowrap' }}>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, minWidth: 0 }}>
+        <span
+          style={{
+            fontSize: 20,
+            fontWeight: 600,
+            lineHeight: '22px',
+            fontVariantNumeric: 'tabular-nums',
+            color: token.colorText,
+          }}
+        >
           {value}
+        </span>
+        <Typography.Text type="secondary" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
+          {unit}
         </Typography.Text>
-      </Col>
-      <Col flex="0 0 112px" style={{ minWidth: 0 }}>
-        {note ? (
-          <Typography.Text
-            type="secondary"
-            style={{
-              fontSize: 11,
-              display: 'block',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {note}
-          </Typography.Text>
-        ) : null}
-      </Col>
-    </Row>
+      </div>
+      <Typography.Text type="secondary" ellipsis style={{ fontSize: 11 }} title={note}>
+        {note}
+      </Typography.Text>
+    </div>
   )
 }
 
@@ -378,38 +387,54 @@ export default function Dashboard() {
 
         {/* 服务 */}
         <Card title="服务" size="small" style={cardStyle} styles={{ body: bodyStyle }}>
-          <div style={{ display: 'grid', gap: 9 }}>
-            <ServiceLine
-              title="Web 服务"
-              tone="#2f54eb"
-              value={`${num(web.routes) || num(info?.webRules)} 条路由`}
-              note={`${num(web.listeners)} 个监听器`}
-            />
-            <ServiceLine
-              title="端口转发"
-              tone="#13a8a8"
-              value={`${num(forward.listening) || num(forward.enabled)} 个监听`}
-              note={`${num(forward.activeConnections)} 个活跃连接`}
-            />
-            <ServiceLine
-              title="动态域名"
-              tone="#389e0d"
-              value={`${num(ddns.enabled)} 个启用`}
-              note={`${num(ddns.rules)} 条规则`}
-            />
-            <ServiceLine
-              title="证书"
-              tone="#d48806"
-              value={`${certTotal} 张`}
-              note={
-                num(certs?.expired)
-                  ? `${num(certs?.expired)} 张已过期`
-                  : expiring
-                    ? `${expiring} 张 30 天内到期`
-                    : '全部有效'
-              }
-            />
-          </div>
+          <Row gutter={[8, 8]}>
+            <Col span={12}>
+              <ServiceTile
+                icon={<GlobalOutlined />}
+                title="Web 服务"
+                tone="#2f54eb"
+                value={`${num(web.routes) || num(info?.webRules)}`}
+                unit="条路由"
+                note={`${num(web.listeners)} 个监听器`}
+              />
+            </Col>
+            <Col span={12}>
+              <ServiceTile
+                icon={<SwapOutlined />}
+                title="端口转发"
+                tone="#13a8a8"
+                value={`${num(forward.listening) || num(forward.enabled)}`}
+                unit="个监听"
+                note={`${num(forward.activeConnections)} 个活跃连接`}
+              />
+            </Col>
+            <Col span={12}>
+              <ServiceTile
+                icon={<LinkOutlined />}
+                title="动态域名"
+                tone="#389e0d"
+                value={`${num(ddns.enabled)}`}
+                unit="个启用"
+                note={`${num(ddns.rules)} 条规则`}
+              />
+            </Col>
+            <Col span={12}>
+              <ServiceTile
+                icon={<SafetyCertificateOutlined />}
+                title="证书"
+                tone="#d48806"
+                value={`${certTotal}`}
+                unit="张"
+                note={
+                  num(certs?.expired)
+                    ? `${num(certs?.expired)} 张已过期`
+                    : expiring
+                      ? `${expiring} 张 30 天内到期`
+                      : '全部有效'
+                }
+              />
+            </Col>
+          </Row>
         </Card>
       </div>
 
