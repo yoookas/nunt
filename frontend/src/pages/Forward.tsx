@@ -419,6 +419,8 @@ export default function Forward() {
   )
 
   const rule = selectedRule
+  // The form keeps the rule's real switch state; a port-busy rule is saved as
+  // enabled so that saving it retries the bind.
   const effectiveEnable = rule ? Boolean(rule.enable) && !rule.disabled : draftEnable
 
   const detailPane = creating ? (
@@ -460,16 +462,6 @@ export default function Forward() {
         ) : null}
         {rule.disabled ? <Tag color="error">端口占用</Tag> : null}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Tooltip title={effectiveEnable ? '停用这条规则' : '启用这条规则'}>
-            <Switch
-              size="small"
-              checked={effectiveEnable}
-              loading={busyId === String(rule.id)}
-              disabled={busyId !== '' && busyId !== String(rule.id)}
-              onChange={(checked) => void toggleRule(rule, checked)}
-              aria-label={`${rule.name || rule.id} 启停`}
-            />
-          </Tooltip>
           <Button
             danger
             type="text"
@@ -494,7 +486,7 @@ export default function Forward() {
           showIcon
           style={{ marginTop: 10 }}
           message="端口被占用，规则已自动停用"
-          description="释放占用该端口的进程后，用右上角开关重新启用；后端会重试绑定。"
+          description="释放占用该端口的进程后，用列表里的开关重新启用；后端会重试绑定。"
         />
       ) : null}
 
