@@ -239,7 +239,9 @@ func (a *App) Reload() {
 // Run starts every module and the admin server, then blocks until ctx is
 // cancelled or the server fails.
 func (a *App) Run(ctx context.Context) error {
-	log := a.log.Logger()
+	// Startup lines belong to the application itself; the run log page shows
+	// this attribute in its component column.
+	log := a.log.Logger().With("component", "app")
 	if a.adminListen.Source == adminlisten.SourceEnv {
 		log.Info("管理端监听地址来自环境变量（优先于 config.json）",
 			"addr", a.adminListen.Listen,

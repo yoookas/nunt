@@ -113,7 +113,9 @@ func (d *Deps) Logger(name string) *slog.Logger {
 	if d == nil || d.Log == nil {
 		return slog.Default()
 	}
-	return d.Log.Logger().With("module", name)
+	// The run log page shows a component column, and it reads this attribute;
+	// tag it here so every module log line lands in that column.
+	return d.Log.Logger().With("component", name)
 }
 
 // Base implements the boring parts of Module.
