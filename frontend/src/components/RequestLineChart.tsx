@@ -164,6 +164,13 @@ export default function RequestLineChart({
         <YAxis numTicks={4} />
         <ChartTooltip
           showDatePill={false}
+          panelStyle={{
+            // A plain white popover with a dark `currentColor` border stands
+            // out of an antd card; the filled grey matches the page instead.
+            backgroundColor: token.colorFillTertiary,
+            borderColor: token.colorBorderSecondary,
+            boxShadow: '0 6px 20px rgba(0, 0, 0, 0.08)',
+          }}
           content={({ point }) => (
             <div style={{ padding: '8px 10px', minWidth: 150 }}>
               <div style={{ fontSize: 11, color: token.colorTextTertiary, marginBottom: 4 }}>
