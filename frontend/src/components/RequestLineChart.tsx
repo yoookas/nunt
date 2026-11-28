@@ -208,6 +208,9 @@ export default function RequestLineChart({
             strokeWidth={item.key === 'total' ? 2.5 : 1.5}
             dashFromIndex={item.dashed ? 0 : undefined}
             dashArray="5,4"
+            // Without this bklit fades the stroke out towards both ends, which
+            // makes the last bucket look empty.
+            fadeEdges={false}
           />
         ))}
       </LineChart>
