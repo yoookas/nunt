@@ -186,8 +186,12 @@ export default function Web() {
   const isMobile = useIsMobile()
   // The page fills the window and each pane scrolls inside itself, so a long
   // route list never turns into a scrollbar on the whole page.
-  const viewportFallback = isMobile ? 'calc(100dvh - 60px - 24px)' : 'calc(100dvh - 60px - 48px)'
+  // The tab strip doubles as the page header, so it hangs flush under the app
+  // header: the content padding is cancelled on top and the page grows by it.
+  const pagePad = isMobile ? 12 : 24
+  const viewportFallback = `calc(100dvh - 60px - ${pagePad}px)`
   const { pageRef, height } = useContentViewport(viewportFallback)
+  const pageHeight = typeof height === 'number' ? height + pagePad : height
 
   const [mode, setMode] = useState<Mode>('listeners')
   const [listeners, setListeners] = useState<WebListenerView[]>([])
@@ -1084,7 +1088,16 @@ export default function Web() {
     mode === 'listeners' ? selectedListenerId !== '' : selectedRuleId !== ''
 
   return (
-    <div ref={pageRef} style={{ height, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+    <div
+      ref={pageRef}
+      style={{
+        height: pageHeight,
+        marginTop: -pagePad,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
       <h2 style={hiddenTitle}>Web 服务</h2>
 
       <Tabs

@@ -25,11 +25,19 @@ export default function Logs() {
   const [tab, setTab] = useState('run')
   const vars = useLogThemeVars()
   const isMobile = useIsMobile()
-  const fallback = isMobile ? 'calc(100dvh - 60px - 24px)' : 'calc(100dvh - 60px - 48px)'
+  // Same as the web page: the three tabs are the page header, so the strip sits
+  // flush under the app header and the content padding is cancelled on top.
+  const pagePad = isMobile ? 12 : 24
+  const fallback = `calc(100dvh - 60px - ${pagePad}px)`
   const { pageRef, height } = useContentViewport(fallback)
+  const pageHeight = typeof height === 'number' ? height + pagePad : height
 
   return (
-    <div ref={pageRef} className={styles.page} style={{ ...vars, height }}>
+    <div
+      ref={pageRef}
+      className={styles.page}
+      style={{ ...vars, height: pageHeight, marginTop: -pagePad }}
+    >
       <h2 style={hiddenTitle}>日志</h2>
       <Tabs
         className={styles.tabs}
