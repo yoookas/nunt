@@ -26,23 +26,6 @@ export const ACCESS_OPTIONS: SelectOption[] = [
   { value: 'deny', label: '黑名单（拒绝列表中的来源）' },
 ]
 
-export const ACCESS_LABEL: Record<string, string> = {
-  off: '关闭',
-  allow: '白名单',
-  deny: '黑名单',
-}
-
-export type AccessMode = 'off' | 'allow' | 'deny'
-
-export interface ForwardAccess {
-  mode?: string
-  ips?: string[]
-  /** Countries, provinces or cities; one flattened list. */
-  geo?: string[]
-  uaMode?: string
-  uas?: string[]
-}
-
 /** A rule as returned by GET /api/v1/forward/rules (config + live counters). */
 export interface ForwardRule {
   id: string
@@ -56,7 +39,7 @@ export interface ForwardRule {
   timeoutSec?: number
   maxConns?: number
   maxConnsPerIP?: number
-  access?: ForwardAccess
+  access?: Access
   remark?: string
   activeConns?: number
   totalConns?: number
@@ -112,12 +95,6 @@ export function num(value: unknown): number {
   return Number.isFinite(n) ? n : 0
 }
 
-export function normalizeMode(value: unknown): AccessMode {
-  const mode = String(value ?? '').trim().toLowerCase()
-  if (mode === 'allow' || mode === 'deny') return mode
-  return 'off'
-}
-
 export function emptyRuleForm(): RuleFormValues {
   return {
     name: '',
@@ -157,7 +134,7 @@ export function ruleFormValues(rule?: ForwardRule | null): RuleFormValues {
  */
 export function buildRulePayload(
   values: RuleFormValues,
-  options: { enable: boolean; originalAccess?: ForwardAccess | null },
+  options: { enable: boolean },
 ): Record<string, unknown> {
   const protocol = PROTOCOL_LABEL[values.protocol || ''] ? values.protocol : 'tcp'
   return {
@@ -195,28 +172,6 @@ export function protocolColor(protocol: unknown): string {
   if (protocol === 'udp') return 'gold'
   if (protocol === 'both') return 'green'
   return 'blue'
-}
-
-export function ruleAccessMode(rule: ForwardRule): AccessMode {
-  return normalizeMode(rule.access?.mode)
-}
-
-export function ruleAccessIps(rule: ForwardRule): string[] {
-  const ips = rule.access?.ips
-  return Array.isArray(ips) ? ips : []
-}
-
-export function ruleAccessText(rule: ForwardRule): string {
-  const mode = ruleAccessMode(rule)
-  if (mode === 'off') return '关闭'
-  return `${ACCESS_LABEL[mode]} · ${ruleAccessIps(rule).length} 条`
-}
-
-export function ruleAccessColor(rule: ForwardRule): string {
-  const mode = ruleAccessMode(rule)
-  if (mode === 'allow') return 'green'
-  if (mode === 'deny') return 'red'
-  return 'default'
 }
 
 export function logResultColor(result: unknown): string {

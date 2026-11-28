@@ -44,7 +44,7 @@ export default function ForwardRuleForm({
     // the filter is off, so switching the filter back on in the same edit does
     // not lose the list.
     const values = form.getFieldsValue(true) as RuleFormValues
-    const payload = buildRulePayload(values, { enable, originalAccess: rule?.access })
+    const payload = buildRulePayload(values, { enable })
     void onSubmit(payload)
   }
 

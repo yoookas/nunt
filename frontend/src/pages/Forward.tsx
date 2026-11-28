@@ -28,13 +28,13 @@ import { confirmDelete, Muted } from '../components'
 import { EntityRow, PaneTitle, Workspace, type ItemStatus } from '../components/Workspace'
 import { usePolling } from '../usePolling'
 import ForwardRuleForm from './forward/RuleForm'
+import { AccessTag } from './web/ui'
 import {
   num,
   PROTOCOL_LABEL,
   PROTOCOL_OPTIONS,
   protocolColor,
-  ruleAccessColor,
-  ruleAccessText,
+
   type ForwardRule,
 } from './forward/types'
 
@@ -359,7 +359,9 @@ export default function Forward() {
           </div>
         ) : null}
 
-        {filtered.map((rule) => (
+        {filtered.map((rule) => {
+          const hasAccess = Boolean(rule.access && rule.access.mode !== 'off')
+          return (
           <EntityRow
             key={rule.id}
             title={rule.name || rule.id}
@@ -373,9 +375,8 @@ export default function Forward() {
                 <Tag color={protocolColor(rule.protocol)} style={{ marginInlineEnd: 0 }}>
                   {PROTOCOL_LABEL[rule.protocol || ''] || rule.protocol || '-'}
                 </Tag>
-                <Tag color={ruleAccessColor(rule)} style={{ marginInlineEnd: 0 }}>
-                  {ruleAccessText(rule)}
-                </Tag>
+                {hasAccess ? <AccessTag access={rule.access} /> : null}
+                {rule.enable ? null : <Tag style={{ marginInlineEnd: 0 }}>已停用</Tag>}
                 <Muted>
                   活跃 {num(rule.activeConns)} · ↑ {fmtBytes(rule.upBytes)}
                 </Muted>
@@ -384,8 +385,21 @@ export default function Forward() {
             status={ruleStatus(rule)}
             selected={!creating && selectedRule?.id === rule.id}
             onClick={() => selectRule(rule)}
+            actions={
+              <div onClick={(event) => event.stopPropagation()}>
+                <Switch
+                  size="small"
+                  checked={Boolean(rule.enable)}
+                  loading={busyId === String(rule.id)}
+                  disabled={busyId !== '' && busyId !== String(rule.id)}
+                  onChange={(checked) => void toggleRule(rule, checked)}
+                  aria-label={`启停规则 ${rule.name || rule.id}`}
+                />
+              </div>
+            }
           />
-        ))}
+          )
+        })}
 
         {!loading && !filtered.length ? (
           <Empty
@@ -441,8 +455,9 @@ export default function Forward() {
         <Tag color={protocolColor(rule.protocol)}>
           {PROTOCOL_LABEL[rule.protocol || ''] || rule.protocol || '-'}
         </Tag>
-        <Tag color={ruleAccessColor(rule)}>{ruleAccessText(rule)}</Tag>
-        {rule.listening ? <Tag color="success">监听中</Tag> : null}
+        {rule.access && rule.access.mode !== 'off' ? (
+          <AccessTag access={rule.access} />
+        ) : null}
         {rule.disabled ? <Tag color="error">端口占用</Tag> : null}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
           <Tooltip title={effectiveEnable ? '停用这条规则' : '启用这条规则'}>
