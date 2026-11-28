@@ -173,7 +173,7 @@ export default function AccessLogs({
   const [loading, setLoading] = useState(true)
   const [more, setMore] = useState(false)
   const [hasMore, setHasMore] = useState(false)
-  const [autoRefresh, setAutoRefresh] = useState(false)
+  const [autoRefresh, setAutoRefresh] = useState(true)
   const [exporting, setExporting] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<number | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -188,6 +188,7 @@ export default function AccessLogs({
   const generationRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
   const atTopRef = useRef(true)
+  const autoRefreshRef = useRef(true)
   const activeRef = useRef(active)
   activeRef.current = active
   const exportingRef = useRef(false)
@@ -309,6 +310,10 @@ export default function AccessLogs({
     [loadMeta, loadStats, mapItems],
   )
 
+  // handleAtTop is stable, so it reads the newest loader through a ref.
+  const loadFirstRef = useRef(loadFirst)
+  loadFirstRef.current = loadFirst
+
   const loadMore = useCallback(async () => {
     if (loadingMoreRef.current || !hasMoreRef.current) return
     const cursor = cursorRef.current
@@ -380,8 +385,23 @@ export default function AccessLogs({
     return () => window.clearInterval(timer)
   }, [autoRefresh, loadFirst, refreshStats])
 
+  // Like the run log: scrolling away pauses the switch, scrolling back to the
+  // top turns it on again, so returning to the newest records restores live
+  // updates without a second click.
   const handleAtTop = useCallback((atTop: boolean) => {
     atTopRef.current = atTop
+    if (atTop) {
+      if (!autoRefreshRef.current) {
+        autoRefreshRef.current = true
+        setAutoRefresh(true)
+        // Coming back to the top resumes following right away instead of
+        // waiting up to ten seconds for the next tick.
+        void loadFirstRef.current({ quiet: true })
+      }
+    } else if (autoRefreshRef.current) {
+      autoRefreshRef.current = false
+      setAutoRefresh(false)
+    }
   }, [])
 
   const handleRefresh = () => {
@@ -826,12 +846,15 @@ export default function AccessLogs({
       <Button size="small" danger icon={<DeleteOutlined />} onClick={clearAll}>
         清空
       </Button>
-      <Tooltip title="每 10 秒刷新统计；在列表顶部时同时刷新列表">
+      <Tooltip title="停在列表顶部时每 10 秒刷新；向上翻看历史会自动暂停，回到顶部恢复">
         <span className={styles.switchLabel}>
           <Switch
             size="small"
             checked={autoRefresh}
-            onChange={setAutoRefresh}
+            onChange={(value) => {
+              autoRefreshRef.current = value
+              setAutoRefresh(value)
+            }}
             aria-label="自动刷新"
           />
           自动刷新

@@ -67,7 +67,7 @@ type ScrollAction = { type: 'top' } | { type: 'by'; delta: number }
 
 const STATUS_META: Record<Status, { color: string; label: string; icon: ReactNode }> = {
   connecting: { color: 'processing', label: '正在连接', icon: <SyncOutlined spin /> },
-  open: { color: 'success', label: '实时连接中', icon: <CheckCircleOutlined /> },
+  open: { color: 'success', label: '实时更新', icon: <CheckCircleOutlined /> },
   reconnecting: { color: 'warning', label: '正在重连', icon: <SyncOutlined spin /> },
   error: { color: 'error', label: '连接已断开', icon: <DisconnectOutlined /> },
 }
