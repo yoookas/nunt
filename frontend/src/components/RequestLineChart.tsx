@@ -1,5 +1,5 @@
 import { theme, Typography } from 'antd'
-import { curveLinear } from 'd3-shape'
+import { curveMonotoneX } from 'd3-shape'
 import type { CSSProperties, ReactNode } from 'react'
 import { useMemo } from 'react'
 import Grid from '../charts/grid'
@@ -216,8 +216,9 @@ export default function RequestLineChart({
             strokeWidth={item.key === 'total' ? 2.5 : 1.5}
             // bklit defaults to curveNatural, whose spline overshoots between
             // buckets: a peak can be drawn above its own value, half an hour off
-            // its bucket. Straight segments put every turn on its data point.
-            curve={curveLinear}
+            // its bucket. Monotone interpolation still bends the line but passes
+            // through every point and never invents a value between two of them.
+            curve={curveMonotoneX}
             dashFromIndex={item.dashed ? 0 : undefined}
             dashArray="5,4"
             // Without this bklit fades the stroke out towards both ends, which
