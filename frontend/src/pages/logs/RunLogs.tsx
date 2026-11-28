@@ -447,13 +447,17 @@ export default function RunLogs() {
     )
   }
 
-  const meta = STATUS_META[status]
+  // A healthy stream says nothing: the badge only appears while the connection
+  // is being made or has a problem.
+  const meta = status === 'open' ? null : STATUS_META[status]
 
   const actions = (
     <>
-      <Tag color={meta.color} icon={meta.icon}>
-        {meta.label}
-      </Tag>
+      {meta ? (
+        <Tag color={meta.color} icon={meta.icon}>
+          {meta.label}
+        </Tag>
+      ) : null}
       <Button
         size="small"
         icon={paused ? <PlayCircleOutlined /> : <PauseCircleOutlined />}
