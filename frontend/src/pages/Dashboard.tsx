@@ -111,7 +111,9 @@ function ServiceLine({
 }) {
   return (
     <Row align="middle" wrap={false} gutter={8}>
-      <Col flex="auto" style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+      {/* Three fixed, left-aligned columns: the names, the figures and the
+          details each start on their own line, whatever their width. */}
+      <Col flex="0 0 84px" style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
         <span
           style={{
             width: 8,
@@ -125,14 +127,12 @@ function ServiceLine({
           {title}
         </Typography.Text>
       </Col>
-      {/* Fixed figure column: the numbers end on the same line, and the note
-          starts on one too, instead of trailing each value. */}
-      <Col flex="0 0 68px" style={{ textAlign: 'right' }}>
+      <Col flex="0 0 64px">
         <Typography.Text strong style={{ fontSize: 13, whiteSpace: 'nowrap' }}>
           {value}
         </Typography.Text>
       </Col>
-      <Col flex="1 1 90px" style={{ minWidth: 0 }}>
+      <Col flex="1 1 auto" style={{ minWidth: 0 }}>
         {note ? (
           <Typography.Text
             type="secondary"
